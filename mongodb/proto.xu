@@ -1,0 +1,42 @@
+@"github.com/xulang-org/packages/mongodb"
+
+#errors
+
+// MongoDB OP_MSG (Opcode 2013) Wire Protocol Framer
+
+pub fn encode_op_msg(request_id int, doc_bytes string) string {
+    // Header (16) + flagBits (4) + section kind (1) + doc_bytes
+    total_len := 16 + 4 + 1 + doc_bytes.len
+
+    mut pkt := ""
+    pkt = pkt + encode_i32(total_len)
+    pkt = pkt + encode_i32(request_id)
+    pkt = pkt + encode_i32(0) // responseTo
+    pkt = pkt + encode_i32(2013) // OP_MSG opcode is 2013 (2012 is OP_COMPRESSED)
+
+    // Body
+    pkt = pkt + encode_i32(0) // flagBits
+    pkt.push_byte(0) // Section 0: Body Document
+    pkt = pkt + doc_bytes
+
+    << pkt
+}
+
+pub fn decode_op_msg_doc(raw string) string {
+    if raw.len < 26 || decode_i32(&raw, 0) != raw.len || decode_i32(&raw, 12) != 2013 {
+        >> errors.new("mongodb: malformed OP_MSG")
+    }
+    if decode_i32(&raw, 16) != 0 {
+        >> errors.new("mongodb: unsupported OP_MSG flags")
+    }
+    // offset 16..20: flagBits
+    // offset 20: section kind (0)
+    // offset 21..: BSON document
+    kind := raw[20] & 255
+    if kind != 0 {
+        >> errors.new("mongodb: unsupported OP_MSG section")
+    }
+    doc := raw[21:raw.len] + ""
+    if !valid_bson(&doc) { >> errors.new("mongodb: malformed BSON response") }
+    << doc
+}

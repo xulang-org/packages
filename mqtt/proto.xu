@@ -1,0 +1,40 @@
+@"github.com/xulang-org/packages/mqtt"
+
+pub fn encode_u16(n int) string {
+    mut s := ""
+    msb := (n >> 8) & 255
+    lsb := n & 255
+    s.push_byte(msb)
+    s.push_byte(lsb)
+    << s
+}
+
+pub fn decode_u16(s &string, off int) int {
+    if off + 2 > s.len {
+        << 0
+    }
+    msb := s[off] & 255
+    lsb := s[off + 1] & 255
+    << (msb << 8) | lsb
+}
+
+pub fn encode_str(text string) string {
+    << encode_u16(text.len) + text
+}
+
+pub fn encode_var_len(val int) string {
+    mut x := val
+    mut s := ""
+    while true {
+        mut b := x % 128
+        x = x / 128
+        if x > 0 {
+            b = b | 128
+        }
+        s.push_byte(b)
+        if x <= 0 {
+            <-
+        }
+    }
+    << s
+}

@@ -1,0 +1,129 @@
+@"github.com/xulang-org/packages/dns"
+
+#strings
+#errors
+
+pub const type_a = 1
+pub const type_ns = 2
+pub const type_cname = 5
+pub const type_soa = 6
+pub const type_txt = 16
+pub const class_in = 1
+
+// Encodes "www.example.com" -> "\x03www\x07example\x03com\x00"
+pub fn encode_domain(domain string) string {
+    if domain.len == 0 {
+        << string_from_byte(0)
+    }
+    mut out := ""
+    parts := strings.split(&domain, ".")
+    mut i := 0
+    while i < parts.len {
+        p := parts[i]
+        if p.len > 0 {
+            out = out + string_from_byte(p.len & 255) + p
+        }
+        i = i + 1
+    }
+    out = out + string_from_byte(0)
+    << out
+}
+
+// Builds a standard 12-byte DNS Header + Question section
+pub fn build_query_packet(tx_id int, domain string, qtype int) string {
+    // 1. Header (12 bytes)
+    id_hi := (tx_id >> 8) & 255
+    id_lo := tx_id & 255
+    flags_hi := 0x01 // RD (Recursion Desired) = 1
+    flags_lo := 0x00
+    qd_hi := 0x00
+    qd_lo := 0x01   // 1 Question
+    mut hdr := string_from_byte(id_hi) + string_from_byte(id_lo)
+    hdr = hdr + string_from_byte(flags_hi) + string_from_byte(flags_lo)
+    hdr = hdr + string_from_byte(qd_hi) + string_from_byte(qd_lo)
+    hdr = hdr + string_from_byte(0) + string_from_byte(0) // ANCOUNT = 0
+    hdr = hdr + string_from_byte(0) + string_from_byte(0) // NSCOUNT = 0
+    hdr = hdr + string_from_byte(0) + string_from_byte(0) // ARCOUNT = 0
+
+    // 2. Question
+    qname := encode_domain(domain)
+    qtype_hi := (qtype >> 8) & 255
+    qtype_lo := qtype & 255
+    qclass_hi := (class_in >> 8) & 255
+    qclass_lo := class_in & 255
+
+    q := qname + string_from_byte(qtype_hi) + string_from_byte(qtype_lo) + string_from_byte(qclass_hi) + string_from_byte(qclass_lo)
+    << hdr + q
+}
+
+// Skips a name (supports uncompressed labels and compression pointers)
+fn skip_name(pkt &string, pos int) int {
+    mut p := pos
+    while p < pkt.len {
+        b := pkt[p] & 255
+        if b == 0 {
+            << p + 1
+        }
+        if (b & 0xc0) == 0xc0 {
+            // 2-byte compression pointer
+            << p + 2
+        }
+        p = p + 1 + b
+    }
+    << p
+}
+
+pub struct DnsAnswer {
+    pub name string
+    pub rtype int
+    pub rclass int
+    pub ttl int
+    pub data string
+}
+
+// Parses DNS response and extracts IPv4 addresses (Type A)
+pub fn parse_a_records(pkt string) []string {
+    mut ips := []string{}
+    if pkt.len < 12 {
+        << ips
+    }
+
+    ancount := ((pkt[6] & 255) << 8) | (pkt[7] & 255)
+    qdcount := ((pkt[4] & 255) << 8) | (pkt[5] & 255)
+
+    mut p := 12
+    // Skip questions
+    mut q := 0
+    while q < qdcount && p < pkt.len {
+        p = skip_name(&pkt, p)
+        p = p + 4 // QTYPE (2) + QCLASS (2)
+        q = q + 1
+    }
+
+    // Parse Answers
+    mut ans := 0
+    while ans < ancount && p + 10 <= pkt.len {
+        p = skip_name(&pkt, p)
+        if p + 10 > pkt.len {
+            <-
+        }
+        rtype := ((pkt[p] & 255) << 8) | (pkt[p + 1] & 255)
+        // rclass := ((pkt[p + 2] & 255) << 8) | (pkt[p + 3] & 255)
+        // ttl := ((pkt[p + 4] & 255) << 24) | ...
+        rdlength := ((pkt[p + 8] & 255) << 8) | (pkt[p + 9] & 255)
+        p = p + 10
+
+        if rtype == type_a && rdlength == 4 && p + 4 <= pkt.len {
+            ip0 := pkt[p] & 255
+            ip1 := pkt[p + 1] & 255
+            ip2 := pkt[p + 2] & 255
+            ip3 := pkt[p + 3] & 255
+            ip_str := str(ip0) + "." + str(ip1) + "." + str(ip2) + "." + str(ip3)
+            ips.push(ip_str)
+        }
+        p = p + rdlength
+        ans = ans + 1
+    }
+
+    << ips
+}

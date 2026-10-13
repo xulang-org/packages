@@ -1,0 +1,442 @@
+@"github.com/xulang-org/packages/kafka"
+
+#errors
+#strings
+#time
+
+fn kafka_crc32c(data string) int {
+    poly := 2197175160
+    u32_max := 4294967295
+    mut tab := []int{}
+    mut i := 0
+    while i < 256 {
+        mut crc := i
+        mut bit := 0
+        while bit < 8 {
+            if (crc & 1) != 0 {
+                crc = ((crc >> 1) & u32_max) ^ poly
+            } else {
+                crc = (crc >> 1) & u32_max
+            }
+            crc = crc & u32_max
+            bit = bit + 1
+        }
+        tab.push(crc & u32_max)
+        i = i + 1
+    }
+    mut c := u32_max
+    mut j := 0
+    while j < data.len {
+        idx := (c ^ (data[j] & 255)) & 255
+        c = (tab[idx] ^ ((c >> 8) & u32_max)) & u32_max
+        j = j + 1
+    }
+    << (c ^ u32_max) & u32_max
+}
+
+// Big-Endian encoders for Kafka protocol primitives
+
+pub fn encode_i8(v int) string {
+    mut b := ""
+    b.push_byte(v & 255)
+    << b
+}
+
+pub fn encode_i16(v int) string {
+    mut b := ""
+    b.push_byte((v >> 8) & 255)
+    b.push_byte(v & 255)
+    << b
+}
+
+pub fn encode_i32(v int) string {
+    mut b := ""
+    b.push_byte((v >> 24) & 255)
+    b.push_byte((v >> 16) & 255)
+    b.push_byte((v >> 8) & 255)
+    b.push_byte(v & 255)
+    << b
+}
+
+pub fn encode_i64(v int) string {
+    mut b := ""
+    b.push_byte((v >> 56) & 255)
+    b.push_byte((v >> 48) & 255)
+    b.push_byte((v >> 40) & 255)
+    b.push_byte((v >> 32) & 255)
+    b.push_byte((v >> 24) & 255)
+    b.push_byte((v >> 16) & 255)
+    b.push_byte((v >> 8) & 255)
+    b.push_byte(v & 255)
+    << b
+}
+
+pub fn encode_string(s string) string {
+    if s.len == 0 {
+        << encode_i16(0)
+    }
+    << encode_i16(s.len) + s
+}
+
+pub fn encode_null_string() string {
+    << encode_i16(-1)
+}
+
+pub fn encode_bytes(b string) string {
+    if b.len == 0 {
+        << encode_i32(0)
+    }
+    << encode_i32(b.len) + b
+}
+
+pub fn encode_null_bytes() string {
+    << encode_i32(-1)
+}
+
+// Zigzag + Varint encoder for Kafka Record v2
+pub fn encode_zigzag_i32(n int) string {
+    mut z := (n << 1) ^ (n >> 31)
+    mut out := ""
+    while z >= 128 {
+        out.push_byte((z & 127) | 128)
+        z = z >> 7
+    }
+    out.push_byte(z & 127)
+    << out
+}
+
+pub fn encode_zigzag_i64(n int) string {
+    mut z := (n << 1) ^ (n >> 63)
+    mut out := ""
+    while z >= 128 {
+        out.push_byte((z & 127) | 128)
+        z = z >> 7
+    }
+    out.push_byte(z & 127)
+    << out
+}
+
+pub struct VarintResult {
+    pub value int
+    pub bytes_read int
+}
+
+pub fn decode_varint(s &string, off int) VarintResult {
+    mut val := 0
+    mut shift := 0
+    mut i := 0
+    while off + i < s.len {
+        b := s[off + i] & 255
+        val = val | ((b & 127) << shift)
+        i = i + 1
+        if (b & 128) == 0 {
+            <-
+        }
+        shift = shift + 7
+    }
+    << VarintResult{value: val, bytes_read: i}
+}
+
+pub fn decode_zigzag(s &string, off int) VarintResult {
+    res := decode_varint(s, off)
+    z := res.value
+    mut orig := z >> 1
+    if (z & 1) != 0 {
+        orig = -(orig + 1)
+    }
+    << VarintResult{value: orig, bytes_read: res.bytes_read}
+}
+
+// Big-Endian decoders
+
+pub fn decode_i16(s &string, off int) int {
+    if off + 2 > s.len {
+        << 0
+    }
+    b0 := s[off] & 255
+    b1 := s[off + 1] & 255
+    mut v := (b0 << 8) | b1
+    if (v & 0x8000) != 0 {
+        v = v - 0x10000
+    }
+    << v
+}
+
+pub fn decode_i32(s &string, off int) int {
+    if off + 4 > s.len {
+        << 0
+    }
+    b0 := s[off] & 255
+    b1 := s[off + 1] & 255
+    b2 := s[off + 2] & 255
+    b3 := s[off + 3] & 255
+    mut v := (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+    if (v & 0x80000000) != 0 {
+        v = v - 0x100000000
+    }
+    << v
+}
+
+pub fn decode_i64(s &string, off int) int {
+    if off + 8 > s.len {
+        << 0
+    }
+    mut v := 0
+    mut i := 0
+    while i < 8 {
+        b := s[off + i] & 255
+        v = (v << 8) | b
+        i = i + 1
+    }
+    << v
+}
+
+// Request Framer: [Length (INT32)] [Header (ApiKey, ApiVersion, CorrelationID, ClientID)] [Body]
+pub fn build_request(api_key int, api_version int, correlation_id int, client_id string, body string) string {
+    mut hdr := encode_i16(api_key)
+    hdr = hdr + encode_i16(api_version)
+    hdr = hdr + encode_i32(correlation_id)
+    hdr = hdr + encode_string(client_id)
+
+    total_len := hdr.len + body.len
+    << encode_i32(total_len) + hdr + body
+}
+
+// Build RecordBatch (Magic = 2) for Kafka 0.11+ / 2.x / 3.x / 4.x
+pub fn build_record_batch(key string, val string) string {
+    // 1. Build individual Record
+    mut rec_body := encode_i8(0) // attributes = 0
+    rec_body = rec_body + encode_zigzag_i64(0) // timestampDelta = 0 (VARLONG)
+    rec_body = rec_body + encode_zigzag_i32(0) // offsetDelta = 0
+    if key.len > 0 {
+        rec_body = rec_body + encode_zigzag_i32(key.len) + key
+    } else {
+        rec_body = rec_body + encode_zigzag_i32(-1) // null key
+    }
+    rec_body = rec_body + encode_zigzag_i32(val.len) + val
+    rec_body = rec_body + encode_zigzag_i32(0) // headers count = 0
+
+    record := encode_zigzag_i32(rec_body.len) + rec_body
+
+    // 2. Build RecordBatch payload (CRC covers from attributes to end)
+    now_ms := time.now_time().unix_nano() / 1000000
+    mut batch_payload := encode_i16(0) // attributes = 0 (no compression)
+    batch_payload = batch_payload + encode_i32(0) // lastOffsetDelta = 0
+    batch_payload = batch_payload + encode_i64(now_ms) // firstTimestamp
+    batch_payload = batch_payload + encode_i64(now_ms) // maxTimestamp
+    batch_payload = batch_payload + encode_i64(-1) // producerId = -1
+    batch_payload = batch_payload + encode_i16(-1) // producerEpoch = -1
+    batch_payload = batch_payload + encode_i32(-1) // baseSequence = -1
+    batch_payload = batch_payload + encode_i32(1) // records count = 1
+    batch_payload = batch_payload + record
+
+    crc := kafka_crc32c(batch_payload + "")
+
+    // 3. Assemble full batch
+    mut batch_after_magic := encode_i32(crc) + batch_payload
+    mut batch_header := encode_i32(-1) // partitionLeaderEpoch = -1
+    batch_header = batch_header + encode_i8(2) // magic = 2 (RecordBatch)
+    batch_header = batch_header + batch_after_magic
+
+    // baseOffset (INT64 = 0) + batchLength (INT32) + batch_header
+    << encode_i64(0) + encode_i32(batch_header.len) + batch_header
+}
+
+// Produce Request (ApiKey 0, Version 3)
+pub fn build_produce_request(correlation_id int, client_id string, topic string, partition int, key string, val string) string {
+    record_batch := build_record_batch(key, val)
+
+    mut body := encode_null_string() // transactional_id = null
+    body = body + encode_i16(1) // acks = 1 (leader ack)
+    body = body + encode_i32(5000) // timeout = 5000ms
+    body = body + encode_i32(1) // topics count = 1
+    body = body + encode_string(topic)
+    body = body + encode_i32(1) // partitions count = 1
+    body = body + encode_i32(partition)
+    body = body + encode_i32(record_batch.len)
+    body = body + record_batch
+
+    << build_request(0, 3, correlation_id, client_id, body)
+}
+
+// Fetch Request (ApiKey 1, Version 4)
+pub fn build_fetch_request(correlation_id int, client_id string, topic string, partition int, offset int) string {
+    mut body := encode_i32(-1) // replica_id = -1
+    body = body + encode_i32(2000) // max_wait_ms = 2000ms
+    body = body + encode_i32(1) // min_bytes = 1
+    body = body + encode_i32(10485760) // max_bytes = 10MB
+    body = body + encode_i8(0) // isolation_level = READ_UNCOMMITTED
+    body = body + encode_i32(1) // topics count = 1
+    body = body + encode_string(topic)
+    body = body + encode_i32(1) // partitions count = 1
+    body = body + encode_i32(partition)
+    body = body + encode_i64(offset) // fetch_offset
+    body = body + encode_i32(1048576) // partition_max_bytes = 1MB
+
+    << build_request(1, 4, correlation_id, client_id, body)
+}
+
+// Metadata Request (ApiKey 3, Version 0)
+pub fn build_metadata_request(correlation_id int, client_id string, topic string) string {
+    mut body := ""
+    if topic.len > 0 {
+        body = encode_i32(1) + encode_string(topic)
+    } else {
+        body = encode_i32(0)
+    }
+    << build_request(3, 0, correlation_id, client_id, body)
+}
+
+// ApiVersions Request (ApiKey 18, Version 0)
+pub fn build_apiversions_request(correlation_id int, client_id string) string {
+    << build_request(18, 0, correlation_id, client_id, "")
+}
+
+// Parse Produce Response v3
+pub fn parse_produce_response(resp string) int {
+    if resp.len < 8 {
+        >> errors.new("kafka: response too short")
+    }
+    mut off := 4 // skip correlation_id
+    num_topics := decode_i32(&resp, off)
+    off = off + 4
+    if num_topics <= 0 {
+        >> errors.new("kafka: no topics in produce response")
+    }
+
+    // Read topic name
+    topic_len := decode_i16(&resp, off)
+    off = off + 2
+    if topic_len > 0 {
+        off = off + topic_len
+    }
+
+    num_parts := decode_i32(&resp, off)
+    off = off + 4
+    if num_parts <= 0 {
+        >> errors.new("kafka: no partitions in produce response")
+    }
+
+    _ := decode_i32(&resp, off) // partition
+    off = off + 4
+    err_code := decode_i16(&resp, off)
+    off = off + 2
+    if err_code != 0 {
+        >> errors.new("kafka: produce error code " + str(err_code))
+    }
+
+    base_offset := decode_i64(&resp, off)
+    << base_offset
+}
+
+// Parse Fetch Response v4
+pub fn parse_fetch_response(resp string) []string {
+    mut messages := []string{}
+    if resp.len < 12 {
+        << messages
+    }
+    mut off := 4 // skip correlation_id
+    // v4 has throttle_time_ms (INT32)
+    off = off + 4
+
+    num_topics := decode_i32(&resp, off)
+    off = off + 4
+    if num_topics <= 0 {
+        << messages
+    }
+
+    // Read topic
+    topic_len := decode_i16(&resp, off)
+    off = off + 2
+    if topic_len > 0 {
+        off = off + topic_len
+    }
+
+    num_parts := decode_i32(&resp, off)
+    off = off + 4
+    if num_parts <= 0 {
+        << messages
+    }
+
+    _ := decode_i32(&resp, off) // partition
+    off = off + 4
+    err_code := decode_i16(&resp, off)
+    off = off + 2
+    if err_code != 0 {
+        >> errors.new("kafka: fetch error code " + str(err_code))
+    }
+
+    _hw := decode_i64(&resp, off) // high_watermark
+    off = off + 8
+    _lso := decode_i64(&resp, off) // last_stable_offset
+    off = off + 8
+
+    aborted_len := decode_i32(&resp, off)
+    off = off + 4
+    if aborted_len > 0 {
+        off = off + (aborted_len * 16)
+    }
+
+    rec_size := decode_i32(&resp, off)
+    off = off + 4
+    if rec_size <= 0 || off + rec_size > resp.len {
+        << messages
+    }
+
+    // Scan for message content in RecordBatch payload
+    end_off := off + rec_size
+    while off + 61 <= end_off {
+        _ := decode_i64(&resp, off) // baseOffset
+        batch_len := decode_i32(&resp, off + 8)
+        if batch_len <= 0 || off + 12 + batch_len > end_off {
+            <-
+        }
+
+        records_count := decode_i32(&resp, off + 57)
+        mut roff := off + 61 // start of records
+        mut r_idx := 0
+        while r_idx < records_count && roff < off + 12 + batch_len {
+            len_res := decode_zigzag(&resp, roff)
+            roff = roff + len_res.bytes_read
+            rec_len := len_res.value
+            if rec_len <= 0 || roff + rec_len > off + 12 + batch_len {
+                <-
+            }
+            rec_end := roff + rec_len
+
+            // attributes (1 byte)
+            roff = roff + 1
+
+            // timestampDelta (zigzag)
+            ts_res := decode_zigzag(&resp, roff)
+            roff = roff + ts_res.bytes_read
+
+            // offsetDelta (zigzag)
+            od_res := decode_zigzag(&resp, roff)
+            roff = roff + od_res.bytes_read
+
+            // keyLength (zigzag)
+            klen_res := decode_zigzag(&resp, roff)
+            roff = roff + klen_res.bytes_read
+            if klen_res.value > 0 {
+                roff = roff + klen_res.value
+            }
+
+            // valueLength (zigzag)
+            vlen_res := decode_zigzag(&resp, roff)
+            roff = roff + vlen_res.bytes_read
+            if vlen_res.value == 0 {
+                messages.push("")
+            } else if vlen_res.value > 0 && roff + vlen_res.value <= rec_end {
+                val_str := resp[roff:(roff + vlen_res.value)]
+                messages.push(val_str)
+            }
+
+            roff = rec_end
+            r_idx = r_idx + 1
+        }
+        off = off + 12 + batch_len
+    }
+
+    << messages
+}

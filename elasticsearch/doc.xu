@@ -1,0 +1,58 @@
+@"github.com/xulang-org/packages/elasticsearch"
+
+#errors
+
+pub fn (c &mut Client) index_doc(index string, id string, doc_json string) string {
+    mut reusable := false
+    << c.index_doc_at(-1, index, id, doc_json, mut &reusable) or >>
+}
+
+fn (c &mut Client) index_doc_at(fd int, index string, id string, doc_json string, reusable &mut bool) string {
+    path := "/" + index + "/_doc/" + id
+    resp := c.request_at(fd, "PUT", path, doc_json, reusable) or >>
+    code := resp.status_code
+    if code != 200 && code != 201 {
+        >> errors.new("elasticsearch: index_doc failed with status " + str(code) + ": " + resp.body)
+    }
+    << resp.body
+}
+
+pub fn (c &mut Client) get_doc(index string, id string) string {
+    mut reusable := false
+    << c.get_doc_at(-1, index, id, mut &reusable) or >>
+}
+
+fn (c &mut Client) get_doc_at(fd int, index string, id string, reusable &mut bool) string {
+    path := "/" + index + "/_doc/" + id
+    resp := c.request_at(fd, "GET", path, "", reusable) or >>
+    code := resp.status_code
+    if code != 200 {
+        >> errors.new("elasticsearch: doc not found (status " + str(code) + ")")
+    }
+    << resp.body
+}
+
+pub fn (c &mut Client) delete_doc(index string, id string) bool {
+    mut reusable := false
+    << c.delete_doc_at(-1, index, id, mut &reusable) or >>
+}
+
+fn (c &mut Client) delete_doc_at(fd int, index string, id string, reusable &mut bool) bool {
+    path := "/" + index + "/_doc/" + id
+    resp := c.request_at(fd, "DELETE", path, "", reusable) or >>
+    code := resp.status_code
+    << code == 200
+}
+
+pub fn (c &mut Client) update_doc(index string, id string, doc_json string) bool {
+    mut reusable := false
+    << c.update_doc_at(-1, index, id, doc_json, mut &reusable) or >>
+}
+
+fn (c &mut Client) update_doc_at(fd int, index string, id string, doc_json string, reusable &mut bool) bool {
+    path := "/" + index + "/_update/" + id
+    body := "{\"doc\":" + doc_json + "}"
+    resp := c.request_at(fd, "POST", path, body, reusable) or >>
+    code := resp.status_code
+    << code == 200
+}

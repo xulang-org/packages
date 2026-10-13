@@ -1,0 +1,138 @@
+@"github.com/xulang-org/packages/rabbitmq"
+
+#errors
+#strings
+
+// AMQP 0-9-1 Protocol Constants
+pub const frame_method = 1
+pub const frame_header = 2
+pub const frame_body = 3
+pub const frame_heartbeat = 8
+pub const frame_end = 206 // 0xCE
+
+// Class IDs
+pub const class_connection = 10
+pub const class_channel = 20
+pub const class_exchange = 40
+pub const class_queue = 50
+pub const class_basic = 60
+
+// Frame structure
+pub struct Frame {
+    pub frame_type int
+    pub channel int
+    pub payload string
+}
+
+pub fn encode_i8(v int) string {
+    mut s := ""
+    s.push_byte(v & 255)
+    << s
+}
+
+pub fn encode_i16(v int) string {
+    mut s := ""
+    s.push_byte((v >> 8) & 255)
+    s.push_byte(v & 255)
+    << s
+}
+
+pub fn encode_i32(v int) string {
+    mut s := ""
+    s.push_byte((v >> 24) & 255)
+    s.push_byte((v >> 16) & 255)
+    s.push_byte((v >> 8) & 255)
+    s.push_byte(v & 255)
+    << s
+}
+
+pub fn encode_i64(v int) string {
+    mut s := ""
+    s.push_byte((v >> 56) & 255)
+    s.push_byte((v >> 48) & 255)
+    s.push_byte((v >> 40) & 255)
+    s.push_byte((v >> 32) & 255)
+    s.push_byte((v >> 24) & 255)
+    s.push_byte((v >> 16) & 255)
+    s.push_byte((v >> 8) & 255)
+    s.push_byte(v & 255)
+    << s
+}
+
+pub fn decode_i8(s string, off int) int {
+    if off >= s.len {
+        << 0
+    }
+    << s[off] & 255
+}
+
+pub fn decode_i16(s string, off int) int {
+    if off + 2 > s.len {
+        << 0
+    }
+    b0 := s[off] & 255
+    b1 := s[off + 1] & 255
+    << (b0 << 8) | b1
+}
+
+pub fn decode_i32(s string, off int) int {
+    if off + 4 > s.len {
+        << 0
+    }
+    b0 := s[off] & 255
+    b1 := s[off + 1] & 255
+    b2 := s[off + 2] & 255
+    b3 := s[off + 3] & 255
+    << (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+}
+
+pub fn decode_i64(s string, off int) int {
+    if off + 8 > s.len {
+        << 0
+    }
+    mut v := 0
+    mut i := 0
+    while i < 8 {
+        v = (v << 8) | (s[off + i] & 255)
+        i = i + 1
+    }
+    << v
+}
+
+// Short string: 1-byte length prefix (0-255) + content
+pub fn encode_shortstr(s string) string {
+    mut len_val := s.len
+    if len_val > 255 {
+        len_val = 255
+    }
+    mut res := encode_i8(len_val)
+    if len_val > 0 {
+        res = res + s[0:len_val]
+    }
+    << res
+}
+
+// Long string: 4-byte length prefix + content
+pub fn encode_longstr(s string) string {
+    << encode_i32(s.len) + s
+}
+
+// Empty AMQP field table (4 bytes = 0 length)
+pub fn encode_empty_table() string {
+    << encode_i32(0)
+}
+
+// Frame builder
+pub fn build_frame(frame_type int, channel int, payload string) string {
+    mut f := encode_i8(frame_type)
+    f = f + encode_i16(channel)
+    f = f + encode_i32(payload.len)
+    f = f + payload
+    f = f + encode_i8(frame_end)
+    << f
+}
+
+// Method payload builder: Class ID (2B) + Method ID (2B) + Arguments
+pub fn build_method_payload(class_id int, method_id int, arguments string) string {
+    << encode_i16(class_id) + encode_i16(method_id) + arguments
+}

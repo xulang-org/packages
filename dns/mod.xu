@@ -1,0 +1,9 @@
+@"github.com/xulang-org/packages/dns"
+
+pub fn client(endpoint string) DnsClient {
+    << new_client(endpoint)
+}
+
+pub fn pool(endpoint string, max_conns int) DnsPool {
+    << open_pool(endpoint, max_conns)
+}

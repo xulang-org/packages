@@ -1,0 +1,20 @@
+@"github.com/xulang-org/packages/nats"
+
+#errors
+
+// NATS high-performance cloud-native messaging driver for Xu.
+//
+// Features:
+// - Standard NATS text protocol implementation in 100% pure Xu.
+// - High-throughput publish/subscribe (PUB/SUB).
+// - Queue Groups (distributed load-balanced worker queues).
+// - Request-Reply RPC pattern with dynamic inbox routing.
+// - Automatic PING/PONG heartbeat management.
+
+pub fn open(addr string) Client {
+    << connect(addr) or >>
+}
+
+pub fn open_pool(addr string, max_idle int) Pool {
+    << new_pool(addr, max_idle)
+}

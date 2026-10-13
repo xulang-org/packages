@@ -1,0 +1,146 @@
+@"github.com/xulang-org/packages/influxdb"
+
+#net
+#net/pool
+#errors
+#strings
+
+// Connection Pool for InfluxDB v2.
+// Manages reusable TCP socket connections and provides Client instances.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub token string
+    pub org string
+    pub bucket string
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, token string, org string, bucket string, max_idle int) Pool {
+    c := new_client(endpoint, token, org, bucket)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := pool.new_state()
+    << Pool{
+        host: c.host,
+        port: c.port,
+        token: c.token,
+        org: c.org,
+        bucket: c.bucket,
+        state: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(endpoint string, token string, org string, bucket string, max_idle int) Pool {
+    << new_pool(endpoint, token, org, bucket, max_idle)
+}
+
+pub fn (p &Pool) get() Client {
+    << Client{
+        host: p.host + "",
+        port: p.port,
+        token: p.token + "",
+        org: p.org + "",
+        bucket: p.bucket + ""
+    }
+}
+
+// Shares sockets and close state; clones configuration strings.
+pub fn (p &Pool) dup() Pool {
+    << Pool{host: strings.clone(&p.host), port: p.port, token: strings.clone(&p.token), org: strings.clone(&p.org), bucket: strings.clone(&p.bucket), state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.host + ":" + str(p.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) write_point(point Point) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.write_point_at(fd, point, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) write_line(line string) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.write_line_at(fd, line, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) write_raw(lines string) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.write_raw_at(fd, lines, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) query_flux(flux string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.query_flux_at(fd, flux, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) ping() bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.ping_at(fd, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

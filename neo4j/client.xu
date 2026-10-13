@@ -1,0 +1,176 @@
+@"github.com/xulang-org/packages/neo4j"
+
+#net
+#net/http
+#errors
+#strings
+#encoding/base64
+
+pub struct Neo4jClient {
+    pub host string
+    pub port int
+    pub user string
+    pub password string
+    pub database string
+    pub auth_header string
+}
+
+fn parse_int_def(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn new_client(endpoint string, user string, pass string, db string) Neo4jClient {
+    mut ep := endpoint
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+    mut host := "127.0.0.1"
+    mut port := 7474
+    mut colon := -1
+    mut i := 0
+    while i < ep.len {
+        if (ep[i] & 255) == 58 {
+            colon = i
+            <-
+        }
+        i = i + 1
+    }
+    if colon >= 0 {
+        host = ep[0:colon]
+        p_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(p_str, 7474)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+
+    mut database := db
+    if database.len == 0 {
+        database = "neo4j"
+    }
+
+    raw_auth := user + ":" + pass
+    b64 := base64.encode_to_string(raw_auth)
+    auth_header := "Basic " + b64
+
+    << Neo4jClient{
+        host: host,
+        port: port,
+        user: user,
+        password: pass,
+        database: database,
+        auth_header: auth_header
+    }
+}
+
+fn escape_json(s string) string {
+    mut out := ""
+    mut i := 0
+    while i < s.len {
+        c := s[i] & 255
+        if c == 34 { // quote
+            out = out + "\\\""
+        } else if c == 92 { // backslash
+            out = out + "\\\\"
+        } else if c == 10 { // newline
+            out = out + "\\n"
+        } else if c == 13 { // carriage return
+            out = out + "\\r"
+        } else if c == 9 { // tab
+            out = out + "\\t"
+        } else {
+            out = out + string_from_byte(c)
+        }
+        i = i + 1
+    }
+    << out
+}
+
+pub fn (c Neo4jClient) execute(stmt string) string {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("neo4j dial failed: " + err.msg())
+    }
+    res := c.execute_on_fd(fd, stmt, false) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    safe_close(fd)
+    << res
+}
+
+pub fn (c Neo4jClient) execute_on_fd(fd int, stmt string, keep_alive bool) string {
+    mut reusable := false
+    << c.execute_response(fd, stmt, keep_alive, mut &reusable) or >>
+}
+
+fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusable &mut bool) string {
+    escaped := escape_json(stmt)
+    payload := "{\"statements\":[{\"statement\":\"" + escaped + "\"}]}"
+
+    path := "/db/" + c.database + "/tx/commit"
+    mut req := "POST " + path + " HTTP/1.1\r\n"
+    req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+    req = req + "Authorization: " + c.auth_header + "\r\n"
+    req = req + "Content-Type: application/json\r\n"
+    req = req + "Accept: application/json; charset=UTF-8\r\n"
+    req = req + "Content-Length: " + str(payload.len) + "\r\n"
+    if keep_alive {
+        req = req + "Connection: keep-alive\r\n\r\n"
+    } else {
+        req = req + "Connection: close\r\n\r\n"
+    }
+    req = req + payload
+
+    mut off := 0
+    while off < req.len {
+        part := req[off:req.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("neo4j write failed: " + err.msg())
+        }
+        if n <= 0 { >> errors.new("neo4j: connection closed during write") }
+        off = off + n
+    }
+
+    resp := http.read_response(fd, "POST") or >>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >> errors.new("neo4j: HTTP status " + str(resp.status_code) + ": " + resp.body)
+    }
+    body := resp.body
+
+    // Check if errors array is non-empty
+    err_needle := "\"errors\":["
+    mut err_pos := -1
+    mut e_idx := 0
+    while e_idx + err_needle.len <= body.len {
+        if body[e_idx:(e_idx + err_needle.len)] == err_needle {
+            err_pos = e_idx + err_needle.len
+            <-
+        }
+        e_idx = e_idx + 1
+    }
+    if err_pos >= 0 && err_pos < body.len {
+        if (body[err_pos] & 255) != 93 { // not ']'
+            >> errors.new("neo4j cypher error: " + body)
+        }
+    }
+
+    *reusable = keep_alive && resp.reusable("POST")
+    << body
+}

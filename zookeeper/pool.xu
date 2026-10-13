@@ -1,0 +1,88 @@
+@"github.com/xulang-org/packages/zookeeper"
+
+#net
+#errors
+#strings
+
+pub struct Pool {
+    pub client Client
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, max_idle int) Pool {
+    cli := new_client(endpoint)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{
+        client: cli,
+        idle: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(endpoint string, max_idle int) Pool {
+    << new_pool(endpoint, max_idle)
+}
+
+pub fn (p &Pool) get_conn() int {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << fd
+            }
+        }
+        else {
+            addr := p.client.host + ":" + str(p.client.port)
+            fd := net.dial(strings.clone(&addr)) or (err) {
+                << -1
+            }
+            << fd
+        }
+    }
+    << -1
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &Pool) ruok() bool {
+    << p.client.ruok()
+}
+
+pub fn (p &Pool) stat() string {
+    << p.client.stat() or >>
+}
+
+pub fn (p &Pool) mntr() string {
+    << p.client.mntr() or >>
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

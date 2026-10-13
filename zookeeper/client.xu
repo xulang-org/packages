@@ -1,0 +1,113 @@
+@"github.com/xulang-org/packages/zookeeper"
+
+#net
+#errors
+#strings
+
+pub struct Client {
+    pub host string
+    pub port int
+}
+
+fn parse_int_def(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn new_client(endpoint string) Client {
+    mut ep := endpoint
+    mut host := "127.0.0.1"
+    mut port := 2181
+    mut colon := -1
+    mut i := 0
+    while i < ep.len {
+        if (ep[i] & 255) == 58 {
+            colon = i
+            <-
+        }
+        i = i + 1
+    }
+    if colon >= 0 {
+        host = ep[0:colon]
+        p_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(p_str, 2181)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+    << Client{
+        host: host,
+        port: port
+    }
+}
+
+pub fn (c Client) exec_4lw(cmd string) string {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("zookeeper dial failed: " + err.msg())
+    }
+
+    mut cmd_payload := cmd
+    if cmd_payload.len == 4 {
+        cmd_payload = cmd_payload + "\n"
+    }
+
+    mut off := 0
+    while off < cmd_payload.len {
+        part := cmd_payload[off:cmd_payload.len]
+        n := net.conn_write(fd, &part) or (err) {
+            safe_close(fd)
+            >> errors.new("zookeeper write failed: " + err.msg())
+        }
+        if n <= 0 {
+            <-
+        }
+        off = off + n
+    }
+
+    mut raw_resp := ""
+    while true {
+        chunk := net.conn_read(fd, 4096) or (err) {
+            <-
+        }
+        if chunk.len == 0 {
+            <-
+        }
+        raw_resp = raw_resp + chunk
+    }
+    safe_close(fd)
+    << raw_resp
+}
+
+pub fn (c Client) ruok() bool {
+    res := c.exec_4lw("ruok") or (err) {
+        << false
+    }
+    target := "imok"
+    if res.len >= 4 && res[0:4] == target {
+        << true
+    }
+    << false
+}
+
+pub fn (c Client) stat() string {
+    << c.exec_4lw("stat") or >>
+}
+
+pub fn (c Client) mntr() string {
+    << c.exec_4lw("mntr") or >>
+}

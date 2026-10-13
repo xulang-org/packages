@@ -1,0 +1,27 @@
+@"github.com/xulang-org/packages/mysql"
+
+#database/sql/driver
+
+// MySQL/MariaDB database/sql driver.
+//
+// This driver is intentionally protocol-native: it does not require
+// libmysqlclient, CGO, or a platform-specific runtime helper.  It supports
+// the text protocol, transactions, Prepare-shaped statements, and the
+// mysql_native_password authentication plugin.  `?` parameters are escaped
+// by the driver before COM_QUERY is sent; placeholders inside SQL strings and
+// comments are left untouched.  TLS and caching_sha2_password are reserved
+// for a later version and are rejected by the DSN parser.
+//
+// DSNs accepted by parse_dsn/open:
+//   user:password@tcp(127.0.0.1:3306)/database?tls=false
+//   mysql://user:password@127.0.0.1:3306/database
+// Defaults are host=127.0.0.1, port=3306, database=user.
+
+pub fn driver() driver.Driver {
+    << driver.Driver(MysqlDriver{tag: 0, dsn: ""})
+}
+
+pub fn open(dsn string) driver.Conn {
+    d := MysqlDriver{tag: 0, dsn: dsn + ""}
+    << d.open(dsn)
+}

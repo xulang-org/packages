@@ -1,0 +1,26 @@
+@"github.com/xulang-org/packages/postgres"
+
+#database/sql/driver
+
+// PostgreSQL database/sql driver.
+//
+// This is a small, dependency-free wire driver.  It deliberately uses the
+// extended query protocol for arguments (parameters never get interpolated
+// into SQL) and supports the authentication methods that PostgreSQL servers
+// commonly advertise: trust, cleartext, MD5 and SCRAM-SHA-256.  TLS is not
+// negotiated by this first version; use sslmode=disable explicitly when the
+// server has SSL enabled but does not require it.
+//
+// DSNs accepted by parse_dsn/open:
+//   postgres://user:password@host:5432/database?sslmode=disable
+//   host=127.0.0.1 port=5432 user=postgres password=secret dbname=postgres
+// Defaults are host=127.0.0.1, port=5432, database=user, sslmode=disable.
+
+pub fn driver() driver.Driver {
+    << driver.Driver(PostgresDriver{tag: 0, dsn: ""})
+}
+
+pub fn open(dsn string) driver.Conn {
+    d := PostgresDriver{tag: 0, dsn: dsn + ""}
+    << d.open(dsn)
+}

@@ -1,0 +1,100 @@
+@"github.com/xulang-org/packages/prometheus"
+
+#net
+#net/pool
+#errors
+#strings
+
+// Connection Pool for Prometheus Pushgateway & Remote Exporters.
+// Manages reusable TCP/HTTP socket connections.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, max_idle int) Pool {
+    mut ep := endpoint
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+    mut host := "127.0.0.1"
+    mut port := 9091
+    mut colon := -1
+    mut i := 0
+    while i < ep.len {
+        if (ep[i] & 255) == 58 {
+            colon = i
+            <-
+        }
+        i = i + 1
+    }
+    if colon >= 0 {
+        host = ep[0:colon]
+        p_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(p_str, 9091)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := pool.new_state()
+    << Pool{
+        host: host,
+        port: port,
+        state: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(endpoint string, max_idle int) Pool {
+    << new_pool(endpoint, max_idle)
+}
+
+// Shares sockets and close state; clones configuration strings.
+pub fn (p &Pool) dup() Pool {
+    << Pool{host: strings.clone(&p.host), port: p.port, state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.host + ":" + str(p.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) push_metrics(job string, metrics_text string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    pusher := Pusher{host: strings.clone(&p.host), port: p.port, job: job}
+    result := pusher.push_on_fd(fd, metrics_text, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

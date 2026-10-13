@@ -1,0 +1,17 @@
+@"github.com/xulang-org/packages/nats"
+
+pub struct Message {
+    pub subject string
+    pub sid string
+    pub reply_to string
+    pub data string
+}
+
+pub fn new_msg(subject string, sid string, reply_to string, data string) Message {
+    << Message{
+        subject: subject,
+        sid: sid,
+        reply_to: reply_to,
+        data: data
+    }
+}

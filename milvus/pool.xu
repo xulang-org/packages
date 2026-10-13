@@ -1,0 +1,109 @@
+@"github.com/xulang-org/packages/milvus"
+
+#net
+#net/pool
+#errors
+#strings
+
+pub struct MilvusPool {
+    pub client MilvusClient
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn open_pool(endpoint string, max_idle int) MilvusPool {
+    c := new_client(endpoint)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    state := pool.new_state()
+    << MilvusPool{
+        client: c,
+        state: state,
+        max_idle: cap_val
+    }
+}
+
+// Copies configuration while sharing the connection and close lifecycle.
+pub fn (p &MilvusPool) dup() MilvusPool {
+    c := MilvusClient{
+        host: strings.clone(&p.client.host),
+        port: p.client.port,
+        token: strings.clone(&p.client.token)
+    }
+    << MilvusPool{client: c, state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &MilvusPool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    fd := p.client.connect() or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &MilvusPool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &MilvusPool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &MilvusPool) create_collection(cfg CollectionConfig) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.create_collection_at(fd, cfg, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MilvusPool) drop_collection(name string) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.drop_collection_at(fd, name, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MilvusPool) insert(collection string, entities []VectorEntity) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.insert_at(fd, collection, entities, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MilvusPool) search(collection string, query_vec []string, limit int) SearchResult {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.search_at(fd, collection, query_vec, limit, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MilvusPool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

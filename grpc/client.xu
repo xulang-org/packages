@@ -1,0 +1,309 @@
+@"github.com/xulang-org/packages/grpc"
+
+#net
+#errors
+#strings
+#net/url
+
+pub struct Response {
+    pub status int
+    pub message string
+    pub payload string
+}
+
+pub struct GrpcClient {
+    pub host string
+    pub port int
+}
+
+fn parse_int_def(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn new_client(endpoint string) GrpcClient {
+    mut ep := endpoint
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+    prefix_grpc := "grpc://"
+    if ep.len >= prefix_grpc.len && ep[0:prefix_grpc.len] == prefix_grpc {
+        ep = ep[prefix_grpc.len:ep.len]
+    }
+    mut host := "127.0.0.1"
+    mut port := 9000
+    mut colon := -1
+    mut i := 0
+    while i < ep.len {
+        if (ep[i] & 255) == 58 {
+            colon = i
+            <-
+        }
+        i = i + 1
+    }
+    if colon >= 0 {
+        host = ep[0:colon]
+        p_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(p_str, 9000)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+    << GrpcClient{
+        host: host,
+        port: port
+    }
+}
+
+fn read_exact(fd int, need int) string {
+    mut buf := ""
+    while buf.len < need {
+        want := need - buf.len
+        chunk := net.conn_read(fd, want) or (err) {
+            >> errors.new("grpc read error: " + err.msg())
+        }
+        if chunk.len == 0 {
+            >> errors.new("grpc read unexpected EOF")
+        }
+        buf = buf + chunk
+    }
+    << buf
+}
+
+fn write_all(fd int, data string) bool {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("grpc write error: " + err.msg())
+        }
+        if n <= 0 { >> errors.new("grpc: connection closed during write") }
+        off = off + n
+    }
+    << true
+}
+
+pub fn (c GrpcClient) read_h2_frame(fd int) H2Frame {
+    hdr := read_exact(fd, 9) or >>
+    b0 := hdr[0] & 255
+    b1 := hdr[1] & 255
+    b2 := hdr[2] & 255
+    flen := (b0 << 16) | (b1 << 8) | b2
+    if flen > 16384 { >> errors.new("grpc: frame exceeds advertised limit") }
+    ftype := hdr[3] & 255
+    flags := hdr[4] & 255
+    s0 := hdr[5] & 127
+    s1 := hdr[6] & 255
+    s2 := hdr[7] & 255
+    s3 := hdr[8] & 255
+    stream_id := (s0 << 24) | (s1 << 16) | (s2 << 8) | s3
+
+    mut payload := ""
+    if flen > 0 {
+        payload = read_exact(fd, flen) or >>
+    }
+
+    << H2Frame{
+        length: flen,
+        frame_type: ftype,
+        flags: flags,
+        stream_id: stream_id,
+        payload: payload
+    }
+}
+
+pub fn (c GrpcClient) connect() int {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("grpc dial failed: " + err.msg())
+    }
+
+    // 1. Send HTTP/2 Preface
+    write_all(fd, h2_client_preface) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // 2. Send initial SETTINGS frame
+    s_frame := build_settings_frame(false)
+    write_all(fd, s_frame) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // 3. Read server SETTINGS
+    f1 := c.read_h2_frame(fd) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    if f1.frame_type != frame_settings || f1.stream_id != 0 || f1.flags != 0 || f1.length % 6 != 0 {
+        safe_close(fd)
+        >> errors.new("grpc: invalid initial SETTINGS")
+    }
+    // This unary transport sends one request within the initial window.
+    for i in 0:f1.length / 6 {
+        off := i * 6
+        key := ((f1.payload[off] & 255) << 8) | (f1.payload[off + 1] & 255)
+        value := ((f1.payload[off + 2] & 255) << 24) | ((f1.payload[off + 3] & 255) << 16) | ((f1.payload[off + 4] & 255) << 8) | (f1.payload[off + 5] & 255)
+        if key == 4 && value < 65535 { safe_close(fd)
+            >> errors.new("grpc: reduced request window is unsupported") }
+    }
+
+    // 4. Send SETTINGS ACK
+    ack_frame := build_settings_frame(true)
+    write_all(fd, ack_frame) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    << fd
+}
+
+// Executes an Unary RPC Call over HTTP/2 with gRPC framing
+pub fn (c GrpcClient) call_unary(path string, req_bytes string) Response {
+    fd := c.connect() or >>
+    resp := c.call_unary_on_fd(fd, path, req_bytes, 1) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    safe_close(fd)
+    << resp
+}
+
+pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, stream_id int) Response {
+    if stream_id <= 0 || stream_id > 2147483647 || stream_id % 2 == 0 { >> errors.new("grpc: invalid client stream id") }
+    if req_bytes.len > 65530 { >> errors.new("grpc: request exceeds supported initial window") }
+    block := build_grpc_headers_for_host(path, c.host + ":" + str(c.port))
+    if block.len > 65536 { >> errors.new("grpc: request headers too large") }
+    mut off := 0
+    while off < block.len {
+        mut end := off + 16384
+        if end > block.len { end = block.len }
+        mut typ := frame_continuation
+        if off == 0 { typ = frame_headers }
+        mut flags := 0
+        if end == block.len { flags = flag_end_headers }
+        frame := encode_h2_header(end - off, typ, flags, stream_id) + block[off:end]
+        write_all(fd, frame) or >>
+        off = end
+    }
+    grpc_msg := build_grpc_message(req_bytes)
+    off = 0
+    while off < grpc_msg.len {
+        mut end := off + 16384
+        if end > grpc_msg.len { end = grpc_msg.len }
+        write_all(fd, build_data_frame(stream_id, grpc_msg[off:end] + "", end == grpc_msg.len)) or >>
+        off = end
+    }
+    mut message_bytes := ""
+    mut grpc_status := -1
+    mut grpc_message := ""
+    mut http_status := 0
+    mut content_type := ""
+    mut got_headers := false
+    mut end_stream := false
+    while !end_stream {
+        frame := c.read_h2_frame(fd) or >>
+        if frame.frame_type == frame_settings {
+            if frame.stream_id != 0 || frame.length % 6 != 0 { >> errors.new("grpc: malformed SETTINGS") }
+            if (frame.flags & flag_ack) != 0 {
+                if frame.length != 0 { >> errors.new("grpc: malformed SETTINGS ACK") }
+            } else { write_all(fd, build_settings_frame(true)) or >> }
+        } else if frame.frame_type == frame_ping {
+            if frame.stream_id != 0 || frame.length != 8 { >> errors.new("grpc: malformed PING") }
+            if (frame.flags & flag_ack) == 0 {
+                write_all(fd, encode_h2_header(8, frame_ping, flag_ack, 0) + frame.payload) or >>
+            }
+        } else if frame.frame_type == frame_data && frame.stream_id == stream_id {
+            if !got_headers { >> errors.new("grpc: DATA before headers") }
+            mut start := 0
+            mut end := frame.payload.len
+            if (frame.flags & flag_padded) != 0 {
+                if end < 1 { >> errors.new("grpc: malformed padded DATA") }
+                end -= frame.payload[0] & 255
+                start = 1
+                if end < start { >> errors.new("grpc: malformed DATA padding") }
+            }
+            message_bytes = message_bytes + frame.payload[start:end]
+            if message_bytes.len > 16777221 { >> errors.new("grpc: response too large") }
+            if frame.length > 0 {
+                delta := string_from_byte((frame.length >> 24) & 127) + string_from_byte((frame.length >> 16) & 255) + string_from_byte((frame.length >> 8) & 255) + string_from_byte(frame.length & 255)
+                write_all(fd, encode_h2_header(4, frame_window_update, 0, 0) + delta) or >>
+                write_all(fd, encode_h2_header(4, frame_window_update, 0, stream_id) + delta) or >>
+            }
+            if (frame.flags & flag_end_stream) != 0 { end_stream = true }
+        } else if frame.frame_type == frame_headers && frame.stream_id == stream_id {
+            mut start := 0
+            mut end := frame.payload.len
+            if (frame.flags & flag_padded) != 0 {
+                if end < 1 { >> errors.new("grpc: malformed padded HEADERS") }
+                end -= frame.payload[0] & 255
+                start = 1
+            }
+            if (frame.flags & flag_priority) != 0 { start += 5 }
+            if end < start { >> errors.new("grpc: malformed HEADERS") }
+            mut headers := frame.payload[start:end] + ""
+            mut done := (frame.flags & flag_end_headers) != 0
+            while !done {
+                next := c.read_h2_frame(fd) or >>
+                if next.frame_type != frame_continuation || next.stream_id != stream_id { >> errors.new("grpc: expected CONTINUATION") }
+                headers = headers + next.payload
+                if headers.len > 65536 { >> errors.new("grpc: response headers too large") }
+                done = (next.flags & flag_end_headers) != 0
+            }
+            h := decode_hpack(headers) or >>
+            for i in 0:h.names.len {
+                if h.names[i] == ":status" {
+                    if got_headers || http_status != 0 { >> errors.new("grpc: invalid HTTP status placement") }
+                    http_status = parse_int(h.values[i] + "") or >>
+                }
+                if h.names[i] == "content-type" {
+                    if got_headers || content_type.len > 0 { >> errors.new("grpc: invalid content-type placement") }
+                    value := h.values[i] + ""
+                    content_type = strings.to_lower(&value)
+                }
+                if h.names[i] == "grpc-status" {
+                    if grpc_status >= 0 || (frame.flags & flag_end_stream) == 0 { >> errors.new("grpc: invalid grpc-status placement") }
+                    grpc_status = parse_int(h.values[i] + "") or >>
+                    if grpc_status < 0 || grpc_status > 16 { >> errors.new("grpc: invalid grpc-status") }
+                }
+                if h.names[i] == "grpc-message" {
+                    value := h.values[i] + ""
+                    grpc_message = url.path_unescape(&value) or >>
+                }
+            }
+            if !got_headers && http_status != 200 { >> errors.new("grpc: HTTP status " + str(http_status)) }
+            if !got_headers {
+                if content_type.len < 16 || content_type[0:16] != "application/grpc" { >> errors.new("grpc: invalid response content-type") }
+                if content_type.len > 16 && content_type[16:17] != "+" && content_type[16:17] != ";" { >> errors.new("grpc: invalid response content-type") }
+            }
+            got_headers = true
+            if (frame.flags & flag_end_stream) != 0 { end_stream = true }
+        } else if frame.frame_type == frame_rst_stream && frame.stream_id == stream_id {
+            >> errors.new("grpc: rst_stream received")
+        } else if frame.frame_type == frame_goaway { >> errors.new("grpc: goaway received") }
+        else if frame.frame_type == frame_continuation { >> errors.new("grpc: unexpected CONTINUATION") }
+        else if frame.frame_type == frame_push_promise { >> errors.new("grpc: PUSH_PROMISE is unsupported") }
+    }
+    if grpc_status < 0 { >> errors.new("grpc: missing grpc-status trailers") }
+    mut payload := ""
+    if message_bytes.len > 0 { payload = decode_grpc_message(message_bytes) or >> }
+    else if grpc_status == 0 { >> errors.new("grpc: missing unary response message") }
+    << Response{status: grpc_status, message: grpc_message, payload: payload}
+}

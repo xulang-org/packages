@@ -1,0 +1,122 @@
+@"github.com/xulang-org/packages/chroma"
+
+#net
+#net/pool
+#errors
+#strings
+
+pub struct Pool {
+    pub client Client
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, max_idle int) Pool {
+    c := new_client(endpoint)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    state := pool.new_state()
+    << Pool{
+        client: c,
+        state: state,
+        max_idle: cap_val
+    }
+}
+
+// Copies configuration while sharing the connection and close lifecycle.
+pub fn (p &Pool) dup() Pool {
+    c := Client{host: strings.clone(&p.client.host), port: p.client.port, tenant: strings.clone(&p.client.tenant), database: strings.clone(&p.client.database)}
+    << Pool{client: c, state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.client.host + ":" + str(p.client.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn open_pool(endpoint string, max_idle int) Pool {
+    << new_pool(endpoint, max_idle)
+}
+
+pub fn (p &Pool) heartbeat() bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.heartbeat_at(fd, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        << false
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) create_collection(name string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.create_collection_at(fd, name, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) add(col_id string, ids_json string, embeddings_json string, documents_json string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.add_at(fd, col_id, ids_json, embeddings_json, documents_json, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        << false
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) query(col_id string, query_embeddings_json string, n_results int) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.query_at(fd, col_id, query_embeddings_json, n_results, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) delete_collection(name string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.delete_collection_at(fd, name, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        << false
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

@@ -1,0 +1,266 @@
+@"github.com/xulang-org/packages/mqtt"
+
+#net
+#errors
+#strings
+
+pub struct Client {
+    pub fd int
+    pub addr string
+    pub client_id string
+    pub next_pid int
+}
+
+pub struct Message {
+    pub topic string
+    pub payload string
+    pub qos int
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+fn (c &mut Client) write_raw(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(c.fd, &part) or (err) {
+            >> errors.new("mqtt: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("mqtt: connection closed")
+        }
+        off = off + n
+    }
+    << 0
+}
+
+fn (c &mut Client) read_exact(n int) string {
+    mut res := ""
+    while res.len < n {
+        chunk := net.conn_read(c.fd, n - res.len) or (err) {
+            >> errors.new("mqtt: read error: " + err.msg())
+        }
+        if chunk.len == 0 {
+            >> errors.new("mqtt: connection closed")
+        }
+        res = res + chunk
+    }
+    << res
+}
+
+pub fn connect_opts(addr string, client_id string, username string, password string, clean_session bool, keepalive int) Client {
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("mqtt: dial failed: " + err.msg())
+    }
+    mut c := Client{
+        fd: fd,
+        addr: addr,
+        client_id: client_id + "",
+        next_pid: 1
+    }
+
+    mut connect_flags := 0
+    if clean_session {
+        connect_flags = connect_flags | 2 // CleanSession = bit 1
+    }
+    if username.len > 0 {
+        connect_flags = connect_flags | 128 // Username = bit 7
+    }
+    if password.len > 0 {
+        connect_flags = connect_flags | 64 // Password = bit 6
+    }
+
+    mut var_hdr := encode_str("MQTT")
+    var_hdr.push_byte(4)  // Level 4 (3.1.1)
+    var_hdr.push_byte(connect_flags)
+    var_hdr = var_hdr + encode_u16(keepalive)
+
+    mut payload := encode_str(client_id)
+    if username.len > 0 {
+        payload = payload + encode_str(username)
+    }
+    if password.len > 0 {
+        payload = payload + encode_str(password)
+    }
+
+    rem_len := encode_var_len(var_hdr.len + payload.len)
+    mut pkt := ""
+    pkt.push_byte(16) // 0x10 = CONNECT
+    pkt = pkt + rem_len + var_hdr + payload
+
+    c.write_raw(pkt) or >>
+
+    // Read CONNACK response (4 bytes: 0x20 0x02 SessionPresent ReturnCode)
+    ack := c.read_exact(4) or >>
+    if (ack[0] & 255) != 32 || (ack[1] & 255) != 2 {
+        >> errors.new("mqtt: invalid CONNACK header")
+    }
+    ret_code := ack[3] & 255
+    if ret_code != 0 {
+        >> errors.new("mqtt: connection rejected with code " + str(ret_code))
+    }
+    << c
+}
+
+pub fn connect(addr string, client_id string) Client {
+    << connect_opts(addr, client_id, "", "", true, 60) or >>
+}
+
+pub fn connect_auth(addr string, client_id string, username string, password string) Client {
+    << connect_opts(addr, client_id, username, password, true, 60) or >>
+}
+
+pub fn (c &mut Client) ping() bool {
+    mut pkt := ""
+    pkt.push_byte(192) // 0xC0 = PINGREQ
+    pkt.push_byte(0)   // Rem len = 0
+    c.write_raw(pkt) or (err) {
+        << false
+    }
+
+    resp := c.read_exact(2) or (err) {
+        << false
+    }
+    << (resp[0] & 255) == 208 && (resp[1] & 255) == 0 // 0xD0 0x00 = PINGRESP
+}
+
+pub fn (c &mut Client) publish(topic string, payload string, qos int) int {
+    c.next_pid = c.next_pid + 1
+    if c.next_pid > 65535 {
+        c.next_pid = 1
+    }
+    pid := c.next_pid
+
+    mut var_hdr := encode_str(topic)
+    mut fixed_type := 48 // 0x30 = PUBLISH QoS 0
+    if qos == 1 {
+        fixed_type = 50  // 0x32 = PUBLISH QoS 1
+        var_hdr = var_hdr + encode_u16(pid)
+    }
+
+    rem_len := encode_var_len(var_hdr.len + payload.len)
+    mut pkt := ""
+    pkt.push_byte(fixed_type)
+    pkt = pkt + rem_len + var_hdr + payload
+
+    c.write_raw(pkt) or >>
+
+    if qos == 1 {
+        while true {
+            hdr := c.read_exact(1) or >>
+            pkt_type := (hdr[0] & 255) >> 4
+            mut rlen := 0
+            mut multiplier := 1
+            while true {
+                b_str := c.read_exact(1) or >>
+                b := b_str[0] & 255
+                rlen = rlen + (b & 127) * multiplier
+                multiplier = multiplier * 128
+                if (b & 128) == 0 {
+                    <-
+                }
+            }
+            body := c.read_exact(rlen) or >>
+            if pkt_type == 4 { // PUBACK
+                <-
+            }
+        }
+    }
+    << 0
+}
+
+pub fn (c &mut Client) subscribe(topic string, qos int) int {
+    c.next_pid = c.next_pid + 1
+    if c.next_pid > 65535 {
+        c.next_pid = 1
+    }
+    pid := c.next_pid
+
+    var_hdr := encode_u16(pid)
+    mut payload := encode_str(topic)
+    payload.push_byte(qos & 3)
+
+    rem_len := encode_var_len(var_hdr.len + payload.len)
+    mut pkt := ""
+    pkt.push_byte(130) // 0x82 = SUBSCRIBE
+    pkt = pkt + rem_len + var_hdr + payload
+
+    c.write_raw(pkt) or >>
+
+    // Read SUBACK (5 bytes: 0x90 0x03 pid_msb pid_lsb return_code)
+    ack := c.read_exact(5) or >>
+    if (ack[0] & 255) != 144 {
+        >> errors.new("mqtt: expected SUBACK")
+    }
+    << 0
+}
+
+pub fn (c &mut Client) read_message() Message {
+    while true {
+        hdr := c.read_exact(1) or >>
+        b0 := hdr[0] & 255
+        pkt_type := b0 >> 4
+        qos := (b0 >> 1) & 3
+
+        mut rlen := 0
+        mut multiplier := 1
+        while true {
+            b_str := c.read_exact(1) or >>
+            b := b_str[0] & 255
+            rlen = rlen + (b & 127) * multiplier
+            multiplier = multiplier * 128
+            if (b & 128) == 0 {
+                <-
+            }
+        }
+
+        body := c.read_exact(rlen) or >>
+
+        if pkt_type == 3 { // PUBLISH
+            topic_len := decode_u16(&body, 0)
+            topic := body[2:(2 + topic_len)]
+            mut payload_start := 2 + topic_len
+            if qos > 0 {
+                pid_msb := body[payload_start] & 255
+                pid_lsb := body[payload_start + 1] & 255
+                payload_start = payload_start + 2
+
+                if qos == 1 {
+                    mut puback := ""
+                    puback.push_byte(64) // 0x40 = PUBACK
+                    puback.push_byte(2)  // Rem len = 2
+                    puback.push_byte(pid_msb)
+                    puback.push_byte(pid_lsb)
+                    c.write_raw(puback) or >>
+                }
+            }
+            payload := body[payload_start:body.len]
+            << Message{topic: topic, payload: payload, qos: qos}
+        }
+    }
+    << Message{topic: "", payload: "", qos: 0}
+}
+
+pub fn (c &mut Client) disconnect() int {
+    mut pkt := ""
+    pkt.push_byte(224) // 0xE0 = DISCONNECT
+    pkt.push_byte(0)
+    _ := c.write_raw(pkt) or (err) {
+        safe_close(c.fd)
+        c.fd = -1
+        << 0
+    }
+    safe_close(c.fd)
+    c.fd = -1
+    << 0
+}
+
+pub fn (c &mut Client) close() int {
+    << c.disconnect()
+}

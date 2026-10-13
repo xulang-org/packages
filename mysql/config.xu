@@ -1,0 +1,186 @@
+@"github.com/xulang-org/packages/mysql"
+
+#errors
+#strconv
+#strings
+
+pub struct Config {
+    pub host string
+    pub port int
+    pub user string
+    pub password string
+    pub database string
+    pub tls_mode string
+}
+
+fn empty_config() Config {
+    << Config{host: "127.0.0.1", port: 3306, user: "", password: "", database: "", tls_mode: "false"}
+}
+
+pub fn new_config() Config {
+    << empty_config()
+}
+
+fn unescape_part(s string) string {
+    mut out := ""
+    mut i := 0
+    while i < s.len {
+        if (s[i] & 255) == 37 && i + 2 < s.len {
+            mut hi := s[i + 1] & 255
+            mut lo := s[i + 2] & 255
+            if hi >= 97 && hi <= 102 { hi = hi - 87 }
+            else if hi >= 65 && hi <= 70 { hi = hi - 55 }
+            else if hi >= 48 && hi <= 57 { hi = hi - 48 }
+            else {
+                out.push_byte(s[i] & 255)
+                i += 1
+                ->
+            }
+            if lo >= 97 && lo <= 102 { lo = lo - 87 }
+            else if lo >= 65 && lo <= 70 { lo = lo - 55 }
+            else if lo >= 48 && lo <= 57 { lo = lo - 48 }
+            else {
+                out.push_byte(s[i] & 255)
+                i += 1
+                ->
+            }
+            out.push_byte((hi * 16 + lo) & 255)
+            i += 3
+        } else {
+            out.push_byte(s[i] & 255)
+            i += 1
+        }
+    }
+    << out
+}
+
+fn set_option(c &mut Config, key string, value string) {
+    k := strings.to_lower(&key)
+    v := unescape_part(value)
+    if k == "host" { c.host = v }
+    if k == "port" { c.port = parse_port_or_default(v) }
+    if k == "user" || k == "username" { c.user = v }
+    if k == "password" || k == "pass" { c.password = v }
+    if k == "dbname" || k == "database" { c.database = v }
+    if k == "tls" || k == "tlsmode" { c.tls_mode = v }
+}
+
+fn parse_port_or_default(v string) int {
+    n := strconv.atoi(&v) or (err) { << 3306 }
+    << n
+}
+
+fn parse_url_dsn(dsn string) Config {
+    mut c := empty_config()
+    mut start := 0
+    if strings.has_prefix(&dsn, "mysql://") { start = 8 }
+    else if strings.has_prefix(&dsn, "mariadb://") { start = 10 }
+    else { >> errors.new("mysql: unsupported DSN scheme") }
+    mut end := dsn.len
+    qpos := strings.index_byte(&dsn, 63)
+    if qpos >= 0 { end = qpos }
+    tail := dsn[start:end]
+    slash := strings.index_byte(&tail, 47)
+    mut authority := strings.clone(&tail)
+    if slash >= 0 { authority = tail[0:slash] }
+    at := strings.last_index_byte(&authority, 64)
+    mut hostport := strings.clone(&authority)
+    if at >= 0 {
+        ui := authority[0:at]
+        colon := strings.last_index_byte(&ui, 58)
+        if colon >= 0 {
+            c.user = unescape_part(ui[0:colon])
+            c.password = unescape_part(ui[colon + 1:ui.len])
+        } else { c.user = unescape_part(ui) }
+        hostport = authority[at + 1:authority.len]
+    }
+    if hostport.len > 0 && (hostport[0] & 255) == 91 {
+        close := strings.index_byte(&hostport, 93)
+        if close < 0 { >> errors.new("mysql: invalid IPv6 host") }
+        c.host = hostport[1:close]
+        if close + 1 < hostport.len && (hostport[close + 1] & 255) == 58 {
+            ps := hostport[close + 2:hostport.len]
+            c.port = strconv.atoi(&ps) or >> errors.new("mysql: invalid port")
+        }
+    } else if hostport.len > 0 {
+        colon := strings.last_index_byte(&hostport, 58)
+        if colon >= 0 {
+            c.host = hostport[0:colon]
+            ps := hostport[colon + 1:hostport.len]
+            c.port = strconv.atoi(&ps) or >> errors.new("mysql: invalid port")
+        } else { c.host = strings.clone(&hostport) }
+    }
+    if slash >= 0 && slash + 1 < tail.len { c.database = unescape_part(tail[slash + 1:tail.len]) }
+    if qpos >= 0 {
+        query := dsn[qpos + 1:dsn.len]
+        pairs := strings.split(&query, "&")
+        for i in 0:pairs.len {
+            p := pairs[i]
+            eq := strings.index_byte(&p, 61)
+            if eq >= 0 { set_option(mut &c, p[0:eq], p[eq + 1:p.len]) }
+        }
+    }
+    << c
+}
+
+fn parse_tcp_dsn(dsn string) Config {
+    mut c := empty_config()
+    at := strings.index_byte(&dsn, 64)
+    mut tail := strings.clone(&dsn)
+    if at >= 0 {
+        ui := dsn[0:at]
+        colon := strings.index_byte(&ui, 58)
+        if colon >= 0 {
+            c.user = unescape_part(ui[0:colon])
+            c.password = unescape_part(ui[colon + 1:ui.len])
+        } else { c.user = unescape_part(ui) }
+        tail = dsn[at + 1:dsn.len]
+    }
+    if strings.has_prefix(&tail, "tcp(") {
+        close := strings.index_byte(&tail, 41)
+        if close < 0 { >> errors.new("mysql: invalid tcp DSN") }
+        hp := tail[4:close]
+        colon := strings.last_index_byte(&hp, 58)
+        if colon >= 0 {
+            c.host = hp[0:colon]
+            ps := hp[colon + 1:hp.len]
+            c.port = strconv.atoi(&ps) or >> errors.new("mysql: invalid port")
+        } else { c.host = hp }
+        tail = tail[close + 1:tail.len]
+    } else { >> errors.new("mysql: DSN must use tcp(host:port)") }
+    if tail.len > 0 && (tail[0] & 255) == 47 {
+        q := strings.index_byte(&tail, 63)
+        if q < 0 { c.database = unescape_part(tail[1:tail.len]) }
+        else { c.database = unescape_part(tail[1:q]) }
+    }
+    qpos := strings.index_byte(&dsn, 63)
+    if qpos >= 0 {
+        query := dsn[qpos + 1:dsn.len]
+        pairs := strings.split(&query, "&")
+        for i in 0:pairs.len {
+            p := pairs[i]
+            eq := strings.index_byte(&p, 61)
+            if eq >= 0 { set_option(mut &c, p[0:eq], p[eq + 1:p.len]) }
+        }
+    }
+    << c
+}
+
+pub fn parse_dsn(dsn string) Config {
+    if dsn.len == 0 { >> errors.new("mysql: empty DSN") }
+    mut c := empty_config()
+    if strings.has_prefix(&dsn, "mysql://") || strings.has_prefix(&dsn, "mariadb://") {
+        c = parse_url_dsn(dsn)
+    } else {
+        c = parse_tcp_dsn(dsn)
+    }
+    if c.host.len == 0 { c.host = "127.0.0.1" }
+    if c.port <= 0 || c.port > 65535 { >> errors.new("mysql: invalid port") }
+    if c.user.len == 0 { c.user = "root" }
+    if c.database.len == 0 { c.database = c.user }
+    if c.tls_mode.len == 0 { c.tls_mode = "false" }
+    if c.tls_mode != "false" && c.tls_mode != "0" && c.tls_mode != "disabled" {
+        >> errors.new("mysql: TLS is not available; use tls=false")
+    }
+    << c
+}

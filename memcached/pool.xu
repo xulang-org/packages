@@ -1,0 +1,62 @@
+@"github.com/xulang-org/packages/memcached"
+
+#net
+#errors
+
+pub struct Pool {
+    pub addr string
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn new_pool(addr string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{addr: addr, idle: ch, max_idle: cap_val}
+}
+
+pub fn (p &Pool) get() Client {
+    select {
+        fd := <-p.idle {
+            << Client{fd: fd, buf: "", addr: p.addr}
+        }
+        else {
+            mut c := dial(p.addr) or >>
+            << c
+        }
+    }
+    mut c := dial(p.addr) or >>
+    << c
+}
+
+pub fn (p &Pool) put(c Client) {
+    if c.fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- c.fd {
+            <<
+        }
+        else {
+            safe_close(c.fd)
+        }
+    }
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

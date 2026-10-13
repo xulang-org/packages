@@ -1,0 +1,4 @@
+@"github.com/xulang-org/packages/cassandra"
+
+// Apache Cassandra & ScyllaDB Native CQL Binary Protocol Driver for Xu
+// Implements CQL Binary Protocol v4 frame serialization, connection pooling, and DDL/DML execution.

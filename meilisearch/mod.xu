@@ -1,0 +1,9 @@
+@"github.com/xulang-org/packages/meilisearch"
+
+pub fn client(endpoint string, api_key string) MeiliClient {
+    << new_client(endpoint, api_key)
+}
+
+pub fn pool(endpoint string, api_key string, max_conns int) MeiliPool {
+    << open_pool(endpoint, api_key, max_conns)
+}

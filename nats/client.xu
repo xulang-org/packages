@@ -1,0 +1,262 @@
+@"github.com/xulang-org/packages/nats"
+
+#net
+#errors
+#strings
+
+pub struct Client {
+    pub fd int
+    pub buf string
+    pub addr string
+    pub next_sid int
+    pub server_info string
+}
+
+fn find_crlf(s &string) int {
+    if s.len < 2 {
+        << -1
+    }
+    mut i := 0
+    while i + 1 < s.len {
+        if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 {
+            << i
+        }
+        i = i + 1
+    }
+    << -1
+}
+
+fn split_space_tokens(s &string) []string {
+    mut tokens := []string{}
+    mut cur := ""
+    mut i := 0
+    while i < s.len {
+        c := s[i] & 255
+        if c == 32 || c == 9 {
+            if cur.len > 0 {
+                tokens.push(cur)
+                cur = ""
+            }
+        } else {
+            cur.push_byte(c)
+        }
+        i = i + 1
+    }
+    if cur.len > 0 {
+        tokens.push(cur)
+    }
+    << tokens
+}
+
+fn parse_int_or(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+fn (c &mut Client) fill() int {
+    chunk := net.conn_read(c.fd, 4096) or (err) {
+        >> errors.new("nats: read error: " + err.msg())
+    }
+    if chunk.len == 0 {
+        >> errors.new("nats: connection closed")
+    }
+    c.buf = c.buf + chunk
+    << chunk.len
+}
+
+pub fn (c &mut Client) read_line() string {
+    while true {
+        idx := find_crlf(&c.buf)
+        if idx >= 0 {
+            line := c.buf[0:idx]
+            if idx + 2 < c.buf.len {
+                c.buf = c.buf[(idx + 2):c.buf.len]
+            } else {
+                c.buf = ""
+            }
+            << line
+        }
+        c.fill() or >>
+    }
+    << ""
+}
+
+pub fn (c &mut Client) read_bytes(n int) string {
+    if n <= 0 {
+        << ""
+    }
+    while c.buf.len < n {
+        c.fill() or >>
+    }
+    res := c.buf[0:n]
+    if n < c.buf.len {
+        c.buf = c.buf[n:c.buf.len]
+    } else {
+        c.buf = ""
+    }
+    << res
+}
+
+pub fn (c &mut Client) write_raw(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(c.fd, &part) or (err) {
+            >> errors.new("nats: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("nats: connection closed")
+        }
+        off = off + n
+    }
+    << 0
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn connect(addr string) Client {
+    << connect_auth(addr, "", "")
+}
+
+pub fn connect_auth(addr string, user string, pass string) Client {
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("nats: dial failed: " + err.msg())
+    }
+    mut c := Client{
+        fd: fd,
+        buf: "",
+        addr: addr,
+        next_sid: 0,
+        server_info: ""
+    }
+    // Read initial INFO line from NATS server
+    info_line := c.read_line() or >>
+    c.server_info = info_line
+
+    // Send CONNECT command
+    mut connect_cmd := "CONNECT {\"verbose\":false,\"pedantic\":false,\"name\":\"xu-nats\""
+    if user.len > 0 {
+        connect_cmd = connect_cmd + ",\"user\":\"" + user + "\",\"pass\":\"" + pass + "\""
+    }
+    connect_cmd = connect_cmd + "}\r\n"
+    c.write_raw(connect_cmd) or >>
+
+    // Ping to verify handshake
+    c.write_raw("PING\r\n") or >>
+    pong_line := c.read_line() or >>
+    if pong_line != "PONG" {
+        safe_close(c.fd)
+        >> errors.new("nats: unexpected handshake response: " + pong_line)
+    }
+    << c
+}
+
+pub fn (c &mut Client) ping() bool {
+    c.write_raw("PING\r\n") or >>
+    line := c.read_line() or >>
+    << line == "PONG"
+}
+
+pub fn (c &mut Client) publish(subject string, data string) int {
+    wire := "PUB " + subject + " " + str(data.len) + "\r\n" + data + "\r\n"
+    c.write_raw(wire) or >>
+    << 0
+}
+
+pub fn (c &mut Client) publish_request(subject string, reply_to string, data string) int {
+    wire := "PUB " + subject + " " + reply_to + " " + str(data.len) + "\r\n" + data + "\r\n"
+    c.write_raw(wire) or >>
+    << 0
+}
+
+pub fn (c &mut Client) subscribe(subject string) Subscription {
+    c.next_sid = c.next_sid + 1
+    sid := str(c.next_sid)
+    wire := "SUB " + subject + " " + sid + "\r\n"
+    c.write_raw(wire) or >>
+    << new_sub(sid, subject, "")
+}
+
+pub fn (c &mut Client) queue_subscribe(subject string, queue_group string) Subscription {
+    c.next_sid = c.next_sid + 1
+    sid := str(c.next_sid)
+    wire := "SUB " + subject + " " + queue_group + " " + sid + "\r\n"
+    c.write_raw(wire) or >>
+    << new_sub(sid, subject, queue_group)
+}
+
+pub fn (c &mut Client) unsubscribe(sub Subscription) int {
+    wire := "UNSUB " + sub.sid + "\r\n"
+    c.write_raw(wire) or >>
+    << 0
+}
+
+pub fn (c &mut Client) next_msg() Message {
+    while true {
+        line := c.read_line() or >>
+        if line == "PING" {
+            c.write_raw("PONG\r\n") or >>
+            ->
+        }
+        if line == "+OK" || line == "PONG" {
+            ->
+        }
+        tokens := split_space_tokens(&line)
+        if tokens.len >= 3 && tokens[0] == "MSG" {
+            // MSG <subject> <sid> [reply-to] <#bytes>
+            subj := tokens[1]
+            sid := tokens[2]
+            mut reply_to := ""
+            mut bytes_count := 0
+            if tokens.len >= 5 {
+                reply_to = tokens[3]
+                bytes_count = parse_int_or(tokens[4], 0)
+            } else if tokens.len >= 4 {
+                bytes_count = parse_int_or(tokens[3], 0)
+            }
+            body := c.read_bytes(bytes_count) or >>
+            _ := c.read_bytes(2) or >> // read trailing \r\n
+            << new_msg(subj, sid, reply_to, body)
+        }
+        if line.len >= 4 && line[0:4] == "-ERR" {
+            >> errors.new("nats error: " + line)
+        }
+    }
+    << new_msg("", "", "", "")
+}
+
+pub fn (c &mut Client) request(subject string, data string) Message {
+    c.next_sid = c.next_sid + 1
+    inbox := "_INBOX." + str(c.fd) + "." + str(c.next_sid)
+    sub := c.subscribe(inbox + "") or >>
+    c.publish_request(subject, inbox + "", data) or >>
+    mut target_msg := new_msg("", "", "", "")
+    while true {
+        msg := c.next_msg() or >>
+        if msg.subject == inbox {
+            target_msg = new_msg(msg.subject + "", msg.sid + "", msg.reply_to + "", msg.data + "")
+            <-
+        }
+    }
+    c.unsubscribe(sub) or >>
+    << target_msg
+}
+
+pub fn (c &mut Client) close() int {
+    if c.fd >= 0 {
+        safe_close(c.fd)
+        c.fd = -1
+    }
+    << 0
+}

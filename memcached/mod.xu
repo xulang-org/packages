@@ -1,0 +1,15 @@
+@"github.com/xulang-org/packages/memcached"
+
+#errors
+
+// Memcached client package for Xu.
+//
+// Features:
+// - Standard Memcached Text Protocol implementation in 100% pure Xu.
+// - High-performance socket line & byte buffering.
+// - Full command suite: set, add, replace, append, prepend, get, delete, incr, decr, touch, stats, flush_all.
+// - Channel-based concurrency-safe connection pooling.
+
+pub fn open(addr string) Client {
+    << dial(addr) or >>
+}

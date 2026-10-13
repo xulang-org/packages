@@ -1,0 +1,138 @@
+@"github.com/xulang-org/packages/qdrant"
+
+#net
+#net/pool
+#errors
+#strings
+
+// Connection Pool for Qdrant Vector Database.
+// Manages reusable TCP/HTTP socket connections.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub api_key string
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, api_key string, max_idle int) Pool {
+    c := new_client(endpoint + "", api_key + "")
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := pool.new_state()
+    << Pool{
+        host: c.host,
+        port: c.port,
+        api_key: api_key + "",
+        state: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(endpoint string, api_key string, max_idle int) Pool {
+    << new_pool(endpoint, api_key, max_idle)
+}
+
+pub fn (p &Pool) get() Client {
+    << Client{
+        host: p.host + "",
+        port: p.port,
+        api_key: p.api_key + ""
+    }
+}
+
+// Shares sockets and close state; clones configuration strings.
+pub fn (p &Pool) dup() Pool {
+    << Pool{host: strings.clone(&p.host), port: p.port, api_key: strings.clone(&p.api_key), state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.host + ":" + str(p.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) create_collection(name string, vector_size int, distance string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.create_collection_at(fd, name, vector_size, distance, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) collection_exists(name string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.collection_exists_at(fd, name, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) delete_collection(name string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.delete_collection_at(fd, name, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) upsert_point(collection string, id int, vector []string, payload_json string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.upsert_point_at(fd, collection, id, vector, payload_json, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) search(collection string, vector []string, limit int) []ScoredPoint {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("qdrant: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.search_at(fd, collection, vector, limit, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) ping() bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.ping_at(fd, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

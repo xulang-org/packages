@@ -1,0 +1,181 @@
+@"github.com/xulang-org/packages/redis"
+
+#net
+#errors
+#strings
+#strconv
+
+pub struct Client {
+    pub fd int
+    pub buf string
+    pub addr string
+}
+
+pub fn dial(addr string) Client {
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("redis: dial failed: " + err.msg())
+    }
+    << Client{fd: fd, buf: "", addr: addr}
+}
+
+fn (c &mut Client) fill() int {
+    chunk := net.conn_read(c.fd, 4096) or (err) {
+        >> errors.new("redis: read error: " + err.msg())
+    }
+    if chunk.len == 0 {
+        >> errors.new("redis: connection closed")
+    }
+    if c.buf.len + chunk.len > 16777216 { >> errors.new("redis: response size limit exceeded") }
+    c.buf = c.buf + chunk
+    << chunk.len
+}
+
+pub fn (c &mut Client) read_line() string {
+    while true {
+        idx := find_crlf(&c.buf)
+        if idx >= 0 {
+            line := c.buf[0:idx]
+            if idx + 2 < c.buf.len {
+                c.buf = c.buf[(idx + 2):c.buf.len]
+            } else {
+                c.buf = ""
+            }
+            << line
+        }
+        c.fill() or >>
+    }
+    << ""
+}
+
+pub fn (c &mut Client) read_bytes(n int) string {
+    if n <= 0 {
+        << ""
+    }
+    while c.buf.len < n {
+        c.fill() or >>
+    }
+    res := c.buf[0:n]
+    if n < c.buf.len {
+        c.buf = c.buf[n:c.buf.len]
+    } else {
+        c.buf = ""
+    }
+    << res
+}
+
+pub fn (c &mut Client) read_value() Value {
+    << c.read_value_depth(0) or >>
+}
+
+fn (c &mut Client) read_value_depth(depth int) Value {
+    if depth > 64 { >> errors.new("redis: response nesting limit exceeded") }
+    line := c.read_line() or >>
+    if line.len == 0 { >> errors.new("redis: empty response") }
+    prefix := line[0] & 255
+    mut v := nil_value()
+    mut raw := line + "\r\n"
+    text := line[1:line.len] + ""
+    if prefix == 43 { v = str_value(text) }
+    else if prefix == 45 { v = err_value(text) }
+    else if prefix == 58 { v = int_value(parse_int(text) or >>) }
+    else if prefix == 36 || prefix == 33 || prefix == 61 {
+        n := parse_int(text) or >>
+        if n == -1 && prefix == 36 { << nil_value() }
+        if n < 0 || n > 16777216 { >> errors.new("redis: invalid bulk length") }
+        data := c.read_bytes(n) or >>
+        tail := c.read_bytes(2) or >>
+        if tail != "\r\n" { >> errors.new("redis: bad bulk CRLF") }
+        raw = raw + data + tail
+        if prefix == 33 { v = err_value(data) }
+        else if prefix == 61 {
+            if data.len < 4 || (data[3] & 255) != 58 { >> errors.new("redis: invalid verbatim string") }
+            v = str_value(data)
+            v.typ = type_verbatim
+        } else { v = str_value(data) }
+    } else if prefix == 42 || prefix == 37 || prefix == 126 || prefix == 62 {
+        count := parse_int(text) or >>
+        if count == -1 && prefix == 42 { << nil_value() }
+        if count < 0 || count > 100000 { >> errors.new("redis: invalid aggregate count") }
+        mut typ := type_arr
+        mut total := count
+        if prefix == 37 { typ = type_map
+            total = count * 2 }
+        if prefix == 126 { typ = type_set }
+        if prefix == 62 { typ = type_push }
+        mut strings_only := []string{}
+        for i in 0:total {
+            elem := c.read_value_depth(depth + 1) or >>
+            raw = raw + elem.raw
+            if raw.len > 16777216 { >> errors.new("redis: response size limit exceeded") }
+            if elem.typ == type_str { strings_only.push(elem.str_val + "") }
+        }
+        v = arr_value(strings_only)
+        v.typ = typ
+    } else if prefix == 95 {
+        if line != "_" { >> errors.new("redis: malformed null") }
+    } else if prefix == 35 {
+        if text != "t" && text != "f" { >> errors.new("redis: malformed bool") }
+        v = bool_value(text == "t")
+    } else if prefix == 44 {
+        if text != "inf" && text != "-inf" && text != "nan" {
+            strconv.parse_float(&text) or >>
+        }
+        v = str_value(text)
+        v.typ = type_double
+    } else if prefix == 40 {
+        mut start := 0
+        if text.len > 0 && (text[0] & 255) == 45 { start = 1 }
+        if start == text.len { >> errors.new("redis: malformed big number") }
+        for i in start:text.len {
+            if (text[i] & 255) < 48 || (text[i] & 255) > 57 { >> errors.new("redis: malformed big number") }
+        }
+        v = str_value(text)
+        v.typ = type_big_number
+    } else { >> errors.new("redis: unsupported response prefix: " + str(prefix)) }
+    v.raw = raw
+    << v
+}
+
+pub fn (c &mut Client) write_raw(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(c.fd, &part) or (err) {
+            >> errors.new("redis: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("redis: connection closed")
+        }
+        off = off + n
+    }
+    << 0
+}
+
+pub fn (c &mut Client) do(args []string) Value {
+    if c.fd < 0 {
+        >> errors.new("redis: client closed")
+    }
+    raw := encode_cmd(args)
+    c.write_raw(raw) or >>
+    << c.read_value() or >>
+}
+
+pub fn (c &mut Client) auth(password string) string {
+    v := c.do(["AUTH", password]) or >>
+    << v.as_string() or >>
+}
+
+pub fn (c &mut Client) select_db(index int) string {
+    v := c.do(["SELECT", str(index)]) or >>
+    << v.as_string() or >>
+}
+
+pub fn (c &mut Client) close() int {
+    if c.fd >= 0 {
+        net.conn_close(c.fd) or (err) {
+            << 0
+        }
+        c.fd = -1
+    }
+    << 0
+}

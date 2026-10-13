@@ -1,0 +1,52 @@
+@"github.com/xulang-org/packages/consul"
+
+#errors
+
+pub fn (c &mut Client) put_kv(key string, val string) bool {
+    mut reusable := false
+    << c.put_kv_at(-1, key, val, mut &reusable)
+}
+
+fn (c &mut Client) put_kv_at(fd int, key string, val string, reusable &mut bool) bool {
+    mut k := key
+    if k.len > 0 && (k[0] & 255) == 47 {
+        k = k[1:k.len]
+    }
+    resp := c.request_at(fd, "PUT", "/v1/kv/" + k, val, reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) get_kv(key string) string {
+    mut reusable := false
+    << c.get_kv_at(-1, key, mut &reusable) or >>
+}
+
+fn (c &mut Client) get_kv_at(fd int, key string, reusable &mut bool) string {
+    mut k := key
+    if k.len > 0 && (k[0] & 255) == 47 {
+        k = k[1:k.len]
+    }
+    resp := c.request_at(fd, "GET", "/v1/kv/" + k + "?raw", "", reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("consul: kv not found (status " + str(resp.status_code) + ")")
+    }
+    << resp.body
+}
+
+pub fn (c &mut Client) delete_kv(key string) bool {
+    mut reusable := false
+    << c.delete_kv_at(-1, key, mut &reusable)
+}
+
+fn (c &mut Client) delete_kv_at(fd int, key string, reusable &mut bool) bool {
+    mut k := key
+    if k.len > 0 && (k[0] & 255) == 47 {
+        k = k[1:k.len]
+    }
+    resp := c.request_at(fd, "DELETE", "/v1/kv/" + k, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}

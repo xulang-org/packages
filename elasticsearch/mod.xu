@@ -1,0 +1,20 @@
+@"github.com/xulang-org/packages/elasticsearch"
+
+#errors
+
+// Elasticsearch / OpenSearch driver package for Xu.
+//
+// Features:
+// - Compatible with Elasticsearch 7.x/8.x and OpenSearch 1.x/2.x.
+// - Pure HTTP REST communication via Xu standard library.
+// - Full index lifecycle: create, delete, check exists, refresh.
+// - Full document CRUD: index, get, update, delete.
+// - Search Query DSL support with total hit count tracking.
+
+pub fn open(endpoint string) Client {
+    << new_client(endpoint)
+}
+
+pub fn open_pool(endpoint string, max_idle int) Pool {
+    << new_pool(endpoint, max_idle)
+}

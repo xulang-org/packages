@@ -1,0 +1,125 @@
+@"github.com/xulang-org/packages/grpc"
+
+#strings
+#errors
+
+pub const h2_client_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+
+// HTTP/2 Frame Types
+pub const frame_data = 0
+pub const frame_headers = 1
+pub const frame_priority = 2
+pub const frame_rst_stream = 3
+pub const frame_settings = 4
+pub const frame_push_promise = 5
+pub const frame_ping = 6
+pub const frame_goaway = 7
+pub const frame_window_update = 8
+pub const frame_continuation = 9
+
+// HTTP/2 Flags
+pub const flag_ack = 1
+pub const flag_end_stream = 1
+pub const flag_end_headers = 4
+pub const flag_padded = 8
+pub const flag_priority = 32
+
+pub struct H2Frame {
+    pub length int
+    pub frame_type int
+    pub flags int
+    pub stream_id int
+    pub payload string
+}
+
+pub fn encode_h2_header(len int, frame_type int, flags int, stream_id int) string {
+    b0 := string_from_byte((len >> 16) & 255)
+    b1 := string_from_byte((len >> 8) & 255)
+    b2 := string_from_byte(len & 255)
+    b3 := string_from_byte(frame_type & 255)
+    b4 := string_from_byte(flags & 255)
+    s0 := string_from_byte((stream_id >> 24) & 127) // 31-bit stream id
+    s1 := string_from_byte((stream_id >> 16) & 255)
+    s2 := string_from_byte((stream_id >> 8) & 255)
+    s3 := string_from_byte(stream_id & 255)
+    << b0 + b1 + b2 + b3 + b4 + s0 + s1 + s2 + s3
+}
+
+pub fn build_settings_frame(ack bool) string {
+    mut flags := 0
+    if ack {
+        flags = flag_ack
+    }
+    mut body := ""
+    if !ack {
+        // HEADER_TABLE_SIZE=0 and ENABLE_PUSH=0. Independent unary calls do
+        // not retain HPACK dynamic tables and do not accept pushed streams.
+        body = string_from_byte(0) + string_from_byte(1) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0)
+        body = body + string_from_byte(0) + string_from_byte(2) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0)
+    }
+    hdr := encode_h2_header(body.len, frame_settings, flags, 0)
+    << hdr + body
+}
+
+pub fn build_data_frame(stream_id int, data string, end_stream bool) string {
+    mut flags := 0
+    if end_stream {
+        flags = flag_end_stream
+    }
+    hdr := encode_h2_header(data.len, frame_data, flags, stream_id)
+    << hdr + data
+}
+
+fn encode_hpack_literal(name string, val string) string {
+    // 0x00: Literal Header Field without Indexing - New Name
+    mut out := string_from_byte(0)
+    out = out + encode_hpack_length(name.len) + name
+    out = out + encode_hpack_length(val.len) + val
+    << out
+}
+
+fn encode_hpack_length(n int) string {
+    if n < 127 { << string_from_byte(n) }
+    mut out := string_from_byte(127)
+    mut rest := n - 127
+    while rest >= 128 { out.push_byte((rest & 127) | 128)
+        rest = rest >> 7 }
+    out.push_byte(rest)
+    << out
+}
+
+// Builds HPACK block for gRPC request
+// :method: POST (Index 3 -> 0x83)
+// :scheme: http (Index 6 -> 0x86)
+// :path: path
+// content-type: application/grpc
+// te: trailers
+pub fn build_grpc_hpack_headers(path string) string {
+    << build_grpc_headers_for_host(path, "")
+}
+
+fn build_grpc_headers_for_host(path string, authority string) string {
+    mut block := ""
+    // 1. :method: POST (static table index 3) -> 0x80 | 3 = 0x83
+    block = block + string_from_byte(131)
+    // 2. :scheme: http (static table index 6) -> 0x80 | 6 = 0x86
+    block = block + string_from_byte(134)
+    // 3. :path
+    block = block + encode_hpack_literal(":path", path)
+    if authority.len > 0 { block = block + encode_hpack_literal(":authority", authority) }
+    // 4. content-type: application/grpc
+    block = block + encode_hpack_literal("content-type", "application/grpc")
+    // 5. te: trailers
+    block = block + encode_hpack_literal("te", "trailers")
+    << block
+}
+
+pub fn build_headers_frame(stream_id int, path string, end_stream bool) string {
+    block := build_grpc_hpack_headers(path)
+    mut flags := flag_end_headers
+    if end_stream {
+        flags = flags | flag_end_stream
+    }
+    hdr := encode_h2_header(block.len, frame_headers, flags, stream_id)
+    << hdr + block
+}

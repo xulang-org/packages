@@ -1,0 +1,189 @@
+@"github.com/xulang-org/packages/grpc"
+
+#strings
+#errors
+
+// Protocol Buffers Wire Types
+pub const wire_varint = 0
+pub const wire_fixed64 = 1
+pub const wire_length_delimited = 2
+pub const wire_fixed32 = 5
+
+pub fn encode_varint(val int) string {
+    mut v := val
+    mut out := ""
+    while true {
+        if (v >> 7) == 0 {
+            out = out + string_from_byte(v & 127)
+            <-
+        } else {
+            b := (v & 127) | 128
+            out = out + string_from_byte(b)
+            v = v >> 7
+        }
+    }
+    << out
+}
+
+pub struct VarintResult {
+    pub value int
+    pub bytes_read int
+}
+
+pub fn decode_varint_full(buf &string, pos int) VarintResult {
+    mut res := 0
+    mut shift := 0
+    mut p := pos
+    while p < buf.len {
+        b := buf[p] & 255
+        p = p + 1
+        res = res | ((b & 127) << shift)
+        if (b & 128) == 0 {
+            << VarintResult{
+                value: res,
+                bytes_read: p - pos
+            }
+        }
+        shift = shift + 7
+        if shift >= 64 {
+            <-
+        }
+    }
+    << VarintResult{
+        value: res,
+        bytes_read: p - pos
+    }
+}
+
+pub fn decode_varint(buf &string, pos int) int {
+    r := decode_varint_full(buf, pos)
+    << r.value
+}
+
+pub fn encode_tag(field_num int, wire_type int) string {
+    key := (field_num << 3) | (wire_type & 7)
+    << encode_varint(key)
+}
+
+pub fn encode_string_field(field_num int, val string) string {
+    tag := encode_tag(field_num, wire_length_delimited)
+    len_varint := encode_varint(val.len)
+    << tag + len_varint + val
+}
+
+pub fn encode_int_field(field_num int, val int) string {
+    tag := encode_tag(field_num, wire_varint)
+    << tag + encode_varint(val)
+}
+
+// Packages Protobuf payload into a 5-byte prefixed gRPC frame:
+// [1 byte compressed flag] + [4 bytes big-endian length] + [payload]
+pub fn build_grpc_message(payload string) string {
+    b0 := string_from_byte(0) // uncompressed
+    b1 := string_from_byte((payload.len >> 24) & 255)
+    b2 := string_from_byte((payload.len >> 16) & 255)
+    b3 := string_from_byte((payload.len >> 8) & 255)
+    b4 := string_from_byte(payload.len & 255)
+    << b0 + b1 + b2 + b3 + b4 + payload
+}
+
+// Parses gRPC message frame and extracts raw protobuf payload
+pub fn parse_grpc_message(raw string) string {
+    // Compatibility helper: malformed input is empty, never a partial message.
+    << decode_grpc_message(raw) or (err) { << "" }
+}
+
+pub fn decode_grpc_message(raw string) string {
+    if raw.len < 5 {
+        >> errors.new("grpc: truncated message header")
+    }
+    if (raw[0] & 255) != 0 { >> errors.new("grpc: compressed messages are unsupported") }
+    b1 := raw[1] & 255
+    b2 := raw[2] & 255
+    b3 := raw[3] & 255
+    b4 := raw[4] & 255
+    msg_len := (b1 << 24) | (b2 << 16) | (b3 << 8) | b4
+    if msg_len > 16777216 { >> errors.new("grpc: response message too large") }
+    if raw.len < 5 + msg_len { >> errors.new("grpc: truncated unary message") }
+    if raw.len > 5 + msg_len { >> errors.new("grpc: multiple unary messages or trailing bytes") }
+    << raw[5:raw.len]
+}
+
+pub fn get_string_field(payload string, target_field int) string {
+    mut p := 0
+    while p < payload.len {
+        tag_res := decode_varint_full(&payload, p)
+        if tag_res.bytes_read <= 0 {
+            <-
+        }
+        p = p + tag_res.bytes_read
+        wire_type := tag_res.value & 7
+        field_num := tag_res.value >> 3
+        if wire_type == wire_length_delimited {
+            len_res := decode_varint_full(&payload, p)
+            if len_res.bytes_read <= 0 {
+                <-
+            }
+            p = p + len_res.bytes_read
+            str_len := len_res.value
+            if p + str_len <= payload.len {
+                if field_num == target_field {
+                    part := payload[p:(p + str_len)]
+                    << part
+                }
+                p = p + str_len
+            } else {
+                <-
+            }
+        } else if wire_type == wire_varint {
+            v_res := decode_varint_full(&payload, p)
+            if v_res.bytes_read <= 0 {
+                <-
+            }
+            p = p + v_res.bytes_read
+        } else if wire_type == wire_fixed32 {
+            p = p + 4
+        } else if wire_type == wire_fixed64 {
+            p = p + 8
+        } else {
+            <-
+        }
+    }
+    << ""
+}
+
+pub fn get_int_field(payload string, target_field int) int {
+    mut p := 0
+    while p < payload.len {
+        tag_res := decode_varint_full(&payload, p)
+        if tag_res.bytes_read <= 0 {
+            <-
+        }
+        p = p + tag_res.bytes_read
+        wire_type := tag_res.value & 7
+        field_num := tag_res.value >> 3
+        if wire_type == wire_varint {
+            v_res := decode_varint_full(&payload, p)
+            if v_res.bytes_read <= 0 {
+                <-
+            }
+            p = p + v_res.bytes_read
+            if field_num == target_field {
+                << v_res.value
+            }
+        } else if wire_type == wire_length_delimited {
+            len_res := decode_varint_full(&payload, p)
+            if len_res.bytes_read <= 0 {
+                <-
+            }
+            p = p + len_res.bytes_read + len_res.value
+        } else if wire_type == wire_fixed32 {
+            p = p + 4
+        } else if wire_type == wire_fixed64 {
+            p = p + 8
+        } else {
+            <-
+        }
+    }
+    << 0
+}

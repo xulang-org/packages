@@ -1,0 +1,167 @@
+@"github.com/xulang-org/packages/mongodb"
+
+#net
+#errors
+#strings
+
+pub struct Client {
+    pub fd int
+    pub addr string
+    pub next_req_id int
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn (c &mut Client) write_exact(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(c.fd, &part) or (err) {
+            >> errors.new("mongodb: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("mongodb: socket closed")
+        }
+        off = off + n
+    }
+    << 0
+}
+
+pub fn (c &mut Client) read_exact(n int) string {
+    mut res := ""
+    while res.len < n {
+        chunk := net.conn_read(c.fd, n - res.len) or (err) {
+            >> errors.new("mongodb: read failed: " + err.msg())
+        }
+        if chunk.len == 0 {
+            >> errors.new("mongodb: socket closed")
+        }
+        res = res + chunk
+    }
+    << res
+}
+
+pub fn (c &mut Client) run_command(db_name string, cmd_elements string) string {
+    mut elems := cmd_elements
+    elems = elems + bson_string("$$db", db_name)
+    doc := build_doc(elems)
+
+    req_id := c.next_req_id
+    c.next_req_id = c.next_req_id + 1
+
+    wire_pkt := encode_op_msg(req_id, doc)
+    c.write_exact(wire_pkt) or >>
+
+    // Read response header (16 bytes)
+    hdr := c.read_exact(16) or >>
+    msg_len := decode_i32(&hdr, 0)
+    if msg_len < 26 || msg_len > 16777216 {
+        >> errors.new("mongodb: invalid message length in response header")
+    }
+    if decode_i32(&hdr, 8) != req_id {
+        >> errors.new("mongodb: responseTo does not match request")
+    }
+    opcode := decode_i32(&hdr, 12)
+    if opcode != 2013 {
+        >> errors.new("mongodb: unexpected opcode in response: " + str(opcode))
+    }
+
+    // Read rest of message
+    rest := c.read_exact(msg_len - 16) or >>
+    full_resp := hdr + rest
+
+    res_doc := decode_op_msg_doc(full_resp) or >>
+    if !is_bson_ok(res_doc + "") {
+        errmsg := find_bson_string(res_doc + "", "errmsg")
+        if errmsg.len > 0 {
+            >> errors.new("mongodb: command error: " + errmsg)
+        }
+        >> errors.new("mongodb: command returned not ok")
+    }
+    errors_field := bson_field(&res_doc, "writeErrors")
+    if errors_field.typ >= 0 && errors_field.typ != 4 { >> errors.new("mongodb: malformed writeErrors") }
+    write_errors := find_bson_document(res_doc + "", "writeErrors")
+    if write_errors.len > 5 {
+        first := find_bson_document(write_errors, "0")
+        errmsg := find_bson_string(first, "errmsg")
+        >> errors.new("mongodb: write error: " + errmsg)
+    }
+    concern_field := bson_field(&res_doc, "writeConcernError")
+    if concern_field.typ >= 0 && concern_field.typ != 3 { >> errors.new("mongodb: malformed writeConcernError") }
+    concern := find_bson_document(res_doc + "", "writeConcernError")
+    if concern.len > 0 {
+        errmsg := find_bson_string(concern, "errmsg")
+        >> errors.new("mongodb: write concern error: " + errmsg)
+    }
+    << res_doc
+}
+
+pub fn connect(addr string) Client {
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("mongodb: dial failed: " + err.msg())
+    }
+    mut c := Client{
+        fd: fd,
+        addr: addr,
+        next_req_id: 1
+    }
+    // Handshake: hello
+    if !c.hello() {
+        safe_close(fd)
+        >> errors.new("mongodb: hello handshake failed")
+    }
+    << c
+}
+
+pub fn (c &mut Client) hello() bool {
+    elems := bson_int32("hello", 1)
+    doc := c.run_command("admin", elems) or (err) {
+        << false
+    }
+    << is_bson_ok(doc)
+}
+
+pub fn (c &mut Client) insert_one(db_name string, col_name string, doc_bytes string) int {
+    mut target_doc := doc_bytes
+    // Check if doc_bytes is already a full document (len >= 5 and decode_i32 == len)
+    if target_doc.len < 5 || decode_i32(&target_doc, 0) != target_doc.len {
+        target_doc = build_doc(target_doc)
+    }
+    mut elems := bson_string("insert", col_name)
+    arr_elem := bson_doc("0", target_doc)
+    arr := build_doc(arr_elem)
+    elems = elems + bson_array("documents", arr)
+    c.run_command(db_name, elems) or >>
+    << 0
+}
+
+pub fn (c &mut Client) find_first_string(db_name string, col_name string, target_field string) string {
+    mut elems := bson_string("find", col_name)
+    elems = elems + bson_int32("limit", 1)
+    res_doc := c.run_command(db_name, elems) or >>
+    cursor := find_bson_document(res_doc, "cursor")
+    batch := find_bson_document(cursor, "firstBatch")
+    first := find_bson_document(batch, "0")
+    << find_bson_string(first, target_field)
+}
+
+pub fn (c &mut Client) drop_collection(db_name string, col_name string) bool {
+    elems := bson_string("drop", col_name)
+    c.run_command(db_name, elems) or (err) {
+        << false
+    }
+    << true
+}
+
+pub fn (c &mut Client) close() {
+    if c.fd >= 0 {
+        safe_close(c.fd)
+        c.fd = -1
+    }
+}

@@ -1,0 +1,4 @@
+@"github.com/xulang-org/packages/neo4j"
+
+// Neo4j Graph Database Native Client for Xu
+// Communicates directly with Neo4j via HTTP Cypher Transactional API.

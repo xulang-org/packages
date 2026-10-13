@@ -1,0 +1,44 @@
+@"github.com/xulang-org/packages/qdrant"
+
+#errors
+
+pub fn (c &mut Client) create_collection(name string, vector_size int, distance string) bool {
+    mut reusable := false
+    << c.create_collection_at(-1, name, vector_size, distance, mut &reusable)
+}
+
+fn (c &mut Client) create_collection_at(fd int, name string, vector_size int, distance string, reusable &mut bool) bool {
+    mut dist := distance
+    if dist.len == 0 {
+        dist = "Cosine"
+    }
+    body := "{\"vectors\":{\"size\":" + str(vector_size) + ",\"distance\":\"" + dist + "\"}}"
+    resp := c.request_at(fd, "PUT", "/collections/" + name, body, reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) collection_exists(name string) bool {
+    mut reusable := false
+    << c.collection_exists_at(-1, name, mut &reusable)
+}
+
+fn (c &mut Client) collection_exists_at(fd int, name string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "GET", "/collections/" + name, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) delete_collection(name string) bool {
+    mut reusable := false
+    << c.delete_collection_at(-1, name, mut &reusable)
+}
+
+fn (c &mut Client) delete_collection_at(fd int, name string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "DELETE", "/collections/" + name, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}

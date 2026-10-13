@@ -1,0 +1,19 @@
+@"github.com/xulang-org/packages/influxdb"
+
+// InfluxDB v2 Time-Series Database Driver for Xu
+//
+// Features:
+// - Native HTTP/1.1 REST communication via Xu standard library.
+// - Full support for InfluxDB Line Protocol point creation and batch writing.
+// - Flux script query support with annotated CSV output.
+// - Server health check & ping endpoints.
+// - Reusable HTTP connections with shared borrow/return and close state.
+// - Full compatibility with InfluxDB 2.x+.
+
+pub fn open(endpoint string, token string, org string, bucket string) Client {
+    << new_client(endpoint, token, org, bucket)
+}
+
+pub fn open_pool_client(endpoint string, token string, org string, bucket string, max_idle int) Pool {
+    << new_pool(endpoint, token, org, bucket, max_idle)
+}

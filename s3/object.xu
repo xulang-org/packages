@@ -1,0 +1,78 @@
+@"github.com/xulang-org/packages/s3"
+
+#errors
+
+pub fn (c &mut Client) put_object(bucket string, key string, data string, content_type string) int {
+    mut reusable := false
+    << c.put_object_at(-1, bucket, key, data, content_type, mut &reusable) or >>
+}
+
+fn (c &mut Client) put_object_at(fd int, bucket string, key string, data string, content_type string, reusable &mut bool) int {
+    mut k := key
+    if k.len > 0 && (k[0] & 255) == 47 {
+        k = k[1:k.len]
+    }
+    path := "/" + bucket + "/" + k
+    mut ct := content_type
+    if ct.len == 0 {
+        ct = "application/octet-stream"
+    }
+    resp := c.request_at(fd, "PUT", path, data, ct, reusable) or >>
+    if resp.status_code != 200 && resp.status_code != 204 {
+        >> errors.new("s3: put_object failed with status " + str(resp.status_code) + ": " + resp.body)
+    }
+    << 0
+}
+
+pub fn (c &mut Client) get_object(bucket string, key string) string {
+    mut reusable := false
+    << c.get_object_at(-1, bucket, key, mut &reusable) or >>
+}
+
+fn (c &mut Client) get_object_at(fd int, bucket string, key string, reusable &mut bool) string {
+    mut k := key
+    if k.len > 0 && (k[0] & 255) == 47 {
+        k = k[1:k.len]
+    }
+    path := "/" + bucket + "/" + k
+    resp := c.request_at(fd, "GET", path, "", "", reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("s3: get_object failed with status " + str(resp.status_code) + ": " + resp.body)
+    }
+    << resp.body
+}
+
+pub fn (c &mut Client) remove_object(bucket string, key string) int {
+    mut reusable := false
+    << c.remove_object_at(-1, bucket, key, mut &reusable) or >>
+}
+
+fn (c &mut Client) remove_object_at(fd int, bucket string, key string, reusable &mut bool) int {
+    mut k := key
+    if k.len > 0 && (k[0] & 255) == 47 {
+        k = k[1:k.len]
+    }
+    path := "/" + bucket + "/" + k
+    resp := c.request_at(fd, "DELETE", path, "", "", reusable) or >>
+    if resp.status_code != 200 && resp.status_code != 204 {
+        >> errors.new("s3: remove_object failed with status " + str(resp.status_code) + ": " + resp.body)
+    }
+    << 0
+}
+
+pub fn (c &mut Client) object_exists(bucket string, key string) bool {
+    mut reusable := false
+    << c.object_exists_at(-1, bucket, key, mut &reusable)
+}
+
+fn (c &mut Client) object_exists_at(fd int, bucket string, key string, reusable &mut bool) bool {
+    mut k := key
+    if k.len > 0 && (k[0] & 255) == 47 {
+        k = k[1:k.len]
+    }
+    path := "/" + bucket + "/" + k
+    resp := c.request_at(fd, "HEAD", path, "", "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}

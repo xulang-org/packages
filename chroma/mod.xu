@@ -1,0 +1,4 @@
+@"github.com/xulang-org/packages/chroma"
+
+// Chroma AI Vector Database Client for Xu
+// Supports collection management, document and vector embedding storage, and similarity search.

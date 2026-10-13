@@ -1,0 +1,245 @@
+@"github.com/xulang-org/packages/memcached"
+
+#errors
+#strings
+
+fn split_space_tokens(s &string) []string {
+    mut tokens := []string{}
+    mut cur := ""
+    mut i := 0
+    while i < s.len {
+        c := s[i] & 255
+        if c == 32 || c == 9 {
+            if cur.len > 0 {
+                tokens.push(cur)
+                cur = ""
+            }
+        } else {
+            cur.push_byte(c)
+        }
+        i = i + 1
+    }
+    if cur.len > 0 {
+        tokens.push(cur)
+    }
+    << tokens
+}
+
+fn parse_int_or(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+fn validate_key(key &string) bool {
+    if key.len == 0 || key.len > 250 {
+        >> errors.new("memcached: invalid key length (must be 1-250 bytes)")
+    }
+    mut i := 0
+    while i < key.len {
+        c := key[i] & 255
+        if c <= 32 || c == 127 {
+            >> errors.new("memcached: key contains invalid character (space, newline or control char)")
+        }
+        i = i + 1
+    }
+    << true
+}
+
+fn check_error_line(line &string) bool {
+    if *line == "ERROR" {
+        >> errors.new("memcached: server error")
+    }
+    prefix_c := "CLIENT_ERROR "
+    if line.len >= prefix_c.len && line[0:prefix_c.len] == prefix_c {
+        >> errors.new(*line)
+    }
+    prefix_s := "SERVER_ERROR "
+    if line.len >= prefix_s.len && line[0:prefix_s.len] == prefix_s {
+        >> errors.new(*line)
+    }
+    << true
+}
+
+// ---- Storage Commands ----
+
+fn (c &mut Client) store(cmd string, key string, val string, flags int, exptime int) bool {
+    validate_key(&key) or >>
+    wire := cmd + " " + key + " " + str(flags) + " " + str(exptime) + " " + str(val.len) + "\r\n" + val + "\r\n"
+    c.write_raw(wire) or >>
+    line := c.read_line() or >>
+    check_error_line(&line) or >>
+    << line == "STORED"
+}
+
+pub fn (c &mut Client) set(key string, val string, flags int, exptime int) bool {
+    << c.store("set", key, val, flags, exptime) or >>
+}
+
+pub fn (c &mut Client) add(key string, val string, flags int, exptime int) bool {
+    << c.store("add", key, val, flags, exptime) or >>
+}
+
+pub fn (c &mut Client) replace(key string, val string, flags int, exptime int) bool {
+    << c.store("replace", key, val, flags, exptime) or >>
+}
+
+pub fn (c &mut Client) append(key string, val string) bool {
+    validate_key(&key) or >>
+    wire := "append " + key + " 0 0 " + str(val.len) + "\r\n" + val + "\r\n"
+    c.write_raw(wire) or >>
+    line := c.read_line() or >>
+    check_error_line(&line) or >>
+    << line == "STORED"
+}
+
+pub fn (c &mut Client) prepend(key string, val string) bool {
+    validate_key(&key) or >>
+    wire := "prepend " + key + " 0 0 " + str(val.len) + "\r\n" + val + "\r\n"
+    c.write_raw(wire) or >>
+    line := c.read_line() or >>
+    check_error_line(&line) or >>
+    << line == "STORED"
+}
+
+// ---- Retrieval Commands ----
+
+pub fn (c &mut Client) get(key string) string {
+    validate_key(&key) or >>
+    wire := "get " + key + "\r\n"
+    c.write_raw(wire) or >>
+    mut result := ""
+    mut found := false
+    while true {
+        line := c.read_line() or >>
+        check_error_line(&line) or >>
+        if line == "END" {
+            <-
+        }
+        tokens := split_space_tokens(&line)
+        if tokens.len >= 4 && tokens[0] == "VALUE" {
+            bytes_count := parse_int_or(tokens[3], 0)
+            data := c.read_bytes(bytes_count) or >>
+            _ := c.read_bytes(2) or >> // read trailing \r\n
+            if tokens[1] == key {
+                result = data
+                found = true
+            }
+        }
+    }
+    if !found {
+        >> errors.new("memcached: key not found: " + key)
+    }
+    << result
+}
+
+pub fn (c &mut Client) get_multi(keys []string) []string {
+    if keys.len == 0 {
+        << []string{}
+    }
+    mut cmd := "get"
+    mut k := 0
+    while k < keys.len {
+        validate_key(&keys[k]) or >>
+        cmd = cmd + " " + keys[k]
+        k = k + 1
+    }
+    cmd = cmd + "\r\n"
+    c.write_raw(cmd) or >>
+
+    mut results := []string{}
+    while true {
+        line := c.read_line() or >>
+        check_error_line(&line) or >>
+        if line == "END" {
+            <-
+        }
+        tokens := split_space_tokens(&line)
+        if tokens.len >= 4 && tokens[0] == "VALUE" {
+            bytes_count := parse_int_or(tokens[3], 0)
+            data := c.read_bytes(bytes_count) or >>
+            _ := c.read_bytes(2) or >>
+            results.push(data)
+        }
+    }
+    << results
+}
+
+// ---- Deletion & Arithmetic ----
+
+pub fn (c &mut Client) delete(key string) bool {
+    validate_key(&key) or >>
+    wire := "delete " + key + "\r\n"
+    c.write_raw(wire) or >>
+    line := c.read_line() or >>
+    check_error_line(&line) or >>
+    << line == "DELETED"
+}
+
+pub fn (c &mut Client) incr(key string, delta int) int {
+    validate_key(&key) or >>
+    wire := "incr " + key + " " + str(delta) + "\r\n"
+    c.write_raw(wire) or >>
+    line := c.read_line() or >>
+    check_error_line(&line) or >>
+    if line == "NOT_FOUND" {
+        >> errors.new("memcached: key not found for incr: " + key)
+    }
+    << parse_int(line) or >>
+}
+
+pub fn (c &mut Client) decr(key string, delta int) int {
+    validate_key(&key) or >>
+    wire := "decr " + key + " " + str(delta) + "\r\n"
+    c.write_raw(wire) or >>
+    line := c.read_line() or >>
+    check_error_line(&line) or >>
+    if line == "NOT_FOUND" {
+        >> errors.new("memcached: key not found for decr: " + key)
+    }
+    << parse_int(line) or >>
+}
+
+pub fn (c &mut Client) touch(key string, exptime int) bool {
+    validate_key(&key) or >>
+    wire := "touch " + key + " " + str(exptime) + "\r\n"
+    c.write_raw(wire) or >>
+    line := c.read_line() or >>
+    check_error_line(&line) or >>
+    << line == "TOUCHED"
+}
+
+// ---- Admin & Stats ----
+
+pub fn (c &mut Client) version() string {
+    c.write_raw("version\r\n") or >>
+    line := c.read_line() or >>
+    prefix := "VERSION "
+    if line.len >= prefix.len && line[0:prefix.len] == prefix {
+        << line[prefix.len:line.len]
+    }
+    << line
+}
+
+pub fn (c &mut Client) flush_all() bool {
+    c.write_raw("flush_all\r\n") or >>
+    line := c.read_line() or >>
+    << line == "OK"
+}
+
+pub fn (c &mut Client) stats() []string {
+    c.write_raw("stats\r\n") or >>
+    mut lines := []string{}
+    while true {
+        line := c.read_line() or >>
+        if line == "END" {
+            <-
+        }
+        lines.push(line)
+    }
+    << lines
+}

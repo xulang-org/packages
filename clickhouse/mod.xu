@@ -1,0 +1,17 @@
+@"github.com/xulang-org/packages/clickhouse"
+
+// ClickHouse High-Performance Analytical Database (OLAP) Driver for Xu
+//
+// Features:
+// - Native HTTP/1.1 REST communication via Xu standard library.
+// - SQL query execution with high-throughput batch insert.
+// - Connection pooling via reusable TCP socket channels.
+// - Full compatibility with ClickHouse 22.x/23.x/24.x+.
+
+pub fn open(endpoint string, user string, password string, database string) Client {
+    << new_client(endpoint, user, password, database)
+}
+
+pub fn open_pool(endpoint string, user string, password string, database string, max_idle int) Pool {
+    << new_pool(endpoint, user, password, database, max_idle)
+}

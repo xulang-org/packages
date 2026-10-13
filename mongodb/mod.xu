@@ -1,0 +1,18 @@
+@"github.com/xulang-org/packages/mongodb"
+
+// MongoDB Document Database Native Driver for Xu
+//
+// Features:
+// - Pure native MongoDB Wire Protocol (OP_MSG opcode 2012) implementation.
+// - Lightweight BSON encoding and decoding without external dependencies.
+// - Full session handshake (hello).
+// - Document CRUD: insert_one, find, drop_collection, run_command.
+// - Connection pooling via reusable TCP socket channels.
+
+pub fn open(addr string) Client {
+    << connect(addr) or >>
+}
+
+pub fn open_pool(addr string, max_idle int) Pool {
+    << new_pool(addr, max_idle)
+}

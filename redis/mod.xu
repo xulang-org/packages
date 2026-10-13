@@ -1,0 +1,39 @@
+@"github.com/xulang-org/packages/redis"
+
+#errors
+
+// Redis standalone client package for Xu.
+//
+// Features:
+// - Full RESP2 / RESP3 protocol support.
+// - High-performance socket line & bulk byte buffering.
+// - Easy-to-use API for strings, hashes, lists, sets, sorted sets, and batch operations.
+// - Pipelining for high-throughput batch operations.
+// - Connection pooling support via channels.
+// - Full URL format parsing (redis://:password@host:port/db).
+
+pub fn open(addr string) Client {
+    << dial(addr) or >>
+}
+
+pub fn open_auth(addr string, password string) Client {
+    mut c := dial(addr) or >>
+    c.auth(password) or >>
+    << c
+}
+
+pub fn open_url(raw string) Client {
+    opt := parse_url(raw)
+    mut c := dial(opt.addr) or >>
+    if opt.password.len > 0 {
+        c.auth(opt.password) or >>
+    }
+    if opt.db > 0 {
+        c.select_db(opt.db) or >>
+    }
+    << c
+}
+
+pub fn dial_url(raw string) Client {
+    << open_url(raw) or >>
+}

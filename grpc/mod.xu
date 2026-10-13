@@ -1,0 +1,4 @@
+@"github.com/xulang-org/packages/grpc"
+
+// gRPC & HTTP/2 High-Performance RPC Driver for Xu
+// Implements HTTP/2 frame framing, HPACK headers, Protobuf serialization, and Unary RPC connection pooling.

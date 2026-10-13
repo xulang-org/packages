@@ -1,0 +1,227 @@
+@"github.com/xulang-org/packages/milvus"
+
+#net
+#net/http
+#strings
+#errors
+#encoding/json
+#strconv
+
+pub struct MilvusClient {
+    pub host string
+    pub port int
+    pub token string
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+fn write_all(fd int, data string) bool {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("milvus write error: " + err.msg())
+        }
+        if n <= 0 { >> errors.new("milvus: connection closed during write") }
+        off = off + n
+    }
+    << true
+}
+
+fn parse_int_def(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+pub fn new_client(endpoint string) MilvusClient {
+    mut ep := endpoint
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+
+    mut host := "127.0.0.1"
+    mut port := 19530
+    colon := strings.index_of(&ep, ":")
+    if colon >= 0 {
+        host = ep[0:colon]
+        port_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(port_str, 19530)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+
+    << MilvusClient{
+        host: host,
+        port: port,
+        token: ""
+    }
+}
+
+pub fn (c MilvusClient) connect() int {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("milvus dial failed: " + err.msg())
+    }
+    << fd
+}
+
+// Executes HTTP/1.1 REST v2 request on an established socket
+pub fn (c MilvusClient) do_request_on_fd(fd int, method string, path string, body string) string {
+    mut reusable := false
+    << c.request_on_fd(fd, method, path, body, mut &reusable) or >>
+}
+
+fn (c MilvusClient) request_on_fd(fd int, method string, path string, body string, reusable &mut bool) string {
+    mut req := method + " " + path + " HTTP/1.1\r\n"
+    req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+    req = req + "Content-Type: application/json\r\n"
+    if c.token.len > 0 {
+        req = req + "Authorization: Bearer " + c.token + "\r\n"
+    }
+    req = req + "Content-Length: " + str(body.len) + "\r\n"
+    req = req + "Connection: keep-alive\r\n\r\n"
+    req = req + body
+
+    write_all(fd, req) or >>
+
+    resp := http.read_response(fd, method + "") or >>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body)
+    }
+    *reusable = resp.reusable(method)
+    << resp.body
+
+}
+
+pub fn (c MilvusClient) do_request(method string, path string, body string) string {
+    fd := c.connect() or >>
+    res := c.do_request_on_fd(fd, method, path, body) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    safe_close(fd)
+    << res
+}
+
+fn (c MilvusClient) request_at(fd int, method string, path string, body string, reusable &mut bool) string {
+    if fd < 0 { << c.do_request(method, path, body) or >> }
+    << c.request_on_fd(fd, method, path, body, reusable) or >>
+}
+
+pub fn (c MilvusClient) create_collection(cfg CollectionConfig) bool {
+    mut reusable := false
+    << c.create_collection_at(-1, cfg, mut &reusable) or >>
+}
+
+fn (c MilvusClient) create_collection_at(fd int, cfg CollectionConfig, reusable &mut bool) bool {
+    mut m_type := cfg.metric_type
+    if m_type.len == 0 {
+        m_type = "COSINE"
+    }
+    body := "{\"collectionName\":\"" + cfg.name + "\",\"dimension\":" + str(cfg.dimension) + ",\"metricType\":\"" + m_type + "\"}"
+    resp := c.request_at(fd, "POST", "/v2/vectordb/collections/create", body, reusable) or >>
+    // Status 0 indicates success in Milvus REST v2
+    << strings.index_of(&resp, "\"code\":0") >= 0 || strings.index_of(&resp, "{}") >= 0
+}
+
+pub fn (c MilvusClient) drop_collection(name string) bool {
+    mut reusable := false
+    << c.drop_collection_at(-1, name, mut &reusable) or >>
+}
+
+fn (c MilvusClient) drop_collection_at(fd int, name string, reusable &mut bool) bool {
+    body := "{\"collectionName\":\"" + name + "\"}"
+    resp := c.request_at(fd, "POST", "/v2/vectordb/collections/drop", body, reusable) or >>
+    << strings.index_of(&resp, "\"code\":0") >= 0 || strings.index_of(&resp, "{}") >= 0
+}
+
+pub fn (c MilvusClient) insert(collection string, entities []VectorEntity) bool {
+    mut reusable := false
+    << c.insert_at(-1, collection, entities, mut &reusable) or >>
+}
+
+fn (c MilvusClient) insert_at(fd int, collection string, entities []VectorEntity, reusable &mut bool) bool {
+    mut data_json := "["
+    mut i := 0
+    while i < entities.len {
+        e := &entities[i]
+        if i > 0 {
+            data_json = data_json + ","
+        }
+        data_json = data_json + "{\"id\":" + str(e.id) + ",\"text\":\"" + e.text + "\",\"vector\":["
+        mut j := 0
+        while j < e.vector.len {
+            if j > 0 {
+                data_json = data_json + ","
+            }
+            v_val := e.vector[j] + ""
+            data_json = data_json + v_val
+            j = j + 1
+        }
+        data_json = data_json + "]}"
+        i = i + 1
+    }
+    data_json = data_json + "]"
+
+    body := "{\"collectionName\":\"" + collection + "\",\"data\":" + data_json + "}"
+    resp := c.request_at(fd, "POST", "/v2/vectordb/entities/insert", body, reusable) or >>
+    << strings.index_of(&resp, "\"insertCount\"") >= 0 || strings.index_of(&resp, "\"code\":0") >= 0
+}
+
+pub fn (c MilvusClient) search(collection string, query_vec []string, limit int) SearchResult {
+    mut reusable := false
+    << c.search_at(-1, collection, query_vec, limit, mut &reusable) or >>
+}
+
+fn (c MilvusClient) search_at(fd int, collection string, query_vec []string, limit int, reusable &mut bool) SearchResult {
+    mut vec_str := "["
+    mut i := 0
+    while i < query_vec.len {
+        if i > 0 {
+            vec_str = vec_str + ","
+        }
+        vec_str = vec_str + query_vec[i]
+        i = i + 1
+    }
+    vec_str = vec_str + "]"
+
+    body := "{\"collectionName\":\"" + collection + "\",\"data\":[" + vec_str + "],\"limit\":" + str(limit) + ",\"outputFields\":[\"id\",\"text\"]}"
+    resp := c.request_at(fd, "POST", "/v2/vectordb/entities/search", body, reusable) or >>
+
+    d := json.parse(&resp)
+    if !d.ok() { >> errors.new("milvus: invalid JSON: " + d.error()) }
+    code := d.get(d.root(), "code")
+    if code < 0 || !d.is_number(code) || d.text(code) != "0" { >> errors.new("milvus: service error: " + resp) }
+    data := d.get(d.root(), "data")
+    if data < 0 || !d.is_list(data) { >> errors.new("milvus: missing search data") }
+    mut hits := []SearchHit{}
+    for i in 0:d.count(data) {
+        hit := d.at(data, i)
+        if !d.is_dict(hit) { >> errors.new("milvus: invalid search hit") }
+        id := d.get(hit, "id")
+        distance := d.get(hit, "distance")
+        text := d.get(hit, "text")
+        if id < 0 || !d.is_number(id) { >> errors.new("milvus: this API requires integer ids") }
+        if distance < 0 || !d.is_number(distance) { >> errors.new("milvus: missing hit distance") }
+        id_text := d.text(id)
+        hid := strconv.atoi(&id_text) or >>
+        mut content := ""
+        if text >= 0 && !d.is_null(text) { content = d.as_string(text) or >> }
+        hits.push(SearchHit{id: hid, distance: d.text(distance), text: content})
+    }
+    << SearchResult{hits: hits}
+}

@@ -1,0 +1,199 @@
+@"github.com/xulang-org/packages/clickhouse"
+
+#net
+#net/http
+#errors
+#strings
+
+pub struct Response {
+    pub status_code int
+    pub body string
+}
+
+pub struct Client {
+    pub host string
+    pub port int
+    pub user string
+    pub password string
+    pub database string
+}
+
+fn parse_int_def(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+fn parse_endpoint(raw string) []string {
+    mut ep := raw
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+    mut host := "127.0.0.1"
+    mut port := 8123
+    mut colon := -1
+    mut i := 0
+    while i < ep.len {
+        if (ep[i] & 255) == 58 {
+            colon = i
+            <-
+        }
+        i = i + 1
+    }
+    if colon >= 0 {
+        host = ep[0:colon]
+        p_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(p_str, 8123)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+    << [host, str(port)]
+}
+
+pub fn new_client(endpoint string, user string, password string, database string) Client {
+    ep_parts := parse_endpoint(endpoint)
+    host := ep_parts[0]
+    port := parse_int_def(ep_parts[1], 8123)
+    mut u := user
+    if u.len == 0 {
+        u = "default"
+    }
+    mut db := database
+    if db.len == 0 {
+        db = "default"
+    }
+    << Client{
+        host: host,
+        port: port,
+        user: u,
+        password: password,
+        database: db
+    }
+}
+
+fn copy_row(src &[]string) []string {
+    mut out := []string{}
+    mut i := 0
+    while i < src.len {
+        out.push(src[i] + "")
+        i = i + 1
+    }
+    << out
+}
+
+pub fn parse_tsv(raw string) [][]string {
+    mut rows := [][]string{}
+    mut cur_row := []string{}
+    mut cur_cell := ""
+    mut i := 0
+    while i < raw.len {
+        c := raw[i] & 255
+        if c == 9 {
+            cur_row.push(cur_cell + "")
+            cur_cell = ""
+        } else if c == 10 {
+            if cur_cell.len > 0 && (cur_cell[cur_cell.len - 1] & 255) == 13 {
+                cur_cell = cur_cell[0:(cur_cell.len - 1)]
+            }
+            cur_row.push(cur_cell + "")
+            cur_cell = ""
+            rows.push(copy_row(&cur_row))
+            cur_row = []string{}
+        } else if c == 92 && i + 1 < raw.len {
+            i = i + 1
+            nc := raw[i] & 255
+            if nc == 116 {
+                cur_cell.push_byte(9)
+            } else if nc == 110 {
+                cur_cell.push_byte(10)
+            } else if nc == 92 {
+                cur_cell.push_byte(92)
+            } else if nc == 48 {
+                cur_cell.push_byte(0)
+            } else {
+                cur_cell.push_byte(nc)
+            }
+        } else {
+            cur_cell.push_byte(c)
+        }
+        i = i + 1
+    }
+    if cur_cell.len > 0 || cur_row.len > 0 {
+        if cur_cell.len > 0 && (cur_cell[cur_cell.len - 1] & 255) == 13 {
+            cur_cell = cur_cell[0:(cur_cell.len - 1)]
+        }
+        cur_row.push(cur_cell + "")
+        rows.push(copy_row(&cur_row))
+    }
+    << rows
+}
+
+pub fn (c &mut Client) request(sql_query string) Response {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { >> err }
+    mut reusable := false
+    result := c.request_on_fd(fd, sql_query, mut &reusable) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    safe_close(fd)
+    << result
+}
+
+fn (c &mut Client) request_on_fd(fd int, sql_query string, reusable &mut bool) Response {
+    mut req := "POST / HTTP/1.1\r\n"
+    req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+    if c.user.len > 0 {
+        req = req + "X-ClickHouse-User: " + c.user + "\r\n"
+    }
+    if c.password.len > 0 {
+        req = req + "X-ClickHouse-Key: " + c.password + "\r\n"
+    }
+    if c.database.len > 0 {
+        req = req + "X-ClickHouse-Database: " + c.database + "\r\n"
+    }
+    req = req + "Content-Type: text/plain; charset=utf-8\r\n"
+    req = req + "Content-Length: " + str(sql_query.len) + "\r\n"
+    req = req + "Connection: keep-alive\r\n\r\n"
+    if sql_query.len > 0 {
+        req = req + sql_query
+    }
+
+    mut off := 0
+    while off < req.len {
+        part := req[off:req.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("clickhouse: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("clickhouse: connection closed during write") }
+        off = off + n
+    }
+
+    resp := http.read_response(fd, "POST") or (err) {
+        >> err
+    }
+    *reusable = resp.reusable("POST") && resp.status_code >= 200 && resp.status_code < 300
+    << Response{status_code: resp.status_code, body: resp.body}
+
+}
+
+fn (c &mut Client) request_at(fd int, sql_query string, reusable &mut bool) Response {
+    if fd < 0 { << c.request(sql_query) or >> }
+    << c.request_on_fd(fd, sql_query, reusable) or >>
+}

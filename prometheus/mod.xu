@@ -1,0 +1,9 @@
+@"github.com/xulang-org/packages/prometheus"
+
+#errors
+
+// Public API convenience helpers for Prometheus metrics exporter
+
+pub fn open_pusher(endpoint string, job string) Pusher {
+    << new_pusher(endpoint, job)
+}

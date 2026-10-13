@@ -1,0 +1,88 @@
+@"github.com/xulang-org/packages/redis"
+
+#errors
+
+pub struct RedisURL {
+    pub host string
+    pub port int
+    pub addr string
+    pub password string
+    pub db int
+}
+
+fn find_char(s &string, ch int) int {
+    mut i := 0
+    while i < s.len {
+        if (s[i] & 255) == ch {
+            << i
+        }
+        i = i + 1
+    }
+    << -1
+}
+
+fn parse_int_def(s &string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    v := parse_int(*s) or (err) {
+        << def
+    }
+    << v
+}
+
+pub fn parse_url(raw string) RedisURL {
+    mut rest := raw
+    prefix := "redis://"
+    if rest.len >= prefix.len && rest[0:prefix.len] == prefix {
+        rest = rest[prefix.len:rest.len]
+    }
+
+    mut db := 0
+    slash_idx := find_char(&rest, 47) // '/'
+    if slash_idx >= 0 {
+        db_part := rest[(slash_idx + 1):rest.len]
+        rest = rest[0:slash_idx]
+        if db_part.len > 0 {
+            db = parse_int_def(&db_part, 0)
+        }
+    }
+
+    mut password := ""
+    at_idx := find_char(&rest, 64) // '@'
+    if at_idx >= 0 {
+        auth_part := rest[0:at_idx]
+        rest = rest[(at_idx + 1):rest.len]
+        colon_idx := find_char(&auth_part, 58) // ':'
+        if colon_idx >= 0 {
+            password = auth_part[(colon_idx + 1):auth_part.len]
+        } else {
+            password = auth_part
+        }
+    }
+
+    mut host := "127.0.0.1"
+    mut port := 6379
+    colon_idx := find_char(&rest, 58) // ':'
+    if colon_idx >= 0 {
+        h := rest[0:colon_idx]
+        if h.len > 0 {
+            host = h
+        }
+        p_part := rest[(colon_idx + 1):rest.len]
+        port = parse_int_def(&p_part, 6379)
+    } else {
+        if rest.len > 0 {
+            host = rest
+        }
+    }
+
+    addr := host + ":" + str(port)
+    << RedisURL{
+        host: host,
+        port: port,
+        addr: addr,
+        password: password,
+        db: db
+    }
+}

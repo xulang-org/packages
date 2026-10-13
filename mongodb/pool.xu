@@ -1,0 +1,116 @@
+@"github.com/xulang-org/packages/mongodb"
+
+#net
+#errors
+
+// Connection Pool for MongoDB.
+// Uses channel of socket file descriptors for lightweight and high-throughput pooling.
+pub struct Pool {
+    pub addr string
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn new_pool(addr string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{addr: addr, idle: ch, max_idle: cap_val}
+}
+
+pub fn (p &Pool) get() Client {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << Client{
+                    fd: fd,
+                    addr: p.addr,
+                    next_req_id: 1
+                }
+            }
+        }
+        else {
+            mut c := connect(p.addr + "") or >>
+            << c
+        }
+    }
+    mut c := connect(p.addr + "") or >>
+    << c
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &Pool) put(c Client) {
+    p.put_conn(c.fd)
+}
+
+pub fn (p &Pool) hello() bool {
+    mut c := p.get() or (err) {
+        << false
+    }
+    fd := c.fd
+    ok := c.hello()
+    p.put_conn(fd)
+    << ok
+}
+
+pub fn (p &Pool) insert_one(db_name string, col_name string, doc_bytes string) int {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.insert_one(db_name, col_name, doc_bytes) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) find_first_string(db_name string, col_name string, target_field string) string {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.find_first_string(db_name, col_name, target_field) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) drop_collection(db_name string, col_name string) bool {
+    mut c := p.get() or (err) {
+        << false
+    }
+    fd := c.fd
+    ok := c.drop_collection(db_name, col_name)
+    p.put_conn(fd)
+    << ok
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

@@ -1,0 +1,13 @@
+@"github.com/xulang-org/packages/meilisearch"
+
+pub struct SearchHit {
+    pub id int
+    pub title string
+    pub raw string
+}
+
+pub struct SearchResult {
+    pub query string
+    pub total_hits int
+    pub hits []SearchHit
+}

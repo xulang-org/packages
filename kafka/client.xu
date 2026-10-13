@@ -1,0 +1,150 @@
+@"github.com/xulang-org/packages/kafka"
+
+#net
+#errors
+#strings
+#time
+
+pub struct Client {
+    pub fd int
+    pub broker string
+    pub client_id string
+    pub next_correlation_id int
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn (c &mut Client) write_exact(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(c.fd, &part) or (err) {
+            >> errors.new("kafka: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("kafka: connection closed")
+        }
+        off = off + n
+    }
+    << 0
+}
+
+pub fn (c &mut Client) read_exact(n int) string {
+    mut res := ""
+    while res.len < n {
+        chunk := net.conn_read(c.fd, n - res.len) or (err) {
+            >> errors.new("kafka: read failed: " + err.msg())
+        }
+        if chunk.len == 0 {
+            >> errors.new("kafka: connection closed")
+        }
+        res = res + chunk
+    }
+    << res
+}
+
+pub fn (c &mut Client) round_trip(req_bytes string) string {
+    c.write_exact(req_bytes) or >>
+
+    // Read response length (4 bytes)
+    len_hdr := c.read_exact(4) or >>
+    resp_len := decode_i32(&len_hdr, 0)
+    if resp_len <= 0 || resp_len > 67108864 { // max 64MB
+        >> errors.new("kafka: invalid response length: " + str(resp_len))
+    }
+
+    body := c.read_exact(resp_len) or >>
+    << body
+}
+
+pub fn connect(broker string, client_id string) Client {
+    mut cid := client_id
+    if cid.len == 0 {
+        cid = "xu-kafka-client"
+    }
+    fd := net.dial(strings.clone(&broker)) or (err) {
+        >> errors.new("kafka: dial failed: " + err.msg())
+    }
+    mut c := Client{
+        fd: fd,
+        broker: broker,
+        client_id: cid,
+        next_correlation_id: 1
+    }
+    << c
+}
+
+pub fn (c &mut Client) ping() bool {
+    corr_id := c.next_correlation_id
+    c.next_correlation_id = c.next_correlation_id + 1
+    req := build_apiversions_request(corr_id, c.client_id)
+    resp := c.round_trip(req) or (err) {
+        << false
+    }
+    if resp.len >= 6 {
+        err_code := decode_i16(&resp, 4)
+        << err_code == 0
+    }
+    << false
+}
+
+pub fn (c &mut Client) metadata(topic string) bool {
+    corr_id := c.next_correlation_id
+    c.next_correlation_id = c.next_correlation_id + 1
+    req := build_metadata_request(corr_id, c.client_id, topic)
+    resp := c.round_trip(req) or (err) {
+        << false
+    }
+    << resp.len > 4
+}
+
+pub fn (c &mut Client) produce(topic string, partition int, message string) int {
+    << c.produce_key_value(topic, partition, "", message)
+}
+
+pub fn (c &mut Client) produce_key_value(topic string, partition int, key string, val string) int {
+    c.metadata(topic + "")
+    mut attempts := 0
+    mut last_err := ""
+    while attempts < 10 {
+        attempts = attempts + 1
+        corr_id := c.next_correlation_id
+        c.next_correlation_id = c.next_correlation_id + 1
+
+        req := build_produce_request(corr_id, c.client_id, topic + "", partition, key + "", val + "")
+        resp := c.round_trip(req) or >>
+        offset := parse_produce_response(resp) or (err) {
+            last_err = err.msg()
+            if attempts < 10 {
+                time.sleep(400000000) // 400ms
+                c.metadata(topic + "")
+                <-
+            }
+            >> err
+        }
+        << offset
+    }
+    >> errors.new("kafka: produce failed after retries: " + last_err)
+}
+
+pub fn (c &mut Client) fetch(topic string, partition int, offset int) []string {
+    corr_id := c.next_correlation_id
+    c.next_correlation_id = c.next_correlation_id + 1
+
+    req := build_fetch_request(corr_id, c.client_id, topic, partition, offset)
+    resp := c.round_trip(req) or >>
+    << parse_fetch_response(resp) or >>
+}
+
+pub fn (c &mut Client) close() {
+    if c.fd >= 0 {
+        safe_close(c.fd)
+        c.fd = -1
+    }
+}

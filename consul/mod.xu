@@ -1,0 +1,13 @@
+@"github.com/xulang-org/packages/consul"
+
+#errors
+
+// Public API convenience helpers for Consul driver
+
+pub fn open(endpoint string) Client {
+    << new_client(endpoint, "")
+}
+
+pub fn open_auth(endpoint string, token string) Client {
+    << new_client(endpoint, token)
+}

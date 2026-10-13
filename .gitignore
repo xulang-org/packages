@@ -1,0 +1,24 @@
+# Local development records and generated native libraries
+/docs/
+/reports/
+/notes/
+/tmp/
+/build/
+/bin/
+/PROGRESS.md
+__pycache__/
+.pytest_cache/
+*.pyc
+*.xin
+*.xulib
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example

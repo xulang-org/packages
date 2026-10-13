@@ -1,0 +1,9 @@
+@"github.com/xulang-org/packages/milvus"
+
+pub fn client(endpoint string) MilvusClient {
+    << new_client(endpoint)
+}
+
+pub fn pool(endpoint string, max_conns int) MilvusPool {
+    << open_pool(endpoint, max_conns)
+}

@@ -1,0 +1,86 @@
+@"github.com/xulang-org/packages/dns"
+
+#net
+#errors
+#strings
+
+pub struct DnsPool {
+    pub client DnsClient
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn open_pool(endpoint string, max_idle int) DnsPool {
+    c := new_client(endpoint)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << DnsPool{
+        client: c,
+        idle: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn (p &DnsPool) get_conn() int {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << fd
+            }
+        }
+        else {
+            fd := p.client.connect() or (err) {
+                << -1
+            }
+            << fd
+        }
+    }
+    << -1
+}
+
+pub fn (p &DnsPool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &DnsPool) resolve_a(domain string) []string {
+    fd := p.get_conn()
+    if fd < 0 {
+        >> errors.new("dns pool failed to acquire connection")
+    }
+    ips := p.client.resolve_a_on_fd(fd, domain) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << ips
+}
+
+pub fn (p &DnsPool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                if fd >= 0 {
+                    safe_close(fd)
+                }
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

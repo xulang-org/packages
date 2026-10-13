@@ -1,0 +1,13 @@
+@"github.com/xulang-org/packages/rabbitmq"
+
+#errors
+
+// Public API convenience helpers for RabbitMQ driver
+
+pub fn open(host string, port int, user string, password string, vhost string) Client {
+    << connect(host, port, user, password, vhost)
+}
+
+pub fn open_default() Client {
+    << connect("127.0.0.1", 5672, "guest", "guest", "/")
+}

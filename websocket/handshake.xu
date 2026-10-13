@@ -1,0 +1,88 @@
+@"github.com/xulang-org/packages/websocket"
+
+#crypto/sha1
+#encoding/hex
+#encoding/base64
+#strings
+#errors
+
+pub fn compute_accept_key(sec_key string) string {
+    magic := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+    h := sha1.sum(sec_key + magic)
+    raw := hex.decode_string(h) or (err) {
+        << ""
+    }
+    << base64.encode_to_string(raw)
+}
+
+pub fn build_handshake_request(host string, port int, path string, sec_key string) string {
+    mut p := path
+    if p.len == 0 {
+        p = "/"
+    }
+    mut req := "GET " + p + " HTTP/1.1\r\n"
+    req = req + "Host: " + host + ":" + str(port) + "\r\n"
+    req = req + "Upgrade: websocket\r\n"
+    req = req + "Connection: Upgrade\r\n"
+    req = req + "Sec-WebSocket-Key: " + sec_key + "\r\n"
+    req = req + "Sec-WebSocket-Version: 13\r\n\r\n"
+    << req
+}
+
+pub struct HandshakeResult {
+    pub status_code int
+    pub accept_key string
+}
+
+pub fn parse_handshake_response(resp string) HandshakeResult {
+    mut code := 0
+    mut accept := ""
+
+    // Check status line: e.g. "HTTP/1.1 101 Switching Protocols"
+    sp1 := strings.index_of(&resp, " ")
+    if sp1 >= 0 {
+        after_sp1 := resp[(sp1 + 1):resp.len]
+        sp2 := strings.index_of(&after_sp1, " ")
+        if sp2 > 0 {
+            code_str := after_sp1[0:sp2]
+            p_code := parse_int(code_str) or (err) {
+                code = 0
+                << HandshakeResult{status_code: 0, accept_key: ""}
+            }
+            code = p_code
+        }
+    }
+
+    // Look for Sec-WebSocket-Accept
+    needle := "sec-websocket-accept:"
+    needle_len := needle.len
+    mut lower_resp := ""
+    for i in 0:resp.len {
+        c := resp[i] & 255
+        if c >= 65 && c <= 90 {
+            lower_resp = lower_resp + string_from_byte(c + 32)
+        } else {
+            lower_resp = lower_resp + string_from_byte(c)
+        }
+    }
+
+    idx := strings.index_of(&lower_resp, needle)
+    if idx >= 0 {
+        start := idx + needle_len
+        mut end := start
+        while end < resp.len {
+            c := resp[end] & 255
+            if c == 13 || c == 10 {
+                <-
+            }
+            end = end + 1
+        }
+        raw_val := resp[start:end]
+        accept = strings.trim_space(&raw_val)
+    }
+
+    << HandshakeResult{
+        status_code: code,
+        accept_key: accept
+    }
+}

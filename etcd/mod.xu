@@ -1,0 +1,17 @@
+@"github.com/xulang-org/packages/etcd"
+
+// etcd v3 Cloud-Native Distributed Key-Value & Coordination Driver for Xu
+//
+// Features:
+// - Native HTTP/JSON communication with etcd v3 gRPC-Gateway.
+// - Standard Base64 Key-Value storage (put, get, delete).
+// - Distributed Lease lifecycle (lease_grant, lease_revoke, lease_keepalive).
+// - Connection pooling via reusable TCP socket channels.
+
+pub fn open(endpoint string) Client {
+    << new_client(endpoint)
+}
+
+pub fn open_pool(endpoint string, max_idle int) Pool {
+    << new_pool(endpoint, max_idle)
+}

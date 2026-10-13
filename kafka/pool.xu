@@ -1,0 +1,135 @@
+@"github.com/xulang-org/packages/kafka"
+
+#net
+#errors
+#strings
+
+// Connection Pool for Apache Kafka.
+// Manages reusable TCP socket connections via a scalar channel.
+pub struct Pool {
+    pub broker string
+    pub client_id string
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn new_pool(broker string, client_id string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    mut cid := client_id
+    if cid.len == 0 {
+        cid = "xu-kafka-pool"
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{
+        broker: broker,
+        client_id: cid,
+        idle: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(broker string, client_id string, max_idle int) Pool {
+    << new_pool(broker, client_id, max_idle)
+}
+
+pub fn (p &Pool) get() Client {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << Client{
+                    fd: fd,
+                    broker: p.broker + "",
+                    client_id: p.client_id + "",
+                    next_correlation_id: 1
+                }
+            }
+        }
+        else {
+            mut c := connect(p.broker + "", p.client_id + "") or >>
+            << c
+        }
+    }
+    mut c := connect(p.broker + "", p.client_id + "") or >>
+    << c
+}
+
+pub fn (p &Pool) ping() bool {
+    mut c := p.get() or (err) {
+        << false
+    }
+    fd := c.fd
+    ok := c.ping()
+    p.put_conn(fd)
+    << ok
+}
+
+pub fn (p &Pool) produce(topic string, partition int, message string) int {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.produce(topic, partition, message) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) produce_key_value(topic string, partition int, key string, val string) int {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.produce_key_value(topic, partition, key, val) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) fetch(topic string, partition int, offset int) []string {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.fetch(topic, partition, offset) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+
+
+pub fn (p &Pool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &Pool) put(c Client) {
+    p.put_conn(c.fd)
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

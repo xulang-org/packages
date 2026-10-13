@@ -1,0 +1,117 @@
+@"github.com/xulang-org/packages/mqtt"
+
+#net
+#errors
+
+// Connection Pool for MQTT 3.1.1 clients.
+// Uses channel of socket file descriptors for lightweight and high-throughput pooling.
+pub struct Pool {
+    pub addr string
+    pub id_prefix string
+    pub idle chan int
+    pub max_idle int
+    pub seq chan int
+}
+
+pub fn new_pool(addr string, id_prefix string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    seq_ch := chan int{cap: 1}
+    seq_ch <- 1
+    mut prefix := id_prefix
+    if prefix.len == 0 {
+        prefix = "xu_mqtt_pool"
+    }
+    << Pool{
+        addr: addr,
+        id_prefix: prefix,
+        idle: ch,
+        max_idle: cap_val,
+        seq: seq_ch
+    }
+}
+
+fn (p &Pool) next_client_id() string {
+    mut id_num := 1
+    select {
+        cur := <-p.seq {
+            id_num = cur
+            p.seq <- (cur + 1)
+        }
+        else {
+            id_num = 1
+            p.seq <- 2
+        }
+    }
+    << p.id_prefix + "_" + str(id_num)
+}
+
+pub fn (p &Pool) get() Client {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << Client{
+                    fd: fd,
+                    addr: p.addr,
+                    client_id: p.id_prefix,
+                    next_pid: 1
+                }
+            }
+        }
+        else {
+            cid := p.next_client_id()
+            mut c := connect(p.addr + "", cid) or >>
+            << c
+        }
+    }
+    cid := p.next_client_id()
+    mut c := connect(p.addr + "", cid) or >>
+    << c
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &Pool) put(c Client) {
+    p.put_conn(c.fd)
+}
+
+pub fn (p &Pool) publish(topic string, payload string, qos int) int {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.publish(topic + "", payload + "", qos) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

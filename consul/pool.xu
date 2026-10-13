@@ -1,0 +1,151 @@
+@"github.com/xulang-org/packages/consul"
+
+#net
+#net/pool
+#errors
+#strings
+
+// Connection Pool for HashiCorp Consul.
+// Manages reusable TCP/HTTP socket connections.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub token string
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, token string, max_idle int) Pool {
+    c := new_client(endpoint + "", token + "")
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := pool.new_state()
+    << Pool{
+        host: c.host,
+        port: c.port,
+        token: token + "",
+        state: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(endpoint string, token string, max_idle int) Pool {
+    << new_pool(endpoint, token, max_idle)
+}
+
+pub fn (p &Pool) get() Client {
+    << Client{
+        host: p.host + "",
+        port: p.port,
+        token: p.token + ""
+    }
+}
+
+// Shares sockets and close state; clones configuration strings.
+pub fn (p &Pool) dup() Pool {
+    << Pool{host: strings.clone(&p.host), port: p.port, token: strings.clone(&p.token), state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.host + ":" + str(p.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) put_kv(key string, val string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.put_kv_at(fd, key, val, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) get_kv(key string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.get_kv_at(fd, key, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) delete_kv(key string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.delete_kv_at(fd, key, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) register_service(id string, name string, address string, port int) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.register_service_at(fd, id, name, address, port, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) deregister_service(id string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.deregister_service_at(fd, id, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) get_service(name string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.get_service_at(fd, name, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) ping() bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.ping_at(fd, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

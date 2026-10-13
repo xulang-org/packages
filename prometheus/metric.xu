@@ -1,0 +1,136 @@
+@"github.com/xulang-org/packages/prometheus"
+
+#strings
+#errors
+
+pub struct Label {
+    pub name string
+    pub value string
+}
+
+pub struct MetricSample {
+    pub label_str string
+    pub value string
+}
+
+pub struct Counter {
+    pub name string
+    pub help string
+    pub samples []MetricSample
+}
+
+pub struct Gauge {
+    pub name string
+    pub help string
+    pub samples []MetricSample
+}
+
+pub fn new_counter(name string, help string) Counter {
+    << Counter{
+        name: name,
+        help: help,
+        samples: []MetricSample{}
+    }
+}
+
+pub fn new_gauge(name string, help string) Gauge {
+    << Gauge{
+        name: name,
+        help: help,
+        samples: []MetricSample{}
+    }
+}
+
+fn format_labels(labels &[]Label) string {
+    if labels.len == 0 {
+        << ""
+    }
+    mut out := "{"
+    mut i := 0
+    while i < labels.len {
+        if i > 0 {
+            out = out + ","
+        }
+        out = out + labels[i].name + "=\"" + labels[i].value + "\""
+        i = i + 1
+    }
+    out = out + "}"
+    << out
+}
+
+pub fn (c &mut Counter) inc() {
+    c.inc_by(1)
+}
+
+pub fn (c &mut Counter) inc_by(delta int) {
+    empty_lbls := []Label{}
+    c.inc_labels(empty_lbls, delta)
+}
+
+pub fn (c &mut Counter) inc_labels(labels []Label, delta int) {
+    lbl_str := format_labels(&labels)
+    mut found := false
+    mut i := 0
+    while i < c.samples.len {
+        if c.samples[i].label_str == lbl_str {
+            old_val := parse_int_def(c.samples[i].value + "", 0)
+            c.samples[i].value = str(old_val + delta)
+            found = true
+            <-
+        }
+        i = i + 1
+    }
+    if !found {
+        c.samples.push(MetricSample{
+            label_str: lbl_str,
+            value: str(delta)
+        })
+    }
+}
+
+pub fn (g &mut Gauge) set(val string) {
+    empty_lbls := []Label{}
+    g.set_labels(empty_lbls, val)
+}
+
+pub fn (g &mut Gauge) set_labels(labels []Label, val string) {
+    lbl_str := format_labels(&labels)
+    mut found := false
+    mut i := 0
+    while i < g.samples.len {
+        if g.samples[i].label_str == lbl_str {
+            g.samples[i].value = val + ""
+            found = true
+            <-
+        }
+        i = i + 1
+    }
+    if !found {
+        g.samples.push(MetricSample{
+            label_str: lbl_str,
+            value: val + ""
+        })
+    }
+}
+
+pub fn (c Counter) format() string {
+    mut out := "# HELP " + c.name + " " + c.help + "\n"
+    out = out + "# TYPE " + c.name + " counter\n"
+    mut i := 0
+    while i < c.samples.len {
+        out = out + c.name + c.samples[i].label_str + " " + c.samples[i].value + "\n"
+        i = i + 1
+    }
+    << out
+}
+
+pub fn (g Gauge) format() string {
+    mut out := "# HELP " + g.name + " " + g.help + "\n"
+    out = out + "# TYPE " + g.name + " gauge\n"
+    mut i := 0
+    while i < g.samples.len {
+        out = out + g.name + g.samples[i].label_str + " " + g.samples[i].value + "\n"
+        i = i + 1
+    }
+    << out
+}

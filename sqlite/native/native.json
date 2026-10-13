@@ -1,0 +1,215 @@
+{
+  "module": "sqlite_native",
+  "abi": "xu-c-1",
+  "exports": [
+    {
+      "name": "buffer_new",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_put",
+      "params": [
+        "int",
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_get",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_len",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_free",
+      "params": [
+        "int"
+      ],
+      "ret": "void"
+    },
+    {
+      "name": "open",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "status",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "error",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "close",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "prepare",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "parameter_count",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "parameter_name",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "bind_null",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "bind_int",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "bind_float",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "bind_buffer",
+      "params": [
+        "int",
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "step",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "finalize",
+      "params": [
+        "int"
+      ],
+      "ret": "void"
+    },
+    {
+      "name": "column_count",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "column_name",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "column_type",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "column_int",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "column_float",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "column_buffer",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "last_id",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "total_changes",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "changes",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    }
+  ]
+}

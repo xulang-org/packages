@@ -1,0 +1,24 @@
+@"github.com/xulang-org/packages/mysql"
+
+#database/sql
+
+// MySQL connection pool helpers.
+// Configures reusable connections over database/sql connection pool.
+
+pub fn open_db(dsn string) sql.DB {
+    mut db := sql.open(driver(), dsn)
+    db.set_max_open_conns(10)
+    db.set_max_idle_conns(5)
+    << db
+}
+
+pub fn open_pool(dsn string, max_open int, max_idle int) sql.DB {
+    mut db := sql.open(driver(), dsn)
+    if max_open > 0 {
+        db.set_max_open_conns(max_open)
+    }
+    if max_idle > 0 {
+        db.set_max_idle_conns(max_idle)
+    }
+    << db
+}

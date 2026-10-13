@@ -1,0 +1,17 @@
+@"github.com/xulang-org/packages/s3"
+
+// S3 & MinIO Compatible Object Storage Driver for Xu
+//
+// Features:
+// - Standard AWS Signature Version 4 (SigV4) calculation with pure Xu crypto primitives.
+// - Works with AWS S3, MinIO, Ceph, Cloudflare R2, and other S3-compatible object storages.
+// - Full bucket lifecycle: make_bucket, bucket_exists, remove_bucket.
+// - Full object lifecycle: put_object, get_object, remove_object, object_exists.
+
+pub fn open(endpoint string, access_key string, secret_key string, region string) Client {
+    << new_client(endpoint, access_key, secret_key, region)
+}
+
+pub fn open_pool(endpoint string, access_key string, secret_key string, region string, max_idle int) Pool {
+    << new_pool(endpoint, access_key, secret_key, region, max_idle)
+}

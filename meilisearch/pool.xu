@@ -1,0 +1,121 @@
+@"github.com/xulang-org/packages/meilisearch"
+
+#net
+#net/pool
+#errors
+#strings
+
+pub struct MeiliPool {
+    pub client MeiliClient
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn open_pool(endpoint string, api_key string, max_idle int) MeiliPool {
+    c := new_client(endpoint, api_key)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    state := pool.new_state()
+    << MeiliPool{
+        client: c,
+        state: state,
+        max_idle: cap_val
+    }
+}
+
+// Copies configuration while sharing the connection and close lifecycle.
+pub fn (p &MeiliPool) dup() MeiliPool {
+    c := MeiliClient{
+        host: strings.clone(&p.client.host),
+        port: p.client.port,
+        api_key: strings.clone(&p.client.api_key)
+    }
+    << MeiliPool{client: c, state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &MeiliPool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    fd := p.client.connect() or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &MeiliPool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &MeiliPool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &MeiliPool) health() bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.health_at(fd, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        << false
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MeiliPool) create_index(uid string, primary_key string) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.create_index_at(fd, uid, primary_key, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MeiliPool) delete_index(uid string) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.delete_index_at(fd, uid, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MeiliPool) add_documents(uid string, json_docs string) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.add_documents_at(fd, uid, json_docs, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MeiliPool) search(uid string, query string, limit int) SearchResult {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.search_at(fd, uid, query, limit, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &MeiliPool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

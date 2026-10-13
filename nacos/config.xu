@@ -1,0 +1,57 @@
+@"github.com/xulang-org/packages/nacos"
+
+#errors
+#strings
+
+pub fn (c Client) publish_config(data_id string, group string, content string) bool {
+    mut reusable := false
+    << c.publish_config_at(-1, data_id, group, content, mut &reusable)
+}
+
+fn (c Client) publish_config_at(fd int, data_id string, group string, content string, reusable &mut bool) bool {
+    mut g := group
+    if g.len == 0 {
+        g = "DEFAULT_GROUP"
+    }
+    path := "/nacos/v1/cs/configs"
+    body := "dataId=" + data_id + "&group=" + g + "&content=" + content
+    resp := c.request_at(fd, "POST", path, body, reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c Client) get_config(data_id string, group string) string {
+    mut reusable := false
+    << c.get_config_at(-1, data_id, group, mut &reusable) or >>
+}
+
+fn (c Client) get_config_at(fd int, data_id string, group string, reusable &mut bool) string {
+    mut g := group
+    if g.len == 0 {
+        g = "DEFAULT_GROUP"
+    }
+    path := "/nacos/v1/cs/configs?dataId=" + data_id + "&group=" + g
+    resp := c.request_at(fd, "GET", path, "", reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("nacos: config not found (status " + str(resp.status_code) + ")")
+    }
+    << resp.body
+}
+
+pub fn (c Client) remove_config(data_id string, group string) bool {
+    mut reusable := false
+    << c.remove_config_at(-1, data_id, group, mut &reusable)
+}
+
+fn (c Client) remove_config_at(fd int, data_id string, group string, reusable &mut bool) bool {
+    mut g := group
+    if g.len == 0 {
+        g = "DEFAULT_GROUP"
+    }
+    path := "/nacos/v1/cs/configs?dataId=" + data_id + "&group=" + g
+    resp := c.request_at(fd, "DELETE", path, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}

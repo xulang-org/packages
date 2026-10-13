@@ -1,0 +1,51 @@
+@"github.com/xulang-org/packages/clickhouse"
+
+#errors
+
+pub fn (c &mut Client) exec(sql_query string) int {
+    mut reusable := false
+    << c.exec_at(-1, sql_query, mut &reusable) or >>
+}
+
+fn (c &mut Client) exec_at(fd int, sql_query string, reusable &mut bool) int {
+    resp := c.request_at(fd, sql_query, reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("clickhouse: exec failed (status " + str(resp.status_code) + "): " + resp.body)
+    }
+    << 0
+}
+
+pub fn (c &mut Client) query(sql_query string) string {
+    mut reusable := false
+    << c.query_at(-1, sql_query, mut &reusable) or >>
+}
+
+fn (c &mut Client) query_at(fd int, sql_query string, reusable &mut bool) string {
+    resp := c.request_at(fd, sql_query, reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("clickhouse: query failed (status " + str(resp.status_code) + "): " + resp.body)
+    }
+    << resp.body
+}
+
+pub fn (c &mut Client) query_tsv(sql_query string) [][]string {
+    mut reusable := false
+    << c.query_tsv_at(-1, sql_query, mut &reusable) or >>
+}
+
+fn (c &mut Client) query_tsv_at(fd int, sql_query string, reusable &mut bool) [][]string {
+    raw := c.query_at(fd, sql_query, reusable) or >>
+    << parse_tsv(raw)
+}
+
+pub fn (c &mut Client) ping() bool {
+    resp := c.request("SELECT 1") or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) insert(table string, values_sql string) int {
+    sql_text := "INSERT INTO " + table + " VALUES " + values_sql
+    << c.exec(sql_text)
+}

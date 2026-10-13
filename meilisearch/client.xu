@@ -1,0 +1,209 @@
+@"github.com/xulang-org/packages/meilisearch"
+
+#net
+#net/http
+#strings
+#errors
+#encoding/json
+#strconv
+
+pub struct MeiliClient {
+    pub host string
+    pub port int
+    pub api_key string
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+fn write_all(fd int, data string) bool {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("meili write error: " + err.msg())
+        }
+        if n <= 0 { >> errors.new("meilisearch: connection closed during write") }
+        off = off + n
+    }
+    << true
+}
+
+fn parse_int_def(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+pub fn new_client(endpoint string, api_key string) MeiliClient {
+    mut ep := endpoint
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+
+    mut host := "127.0.0.1"
+    mut port := 7700
+    colon := strings.index_of(&ep, ":")
+    if colon >= 0 {
+        host = ep[0:colon]
+        port_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(port_str, 7700)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+
+    << MeiliClient{
+        host: host,
+        port: port,
+        api_key: api_key
+    }
+}
+
+pub fn (c MeiliClient) connect() int {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("meili dial failed: " + err.msg())
+    }
+    << fd
+}
+
+pub fn (c MeiliClient) do_request_on_fd(fd int, method string, path string, body string) string {
+    mut reusable := false
+    << c.request_on_fd(fd, method, path, body, mut &reusable) or >>
+}
+
+fn (c MeiliClient) request_on_fd(fd int, method string, path string, body string, reusable &mut bool) string {
+    mut req := method + " " + path + " HTTP/1.1\r\n"
+    req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+    req = req + "Content-Type: application/json\r\n"
+    if c.api_key.len > 0 {
+        req = req + "Authorization: Bearer " + c.api_key + "\r\n"
+    }
+    req = req + "Content-Length: " + str(body.len) + "\r\n"
+    req = req + "Connection: keep-alive\r\n\r\n"
+    req = req + body
+
+    write_all(fd, req) or >>
+
+    resp := http.read_response(fd, method + "") or >>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >> errors.new("meilisearch: HTTP status " + str(resp.status_code) + ": " + resp.body)
+    }
+    *reusable = resp.reusable(method)
+    << resp.body
+
+}
+
+pub fn (c MeiliClient) do_request(method string, path string, body string) string {
+    fd := c.connect() or >>
+    res := c.do_request_on_fd(fd, method, path, body) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    safe_close(fd)
+    << res
+}
+
+fn (c MeiliClient) request_at(fd int, method string, path string, body string, reusable &mut bool) string {
+    if fd < 0 { << c.do_request(method, path, body) or >> }
+    << c.request_on_fd(fd, method, path, body, reusable) or >>
+}
+
+pub fn (c MeiliClient) health() bool {
+    mut reusable := false
+    result := c.health_at(-1, mut &reusable) or (err) { << false }
+    << result
+}
+
+fn (c MeiliClient) health_at(fd int, reusable &mut bool) bool {
+    resp := c.request_at(fd, "GET", "/health", "", reusable) or >>
+    target := "\"status\":\"available\""
+    << strings.index_of(&resp, target) >= 0
+}
+
+pub fn (c MeiliClient) create_index(uid string, primary_key string) bool {
+    mut reusable := false
+    << c.create_index_at(-1, uid, primary_key, mut &reusable) or >>
+}
+
+fn (c MeiliClient) create_index_at(fd int, uid string, primary_key string, reusable &mut bool) bool {
+    mut body := "{\"uid\":\"" + uid + "\""
+    if primary_key.len > 0 {
+        body = body + ",\"primaryKey\":\"" + primary_key + "\""
+    }
+    body = body + "}"
+    resp := c.request_at(fd, "POST", "/indexes", body, reusable) or >>
+    target := "\"taskUid\""
+    << strings.index_of(&resp, target) >= 0
+}
+
+pub fn (c MeiliClient) delete_index(uid string) bool {
+    mut reusable := false
+    << c.delete_index_at(-1, uid, mut &reusable) or >>
+}
+
+fn (c MeiliClient) delete_index_at(fd int, uid string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "DELETE", "/indexes/" + uid, "", reusable) or >>
+    target := "\"taskUid\""
+    << strings.index_of(&resp, target) >= 0
+}
+
+pub fn (c MeiliClient) add_documents(uid string, json_docs string) bool {
+    mut reusable := false
+    << c.add_documents_at(-1, uid, json_docs, mut &reusable) or >>
+}
+
+fn (c MeiliClient) add_documents_at(fd int, uid string, json_docs string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "POST", "/indexes/" + uid + "/documents", json_docs, reusable) or >>
+    target := "\"taskUid\""
+    << strings.index_of(&resp, target) >= 0
+}
+
+pub fn (c MeiliClient) search(uid string, query string, limit int) SearchResult {
+    mut reusable := false
+    << c.search_at(-1, uid, query, limit, mut &reusable) or >>
+}
+
+fn (c MeiliClient) search_at(fd int, uid string, query string, limit int, reusable &mut bool) SearchResult {
+    body := "{\"q\":" + json.quote(&query) + ",\"limit\":" + str(limit) + "}"
+    resp := c.request_at(fd, "POST", "/indexes/" + uid + "/search", body, reusable) or >>
+
+    d := json.parse(&resp)
+    if !d.ok() { >> errors.new("meilisearch: invalid JSON: " + d.error()) }
+    nodes := d.get(d.root(), "hits")
+    if nodes < 0 || !d.is_list(nodes) { >> errors.new("meilisearch: missing hits array") }
+    mut hits := []SearchHit{}
+    for i in 0:d.count(nodes) {
+        hit := d.at(nodes, i)
+        if !d.is_dict(hit) { >> errors.new("meilisearch: invalid hit") }
+        id := d.get(hit, "id")
+        if id < 0 || !d.is_number(id) { >> errors.new("meilisearch: this API requires integer ids") }
+        id_text := d.text(id)
+        hid := strconv.atoi(&id_text) or >>
+        title := d.get(hit, "title")
+        mut title_text := ""
+        if title >= 0 && !d.is_null(title) { title_text = d.as_string(title) or >> }
+        hits.push(SearchHit{id: hid, title: title_text, raw: d.encode(hit) or >>})
+    }
+    mut total := d.get(d.root(), "totalHits")
+    if total < 0 { total = d.get(d.root(), "estimatedTotalHits") }
+    mut count := -1
+    if total >= 0 {
+        if !d.is_number(total) { >> errors.new("meilisearch: invalid total hits") }
+        text := d.text(total)
+        count = strconv.atoi(&text) or >>
+    }
+    << SearchResult{query: query, total_hits: count, hits: hits}
+}

@@ -1,0 +1,36 @@
+@"github.com/xulang-org/packages/prometheus"
+
+pub struct Registry {
+    pub counters []Counter
+    pub gauges []Gauge
+}
+
+pub fn new_registry() Registry {
+    << Registry{
+        counters: []Counter{},
+        gauges: []Gauge{}
+    }
+}
+
+pub fn (r &mut Registry) register_counter(c Counter) {
+    r.counters.push(c)
+}
+
+pub fn (r &mut Registry) register_gauge(g Gauge) {
+    r.gauges.push(g)
+}
+
+pub fn (r &Registry) gather() string {
+    mut out := ""
+    mut i := 0
+    while i < r.counters.len {
+        out = out + r.counters[i].format()
+        i = i + 1
+    }
+    mut j := 0
+    while j < r.gauges.len {
+        out = out + r.gauges[j].format()
+        j = j + 1
+    }
+    << out
+}

@@ -1,0 +1,99 @@
+@"github.com/xulang-org/packages/nats"
+
+#net
+#errors
+
+// Connection Pool for NATS messaging system.
+// Uses channel of socket file descriptors for lightweight and high-throughput pooling.
+pub struct Pool {
+    pub url string
+    pub auth_user string
+    pub auth_pass string
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn new_pool(url string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{url: url, auth_user: "", auth_pass: "", idle: ch, max_idle: cap_val}
+}
+
+pub fn new_pool_auth(url string, user string, pass string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{url: url, auth_user: user, auth_pass: pass, idle: ch, max_idle: cap_val}
+}
+
+pub fn (p &Pool) get() Client {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << Client{
+                    fd: fd,
+                    buf: "",
+                    addr: p.url,
+                    next_sid: 1,
+                    server_info: ""
+                }
+            }
+        }
+        else {}
+    }
+    if p.auth_user.len > 0 {
+        mut c := connect_auth(p.url + "", p.auth_user + "", p.auth_pass + "") or >>
+        << c
+    }
+    mut c := connect(p.url + "") or >>
+    << c
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &Pool) put(c Client) {
+    p.put_conn(c.fd)
+}
+
+pub fn (p &Pool) publish(subject string, data string) int {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.publish(subject + "", data + "") or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

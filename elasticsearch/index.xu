@@ -1,0 +1,46 @@
+@"github.com/xulang-org/packages/elasticsearch"
+
+#errors
+
+pub fn (c &mut Client) create_index(index string, mapping_json string) bool {
+    mut reusable := false
+    << c.create_index_at(-1, index, mapping_json, mut &reusable) or >>
+}
+
+fn (c &mut Client) create_index_at(fd int, index string, mapping_json string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "PUT", "/" + index, mapping_json, reusable) or >>
+    code := resp.status_code
+    << code == 200 || code == 201
+}
+
+pub fn (c &mut Client) delete_index(index string) bool {
+    mut reusable := false
+    << c.delete_index_at(-1, index, mut &reusable) or >>
+}
+
+fn (c &mut Client) delete_index_at(fd int, index string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "DELETE", "/" + index, "", reusable) or >>
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) index_exists(index string) bool {
+    mut reusable := false
+    << c.index_exists_at(-1, index, mut &reusable)
+}
+
+fn (c &mut Client) index_exists_at(fd int, index string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "GET", "/" + index, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) refresh(index string) bool {
+    mut reusable := false
+    << c.refresh_at(-1, index, mut &reusable) or >>
+}
+
+fn (c &mut Client) refresh_at(fd int, index string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "POST", "/" + index + "/_refresh", "", reusable) or >>
+    << resp.status_code == 200
+}

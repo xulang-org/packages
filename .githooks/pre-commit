@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+python3 scripts/module_versions.py --check
+exec python3 scripts/check_git_hygiene.py --staged

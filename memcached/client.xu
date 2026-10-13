@@ -1,0 +1,107 @@
+@"github.com/xulang-org/packages/memcached"
+
+#net
+#errors
+#strings
+
+pub struct Client {
+    pub fd int
+    pub buf string
+    pub addr string
+}
+
+pub fn dial(addr string) Client {
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("memcached: dial failed: " + err.msg())
+    }
+    << Client{fd: fd, buf: "", addr: addr}
+}
+
+fn (c &mut Client) fill() int {
+    chunk := net.conn_read(c.fd, 4096) or (err) {
+        >> errors.new("memcached: read error: " + err.msg())
+    }
+    if chunk.len == 0 {
+        >> errors.new("memcached: connection closed")
+    }
+    c.buf = c.buf + chunk
+    << chunk.len
+}
+
+fn find_crlf(s &string) int {
+    if s.len < 2 {
+        << -1
+    }
+    mut i := 0
+    while i + 1 < s.len {
+        if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 {
+            << i
+        }
+        i = i + 1
+    }
+    << -1
+}
+
+pub fn (c &mut Client) read_line() string {
+    while true {
+        idx := find_crlf(&c.buf)
+        if idx >= 0 {
+            line := c.buf[0:idx]
+            if idx + 2 < c.buf.len {
+                c.buf = c.buf[(idx + 2):c.buf.len]
+            } else {
+                c.buf = ""
+            }
+            << line
+        }
+        c.fill() or >>
+    }
+    << ""
+}
+
+pub fn (c &mut Client) read_bytes(n int) string {
+    if n <= 0 {
+        << ""
+    }
+    while c.buf.len < n {
+        c.fill() or >>
+    }
+    res := c.buf[0:n]
+    if n < c.buf.len {
+        c.buf = c.buf[n:c.buf.len]
+    } else {
+        c.buf = ""
+    }
+    << res
+}
+
+pub fn (c &mut Client) write_raw(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(c.fd, &part) or (err) {
+            >> errors.new("memcached: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("memcached: connection closed")
+        }
+        off = off + n
+    }
+    << 0
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn (c &mut Client) close() int {
+    if c.fd >= 0 {
+        safe_close(c.fd)
+        c.fd = -1
+    }
+    << 0
+}

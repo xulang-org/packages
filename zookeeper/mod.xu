@@ -1,0 +1,4 @@
+@"github.com/xulang-org/packages/zookeeper"
+
+// Apache ZooKeeper Distributed Coordination Driver for Xu
+// Communicates via 4LW (Four-Letter Words) and native TCP commands.

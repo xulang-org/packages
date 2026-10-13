@@ -1,0 +1,24 @@
+@"github.com/xulang-org/packages/sqlite"
+
+#database/sql
+
+// SQLite connection pool helpers.
+// Configures thread-safe single-writer and multi-reader connections.
+
+pub fn open_db(path string) sql.DB {
+    mut db := sql.open(driver(), path)
+    db.set_max_open_conns(1)
+    db.set_max_idle_conns(1)
+    << db
+}
+
+pub fn open_pool(path string, max_open int, max_idle int) sql.DB {
+    mut db := sql.open(driver(), path)
+    if max_open > 0 {
+        db.set_max_open_conns(max_open)
+    }
+    if max_idle > 0 {
+        db.set_max_idle_conns(max_idle)
+    }
+    << db
+}

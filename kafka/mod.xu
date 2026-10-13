@@ -1,0 +1,23 @@
+@"github.com/xulang-org/packages/kafka"
+
+// Apache Kafka High-Performance Distributed Event Streaming Driver for Xu
+//
+// Features:
+// - Pure native Kafka Wire Protocol implementation (TCP socket + Big-Endian framing).
+// - IEEE CRC32 message verification via standard library #hash/crc32.
+// - High-throughput Produce & Fetch operations with partition targeting.
+// - Heartbeat probe via ApiVersions & Metadata APIs.
+// - Connection pooling via reusable TCP socket channels.
+// - Full compatibility with Apache Kafka 2.x, 3.x, and 4.x (KRaft & ZooKeeper modes).
+
+pub fn open(broker string) Client {
+    << connect(broker, "xu-kafka-client") or >>
+}
+
+pub fn open_client(broker string, client_id string) Client {
+    << connect(broker, client_id) or >>
+}
+
+pub fn open_pool_client(broker string, client_id string, max_idle int) Pool {
+    << new_pool(broker, client_id, max_idle)
+}

@@ -1,0 +1,41 @@
+@"github.com/xulang-org/packages/consul"
+
+#errors
+
+pub fn (c &mut Client) register_service(id string, name string, address string, port int) bool {
+    mut reusable := false
+    << c.register_service_at(-1, id, name, address, port, mut &reusable)
+}
+
+fn (c &mut Client) register_service_at(fd int, id string, name string, address string, port int, reusable &mut bool) bool {
+    body := "{\"ID\":\"" + id + "\",\"Name\":\"" + name + "\",\"Address\":\"" + address + "\",\"Port\":" + str(port) + "}"
+    resp := c.request_at(fd, "PUT", "/v1/agent/service/register", body, reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) deregister_service(id string) bool {
+    mut reusable := false
+    << c.deregister_service_at(-1, id, mut &reusable)
+}
+
+fn (c &mut Client) deregister_service_at(fd int, id string, reusable &mut bool) bool {
+    resp := c.request_at(fd, "PUT", "/v1/agent/service/deregister/" + id, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) get_service(name string) string {
+    mut reusable := false
+    << c.get_service_at(-1, name, mut &reusable) or >>
+}
+
+fn (c &mut Client) get_service_at(fd int, name string, reusable &mut bool) string {
+    resp := c.request_at(fd, "GET", "/v1/catalog/service/" + name, "", reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("consul: get_service failed with status " + str(resp.status_code))
+    }
+    << resp.body
+}

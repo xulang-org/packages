@@ -1,0 +1,102 @@
+@"github.com/xulang-org/packages/websocket"
+
+#strings
+#errors
+
+pub const opcode_continuation = 0
+pub const opcode_text = 1
+pub const opcode_binary = 2
+pub const opcode_close = 8
+pub const opcode_ping = 9
+pub const opcode_pong = 10
+
+pub struct Frame {
+    pub fin bool
+    pub opcode int
+    pub masked bool
+    pub payload string
+}
+
+// Builds a WebSocket frame according to RFC 6455
+pub fn build_frame(opcode int, payload string, fin bool, mask bool) string {
+    mut b0 := opcode & 15
+    if fin {
+        b0 = b0 | 128
+    }
+
+    mut mask_flag := 0
+    if mask {
+        mask_flag = 128
+    }
+
+    n := payload.len
+    mut hdr := string_from_byte(b0)
+
+    if n <= 125 {
+        b1 := mask_flag | n
+        hdr = hdr + string_from_byte(b1)
+    } else if n <= 65535 {
+        b1 := mask_flag | 126
+        b2 := (n >> 8) & 255
+        b3 := n & 255
+        hdr = hdr + string_from_byte(b1) + string_from_byte(b2) + string_from_byte(b3)
+    } else {
+        b1 := mask_flag | 127
+        hdr = hdr + string_from_byte(b1)
+        // 8 bytes big endian
+        mut k := 7
+        while k >= 0 {
+            byte_val := (n >> (k * 8)) & 255
+            hdr = hdr + string_from_byte(byte_val)
+            k = k - 1
+        }
+    }
+
+    if !mask {
+        << hdr + payload
+    }
+
+    // Mask payload with 4-byte key (client to server requires masking)
+    m0 := 0x4a
+    m1 := 0x8b
+    m2 := 0x2c
+    m3 := 0x6e
+    mask_bytes := string_from_byte(m0) + string_from_byte(m1) + string_from_byte(m2) + string_from_byte(m3)
+
+    mut masked_data := []int{}
+    for i in 0:n {
+        b := payload[i] & 255
+        rem := i % 4
+        mut mk := m0
+        if rem == 1 {
+            mk = m1
+        } else if rem == 2 {
+            mk = m2
+        } else if rem == 3 {
+            mk = m3
+        }
+        masked_data.push(b ^ mk)
+    }
+
+    << hdr + mask_bytes + string_from_bytes(masked_data)
+}
+
+// Unmasks or masks payload given 4-byte mask
+pub fn apply_mask(payload string, m0 int, m1 int, m2 int, m3 int) string {
+    n := payload.len
+    mut unmasked := []int{}
+    for i in 0:n {
+        b := payload[i] & 255
+        rem := i % 4
+        mut mk := m0
+        if rem == 1 {
+            mk = m1
+        } else if rem == 2 {
+            mk = m2
+        } else if rem == 3 {
+            mk = m3
+        }
+        unmasked.push(b ^ mk)
+    }
+    << string_from_bytes(unmasked)
+}

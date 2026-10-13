@@ -1,0 +1,15 @@
+@"github.com/xulang-org/packages/nats"
+
+pub struct Subscription {
+    pub sid string
+    pub subject string
+    pub queue_group string
+}
+
+pub fn new_sub(sid string, subject string, queue_group string) Subscription {
+    << Subscription{
+        sid: sid,
+        subject: subject,
+        queue_group: queue_group
+    }
+}

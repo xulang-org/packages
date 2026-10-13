@@ -1,0 +1,21 @@
+@"github.com/xulang-org/packages/mqtt"
+
+#errors
+
+// MQTT 3.1.1 lightweight messaging and IoT driver for Xu.
+//
+// Features:
+// - Pure binary Wire Protocol implementation in 100% pure Xu.
+// - Full CONNECT / CONNACK session handshake.
+// - PUBLISH support for QoS 0 and QoS 1 with PUBACK confirmation.
+// - SUBSCRIBE with SUBACK confirmation.
+// - PINGREQ / PINGRESP heartbeat maintenance.
+// - Graceful DISCONNECT.
+
+pub fn open(addr string, client_id string) Client {
+    << connect(addr, client_id) or >>
+}
+
+pub fn open_pool(addr string, id_prefix string, max_idle int) Pool {
+    << new_pool(addr, id_prefix, max_idle)
+}

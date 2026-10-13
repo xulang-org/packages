@@ -1,0 +1,18 @@
+@"github.com/xulang-org/packages/sqlite"
+
+#database/sql/driver
+#strings
+
+// SQLite database/sql driver backed by the official C API, statically linked
+// through xu-c-1. Each connection owns a native database handle; parameters
+// are bound by SQLite. No runtime Python, CLI or subprocess is required.
+
+pub fn driver() driver.Driver {
+    << driver.Driver(SqliteDriver{tag: 0, path: ""})
+}
+
+pub fn open(path string) driver.Conn {
+    p := strings.clone(&path)
+    d := SqliteDriver{tag: 0, path: path}
+    << d.open(p)
+}

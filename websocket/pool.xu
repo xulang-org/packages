@@ -1,0 +1,91 @@
+@"github.com/xulang-org/packages/websocket"
+
+#net
+#errors
+#strings
+
+pub struct WsPool {
+    pub client WsClient
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn open_pool(endpoint string, max_idle int) WsPool {
+    c := new_client(endpoint)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << WsPool{
+        client: c,
+        idle: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn (p &WsPool) get_conn() int {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << fd
+            }
+        }
+        else {
+            fd := p.client.connect() or (err) {
+                << -1
+            }
+            << fd
+        }
+    }
+    << -1
+}
+
+pub fn (p &WsPool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            p.client.close_conn(fd)
+        }
+    }
+}
+
+// Executes an echo round-trip borrowing from pool
+pub fn (p &WsPool) echo_text(text string) string {
+    fd := p.get_conn()
+    if fd < 0 {
+        >> errors.new("ws pool failed to get connection")
+    }
+    p.client.send_text(fd, text) or (err) {
+        p.client.close_conn(fd)
+        >> err
+    }
+    resp := p.client.read_text(fd) or (err) {
+        p.client.close_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << resp
+}
+
+pub fn (p &WsPool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                if fd >= 0 {
+                    p.client.close_conn(fd)
+                }
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

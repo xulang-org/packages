@@ -1,0 +1,497 @@
+@"github.com/xulang-org/packages/postgres"
+
+#database/sql/driver
+#context
+#encoding/hex
+#net
+#strconv
+#strings
+#time
+
+pub struct PostgresDriver {
+    pub tag int
+    pub dsn string
+}
+
+struct PgState {
+    pub fd int
+    pub closed int
+    pub open_err string
+    pub tx int
+}
+
+struct PgConn {
+    pub st chan PgState
+}
+
+struct PgStmt {
+    pub st chan PgState
+    pub q string
+}
+
+struct PgTx {
+    pub st chan PgState
+}
+
+fn oid_cell(oid int, payload string) string {
+    if oid == 16 {
+        if payload == "t" || payload == "true" { << "b:1" }
+        << "b:0"
+    }
+    if oid == 20 || oid == 21 || oid == 23 || oid == 26 || oid == 28 || oid == 29 {
+        << "i:" + payload
+    }
+    if oid == 700 || oid == 701 || oid == 1700 {
+        << "f:" + payload
+    }
+    if oid == 17 && strings.has_prefix(&payload, "\\x") {
+        raw := hex.decode_string(payload[2:payload.len]) or (err) { << "s:" + payload }
+        << driver.encode_value(raw)
+    }
+    << "s:" + payload
+}
+
+fn parse_row_description(body string) QueryResult {
+    if body.len < 2 { << QueryResult{columns: []string{}, cells: []string{}, ncols: 0, last_id: 0, rows_affected: 0, err: "postgres: malformed RowDescription"} }
+    n := be16_at(&body, 0)
+    if n < 0 || n > 4096 { << QueryResult{columns: []string{}, cells: []string{}, ncols: 0, last_id: 0, rows_affected: 0, err: "postgres: malformed RowDescription"} }
+    mut off := 2
+    mut cols := []string{}
+    mut types := []int{}
+    for i in 0:n {
+        r := cstring(&body, off)
+        if r.err.len > 0 { << QueryResult{columns: []string{}, cells: []string{}, ncols: 0, last_id: 0, rows_affected: 0, err: r.err} }
+        cols.push(r.data)
+        off += r.data.len + 1
+        if off + 18 > body.len { << QueryResult{columns: []string{}, cells: []string{}, ncols: 0, last_id: 0, rows_affected: 0, err: "postgres: malformed RowDescription"} }
+        types.push(be32_at(&body, off + 6))
+        off += 18
+    }
+    << QueryResult{columns: cols, cells: []string{}, ncols: n, last_id: 0, rows_affected: 0, err: ""}
+}
+
+fn append_data_row(qr &mut QueryResult, body string, types &[]int) string {
+    if body.len < 2 { << "postgres: malformed DataRow" }
+    n := be16_at(&body, 0)
+    if n != qr.ncols { << "postgres: DataRow column count mismatch" }
+    mut off := 2
+    for i in 0:n {
+        if off + 4 > body.len { << "postgres: malformed DataRow" }
+        len := be_i32_at(&body, off)
+        off += 4
+        if len == -1 { qr.cells.push("n:") }
+        else {
+            if len < 0 { << "postgres: invalid DataRow length" }
+            if off + len > body.len { << "postgres: malformed DataRow" }
+            payload := body[off:off + len] + ""
+            off += len
+            qr.cells.push(oid_cell(types[i], payload))
+        }
+    }
+    if off != body.len { << "postgres: trailing DataRow bytes" }
+    << ""
+}
+
+fn command_rows(tag string) int {
+    mut end := tag.len
+    while end > 0 && (tag[end - 1] & 255) == 32 { end -= 1 }
+    mut start := end
+    while start > 0 {
+        c := tag[start - 1] & 255
+        if c < 48 || c > 57 { <- }
+        start -= 1
+    }
+    if start == end { << 0 }
+    part := tag[start:end] + ""
+    n := strconv.atoi(&part) or (err) { << 0 }
+    << n
+}
+
+fn query_wire(fd int, q string, args []driver.NamedValue, want_rows int) QueryResult {
+    mut qr := empty_query()
+    mut types := []int{}
+    mut e := ""
+    if args.len == 0 {
+        e = send_packet(fd, 81, q + string_from_byte(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+    } else {
+        // Parse + Bind + Describe + Execute + Sync. Values are sent in text
+        // format, letting PostgreSQL perform the normal input conversion.
+        e = send_packet(fd, 80, string_from_byte(0) + q + string_from_byte(0) + be16(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet(fd, 66, string_from_byte(0) + string_from_byte(0) + be16(0) + be16(args.len) + pg_args(&args) + be16(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet(fd, 68, string_from_byte(80) + string_from_byte(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet(fd, 69, string_from_byte(0) + be32(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet(fd, 83, "")
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+    }
+    mut done := 0
+    while done == 0 {
+        p := recv_packet(fd)
+        if p.err.len > 0 {
+            qr.err = p.err
+            << qr
+        }
+        if p.typ == 84 {
+            desc := parse_row_description(p.body + "")
+            if desc.err.len > 0 {
+                qr.err = desc.err
+                << qr
+            }
+            qr.columns = copy_strings(&desc.columns)
+            qr.ncols = desc.ncols
+            // Re-read OIDs from the description for typed cell conversion.
+            mut off := 2
+            for i in 0:qr.ncols {
+                r := cstring(&p.body, off)
+                off += r.data.len + 1
+                types.push(be32_at(&p.body, off + 6))
+                off += 18
+            }
+        } else if p.typ == 68 {
+            e2 := append_data_row(mut &qr, p.body, &types)
+            if e2.len > 0 {
+                qr.err = e2
+                << qr
+            }
+        } else if p.typ == 67 {
+            tag := cstring(&p.body, 0)
+            if tag.err.len == 0 { qr.rows_affected = command_rows(tag.data) }
+        } else if p.typ == 69 {
+            qr.err = error_text(p.body)
+        } else if p.typ == 90 {
+            done = 1
+        }
+    }
+    << qr
+}
+
+fn pg_arg_val(args &[]driver.NamedValue, i int) string {
+    if i < 0 || i >= args.len {
+        << be32(-1)
+    }
+    if args[i].value is int {
+        x := args[i].value as int
+        << pg_text(str(x))
+    }
+    if args[i].value is string {
+        x := args[i].value as string
+        << pg_text(x)
+    }
+    if args[i].value is bool {
+        x := args[i].value as bool
+        if x { << pg_text("true") }
+        << pg_text("false")
+    }
+    if args[i].value is f64 {
+        x := args[i].value as f64
+        fs := strconv.format_float(x, 103, -1) or (err) { << pg_text("0") }
+        << pg_text(fs)
+    }
+    if args[i].value is time.Time {
+        x := args[i].value as time.Time
+        << pg_text(x.format_rfc3339())
+    }
+    if args[i].value is []u8 {
+        bs := args[i].value as []u8
+        mut raw := ""
+        for k in 0:bs.len { raw.push_byte(int(bs[k]) & 255) }
+        << pg_text("\\x" + hex.encode_to_string(raw))
+    }
+    << be32(-1)
+}
+
+fn pg_text(s string) string {
+    << be32(s.len) + s
+}
+
+fn pg_args(args &[]driver.NamedValue) string {
+    mut out := ""
+    mut i := 0
+    while i < args.len {
+        out = out + pg_arg_val(args, i)
+        i = i + 1
+    }
+    << out
+}
+
+fn take_st(c &PgConn) PgState { << <- c.st }
+fn put_st(c &PgConn, s PgState) { c.st <- s }
+
+fn close_fd(fd int) {
+    net.conn_close(fd) or (err) {
+        <<
+    }
+    <<
+}
+
+fn new_conn(cfg Config) driver.Conn {
+    fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
+        ch := chan PgState{cap: 1}
+        ch <- PgState{fd: -1, closed: 1, open_err: err.msg(), tx: 0}
+        << driver.Conn(PgConn{st: ch})
+    }
+    err := startup(fd, &cfg)
+    ch := chan PgState{cap: 1}
+    if err.len > 0 {
+        close_fd(fd)
+        ch <- PgState{fd: -1, closed: 1, open_err: err, tx: 0}
+    } else { ch <- PgState{fd: fd, closed: 0, open_err: "", tx: 0} }
+    << driver.Conn(PgConn{st: ch})
+}
+
+fn (d PostgresDriver) open(name string) driver.Conn {
+    cfg := parse_dsn(name) or (err) {
+        ch := chan PgState{cap: 1}
+        ch <- PgState{fd: -1, closed: 1, open_err: err.msg(), tx: 0}
+        << driver.Conn(PgConn{st: ch})
+    }
+    << new_conn(cfg)
+}
+
+fn (d PostgresDriver) connect(ctx &context.Context) driver.Conn {
+    _ := ctx
+    << d.open(d.dsn + "")
+}
+
+fn (d PostgresDriver) dup() driver.Driver { << driver.Driver(PostgresDriver{tag: d.tag, dsn: d.dsn + ""}) }
+fn (d PostgresDriver) driver() driver.Driver { << driver.Driver(PostgresDriver{tag: d.tag, dsn: d.dsn + ""}) }
+
+fn (c PgConn) dup() driver.Conn { << driver.Conn(PgConn{st: c.st}) }
+
+fn fail_exec(msg string) driver.ExecResult { << driver.exec_err(msg) }
+fn fail_rows(msg string) driver.RowsResult { << driver.rows_err(msg) }
+
+fn copy_strings(src &[]string) []string {
+    mut out := []string{}
+    for i in 0:src.len {
+        // Byte-copy each cell; `src[i] + ""` / deref can truncate binary-ish text.
+        mut s := ""
+        mut j := 0
+        while j < src[i].len {
+            s.push_byte(src[i][j] & 255)
+            j = j + 1
+        }
+        out.push(s)
+    }
+    << out
+}
+
+fn (c PgConn) ping() string {
+    mut s := take_st(&c)
+    if s.open_err.len > 0 {
+        msg := s.open_err + ""
+        put_st(&c, s)
+        << msg
+    }
+    if s.closed != 0 {
+        put_st(&c, s)
+        << "sql: connection is closed"
+    }
+    qr := query_wire(s.fd, "SELECT 1", []driver.NamedValue{}, 1)
+    if qr.err.len > 0 {
+        s.closed = 1
+        put_st(&c, s)
+        << driver.err_bad_conn()
+    }
+    put_st(&c, s)
+    << ""
+}
+
+fn (c PgConn) close() string {
+    mut s := take_st(&c)
+    if s.closed != 0 {
+        put_st(&c, s)
+        << ""
+    }
+    fd := s.fd
+    s.closed = 1
+    s.fd = -1
+    put_st(&c, s)
+    if fd >= 0 {
+        _ := send_packet(fd, 88, "")
+        close_fd(fd)
+    }
+    << ""
+}
+
+fn (c PgConn) is_valid() bool {
+    mut s := take_st(&c)
+    ok := s.closed == 0 && s.open_err.len == 0 && s.tx == 0
+    put_st(&c, s)
+    << ok
+}
+
+fn (c PgConn) reset_session(ctx &context.Context) string {
+    _ := ctx
+    mut s := take_st(&c)
+    if s.closed != 0 {
+        put_st(&c, s)
+        << driver.err_bad_conn()
+    }
+    // Only clear an open transaction — do not issue ROLLBACK on every checkout.
+    if s.tx != 0 {
+        qr := query_wire(s.fd, "ROLLBACK", []driver.NamedValue{}, 0)
+        if qr.err.len > 0 {
+            s.closed = 1
+            put_st(&c, s)
+            << driver.err_bad_conn()
+        }
+        s.tx = 0
+    }
+    put_st(&c, s)
+    << ""
+}
+
+fn (c PgConn) exec(q string, args []driver.NamedValue) driver.ExecResult {
+    mut s := take_st(&c)
+    if s.open_err.len > 0 {
+        msg := s.open_err + ""
+        put_st(&c, s)
+        << fail_exec(msg)
+    }
+    if s.closed != 0 {
+        put_st(&c, s)
+        << fail_exec("sql: connection is closed")
+    }
+    qr := query_wire(s.fd, q, args, 0)
+    if qr.err.len > 0 {
+        if strings.contains(&qr.err, "connection") {
+            s.closed = 1
+            put_st(&c, s)
+            << fail_exec(driver.err_bad_conn())
+        }
+        put_st(&c, s)
+        << fail_exec(qr.err)
+    }
+    put_st(&c, s)
+    << driver.exec_ok(qr.last_id, qr.rows_affected)
+}
+
+fn (c PgConn) query(q string, args []driver.NamedValue) driver.RowsResult {
+    mut s := take_st(&c)
+    if s.open_err.len > 0 {
+        msg := s.open_err + ""
+        put_st(&c, s)
+        << fail_rows(msg)
+    }
+    if s.closed != 0 {
+        put_st(&c, s)
+        << fail_rows("sql: connection is closed")
+    }
+    qr := query_wire(s.fd, q, args, 1)
+    if qr.err.len > 0 {
+        if strings.contains(&qr.err, "connection") {
+            s.closed = 1
+            put_st(&c, s)
+            << fail_rows(driver.err_bad_conn())
+        }
+        put_st(&c, s)
+        << fail_rows(qr.err)
+    }
+    cols := copy_strings(&qr.columns)
+    cells := copy_strings(&qr.cells)
+    ncols := qr.ncols
+    put_st(&c, s)
+    << driver.RowsResult{columns: cols, cells: cells, ncols: ncols, err: ""}
+}
+
+fn (c PgConn) prepare(q string) driver.Stmt { << driver.Stmt(PgStmt{st: c.st, q: q + ""}) }
+fn (c PgConn) prepare_context(ctx &context.Context, q string) driver.Stmt {
+    _ := ctx
+    << c.prepare(q)
+}
+
+fn (c PgConn) begin() driver.Tx { << c.begin_tx(0, false) }
+fn (c PgConn) begin_tx(iso int, ro bool) driver.Tx {
+    mut s := take_st(&c)
+    if s.closed != 0 || s.open_err.len > 0 {
+        put_st(&c, s)
+        << driver.Tx(PgTx{st: c.st})
+    }
+    mut q := "BEGIN"
+    if iso == 6 { q = q + " ISOLATION LEVEL SERIALIZABLE" }
+    if iso == 4 { q = q + " ISOLATION LEVEL REPEATABLE READ" }
+    if iso == 2 { q = q + " ISOLATION LEVEL READ COMMITTED" }
+    if ro { q = q + " READ ONLY" }
+    qr := query_wire(s.fd, q, []driver.NamedValue{}, 0)
+    if qr.err.len == 0 { s.tx = 1 }
+    put_st(&c, s)
+    << driver.Tx(PgTx{st: c.st})
+}
+
+fn (t PgTx) commit() string {
+    mut c := PgConn{st: t.st}
+    mut s := take_st(&c)
+    if s.closed != 0 {
+        put_st(&c, s)
+        << "sql: connection is closed"
+    }
+    qr := query_wire(s.fd, "COMMIT", []driver.NamedValue{}, 0)
+    s.tx = 0
+    put_st(&c, s)
+    << qr.err
+}
+
+fn (t PgTx) rollback() string {
+    mut c := PgConn{st: t.st}
+    mut s := take_st(&c)
+    if s.closed != 0 {
+        put_st(&c, s)
+        << "sql: connection is closed"
+    }
+    qr := query_wire(s.fd, "ROLLBACK", []driver.NamedValue{}, 0)
+    s.tx = 0
+    put_st(&c, s)
+    << qr.err
+}
+
+fn count_params(q string) int {
+    mut maxn := 0
+    mut i := 0
+    while i + 1 < q.len {
+        if (q[i] & 255) == 36 && (q[i + 1] & 255) >= 49 && (q[i + 1] & 255) <= 57 {
+            mut j := i + 1
+            mut n := 0
+            while j < q.len && (q[j] & 255) >= 48 && (q[j] & 255) <= 57 {
+                n = n * 10 + ((q[j] & 255) - 48)
+                j += 1
+            }
+            if n > maxn { maxn = n }
+            i = j
+        } else { i += 1 }
+    }
+    << maxn
+}
+
+fn (s PgStmt) num_input() int { << count_params(s.q) }
+fn (s PgStmt) exec(args []driver.NamedValue) driver.ExecResult {
+    c := PgConn{st: s.st}
+    << c.exec(s.q, args)
+}
+fn (s PgStmt) query(args []driver.NamedValue) driver.RowsResult {
+    c := PgConn{st: s.st}
+    << c.query(s.q, args)
+}
+fn (s PgStmt) close() string { << "" }

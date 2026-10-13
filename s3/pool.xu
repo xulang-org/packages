@@ -1,0 +1,164 @@
+@"github.com/xulang-org/packages/s3"
+
+#net
+#net/pool
+#errors
+#strings
+
+// Connection Pool for S3 & MinIO Compatible Object Storage.
+// Manages reusable TCP/HTTP socket connections.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub endpoint string
+    pub access_key string
+    pub secret_key string
+    pub region string
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, access_key string, secret_key string, region string, max_idle int) Pool {
+    c := new_client(endpoint + "", access_key + "", secret_key + "", region + "")
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := pool.new_state()
+    << Pool{
+        host: c.host,
+        port: c.port,
+        endpoint: endpoint,
+        access_key: access_key,
+        secret_key: secret_key,
+        region: region,
+        state: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn (p &Pool) get() Client {
+    << Client{
+        host: p.host + "",
+        port: p.port,
+        access_key: p.access_key + "",
+        secret_key: p.secret_key + "",
+        region: p.region + ""
+    }
+}
+
+// Shares sockets and close state; clones configuration strings.
+pub fn (p &Pool) dup() Pool {
+    << Pool{host: strings.clone(&p.host), port: p.port, endpoint: strings.clone(&p.endpoint), access_key: strings.clone(&p.access_key), secret_key: strings.clone(&p.secret_key), region: strings.clone(&p.region), state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.host + ":" + str(p.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) make_bucket(bucket string) int {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.make_bucket_at(fd, bucket, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) bucket_exists(bucket string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.bucket_exists_at(fd, bucket, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) remove_bucket(bucket string) int {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.remove_bucket_at(fd, bucket, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) put_object(bucket string, key string, data string, content_type string) int {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.put_object_at(fd, bucket, key, data, content_type, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) get_object(bucket string, key string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.get_object_at(fd, bucket, key, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) remove_object(bucket string, key string) int {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.remove_object_at(fd, bucket, key, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) object_exists(bucket string, key string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.object_exists_at(fd, bucket, key, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

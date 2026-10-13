@@ -1,0 +1,110 @@
+@"github.com/xulang-org/packages/dns"
+
+#net
+#strings
+#errors
+
+pub struct DnsClient {
+    pub host string
+    pub port int
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+fn read_exact(fd int, need int) string {
+    mut buf := ""
+    while buf.len < need {
+        want := need - buf.len
+        chunk := net.conn_read(fd, want) or (err) {
+            >> errors.new("dns read error: " + err.msg())
+        }
+        if chunk.len == 0 {
+            >> errors.new("dns read unexpected EOF")
+        }
+        buf = buf + chunk
+    }
+    << buf
+}
+
+fn write_all(fd int, data string) bool {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("dns write error: " + err.msg())
+        }
+        if n <= 0 {
+            <-
+        }
+        off = off + n
+    }
+    << true
+}
+
+pub fn new_client(endpoint string) DnsClient {
+    mut ep := endpoint
+    mut host := "8.8.8.8"
+    mut port := 53
+
+    colon := strings.index_of(&ep, ":")
+    if colon >= 0 {
+        host = ep[0:colon]
+        port_str := ep[(colon + 1):ep.len]
+        p_val := parse_int(port_str) or (err) {
+            port = 53
+            << DnsClient{host: host, port: 53}
+        }
+        port = p_val
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+
+    << DnsClient{
+        host: host,
+        port: port
+    }
+}
+
+pub fn (c DnsClient) connect() int {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("dns dial failed: " + err.msg())
+    }
+    << fd
+}
+
+// Queries A-records over TCP DNS (RFC 1035 section 4.2.2)
+pub fn (c DnsClient) resolve_a_on_fd(fd int, domain string) []string {
+    pkt := build_query_packet(0x1a2b, domain, type_a)
+    // Over TCP, DNS queries are prefixed with a 2-byte length
+    l_hi := (pkt.len >> 8) & 255
+    l_lo := pkt.len & 255
+    tcp_query := string_from_byte(l_hi) + string_from_byte(l_lo) + pkt
+
+    write_all(fd, tcp_query) or >>
+
+    // Read 2-byte response length
+    l_hdr := read_exact(fd, 2) or >>
+    resp_len := ((l_hdr[0] & 255) << 8) | (l_hdr[1] & 255)
+
+    resp_pkt := read_exact(fd, resp_len) or >>
+    << parse_a_records(resp_pkt)
+}
+
+pub fn (c DnsClient) resolve_a(domain string) []string {
+    fd := c.connect() or >>
+    ips := c.resolve_a_on_fd(fd, domain) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    safe_close(fd)
+    << ips
+}

@@ -1,0 +1,142 @@
+@"github.com/xulang-org/packages/elasticsearch"
+
+#net
+#net/pool
+#errors
+#strings
+
+// Connection Pool for Elasticsearch & OpenSearch.
+// Manages reusable TCP/HTTP socket connections.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub endpoint string
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, max_idle int) Pool {
+    c := new_client(endpoint + "")
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := pool.new_state()
+    << Pool{
+        host: c.host,
+        port: c.port,
+        endpoint: endpoint,
+        state: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn (p &Pool) get() Client {
+    << Client{host: p.host + "", port: p.port}
+}
+
+// Shares sockets and close state; clones configuration strings.
+pub fn (p &Pool) dup() Pool {
+    << Pool{host: strings.clone(&p.host), port: p.port, endpoint: strings.clone(&p.endpoint), state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.host + ":" + str(p.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) search(index string, query_dsl string) SearchResult {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.search_at(fd, index, query_dsl, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) search_match(index string, field string, query_text string) SearchResult {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.search_match_at(fd, index, field, query_text, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) get_doc(index string, id string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.get_doc_at(fd, index, id, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) index_doc(index string, id string, doc_json string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.index_doc_at(fd, index, id, doc_json, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) delete_doc(index string, id string) bool {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
+    mut reusable := false
+    mut c := p.get()
+    result := c.delete_doc_at(fd, index, id, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) ping() bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    mut c := p.get()
+    result := c.ping_at(fd, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

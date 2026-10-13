@@ -1,0 +1,153 @@
+@"github.com/xulang-org/packages/consul"
+
+#net
+#net/http
+#errors
+#strings
+
+pub struct Response {
+    pub status_code int
+    pub body string
+}
+
+pub struct Client {
+    pub host string
+    pub port int
+    pub token string
+}
+
+fn parse_int_def(s string, def int) int {
+    if s.len == 0 {
+        << def
+    }
+    n := parse_int(s) or (err) {
+        << def
+    }
+    << n
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+fn parse_endpoint(raw string) Client {
+    mut ep := raw
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+    mut host := "127.0.0.1"
+    mut port := 8500
+    mut colon := -1
+    mut i := 0
+    while i < ep.len {
+        if (ep[i] & 255) == 58 {
+            colon = i
+            <-
+        }
+        i = i + 1
+    }
+    if colon >= 0 {
+        host = ep[0:colon]
+        p_str := ep[(colon + 1):ep.len]
+        port = parse_int_def(p_str, 8500)
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+    << Client{host: host, port: port, token: ""}
+}
+
+pub fn new_client(endpoint string, token string) Client {
+    mut c := parse_endpoint(endpoint)
+    c.token = token + ""
+    << c
+}
+
+pub fn (c &mut Client) request(method string, path string, body string) Response {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("consul: dial failed: " + err.msg())
+    }
+    mut reusable := false
+    result := c.request_on_fd(fd, method, path, body, mut &reusable) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    safe_close(fd)
+    << result
+}
+
+fn (c &mut Client) request_at(fd int, method string, path string, body string, reusable &mut bool) Response {
+    if fd < 0 { << c.request(method, path, body) or >> }
+    << c.request_on_fd(fd, method, path, body, reusable) or >>
+}
+
+fn (c &mut Client) request_on_fd(fd int, method string, path string, body string, reusable &mut bool) Response {
+    *reusable = false
+
+    mut p := path
+    if p.len == 0 || (p[0] & 255) != 47 {
+        p = "/" + p
+    }
+
+    mut req := method + " " + p + " HTTP/1.1\r\n"
+    req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+    if c.token.len > 0 {
+        req = req + "X-Consul-Token: " + c.token + "\r\n"
+    }
+    req = req + "Content-Type: application/json\r\n"
+    req = req + "Content-Length: " + str(body.len) + "\r\n"
+    req = req + "Connection: keep-alive\r\n\r\n"
+    if body.len > 0 {
+        req = req + body
+    }
+
+    mut off := 0
+    while off < req.len {
+        part := req[off:req.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("consul: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("consul: connection closed during write")
+        }
+        off = off + n
+    }
+
+    resp := http.read_response(fd, method + "") or (err) {
+        >> err
+    }
+    *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method)
+    << Response{status_code: resp.status_code, body: resp.body}
+}
+
+pub fn (c &mut Client) ping() bool {
+    mut reusable := false
+    << c.ping_at(-1, mut &reusable)
+}
+
+fn (c &mut Client) ping_at(fd int, reusable &mut bool) bool {
+    resp := c.request_at(fd, "GET", "/v1/status/leader", "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200 && resp.body.len > 0
+}
+
+pub fn (c &mut Client) leader() string {
+    mut reusable := false
+    << c.leader_at(-1, mut &reusable) or >>
+}
+
+fn (c &mut Client) leader_at(fd int, reusable &mut bool) string {
+    resp := c.request_at(fd, "GET", "/v1/status/leader", "", reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("consul: get leader failed (" + str(resp.status_code) + ")")
+    }
+    << resp.body
+}

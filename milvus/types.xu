@@ -1,0 +1,23 @@
+@"github.com/xulang-org/packages/milvus"
+
+pub struct CollectionConfig {
+    pub name string
+    pub dimension int
+    pub metric_type string // "COSINE", "L2", "IP"
+}
+
+pub struct VectorEntity {
+    pub id int
+    pub vector []string
+    pub text string
+}
+
+pub struct SearchHit {
+    pub id int
+    pub distance string
+    pub text string
+}
+
+pub struct SearchResult {
+    pub hits []SearchHit
+}

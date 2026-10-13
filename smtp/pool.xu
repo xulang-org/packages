@@ -1,0 +1,87 @@
+@"github.com/xulang-org/packages/smtp"
+
+#net
+#errors
+#strings
+
+pub struct SmtpPool {
+    pub client SmtpClient
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn open_pool(endpoint string, max_idle int) SmtpPool {
+    c := new_client(endpoint)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << SmtpPool{
+        client: c,
+        idle: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn (p &SmtpPool) get_conn() int {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << fd
+            }
+        }
+        else {
+            fd := p.client.connect() or (err) {
+                << -1
+            }
+            << fd
+        }
+    }
+    << -1
+}
+
+pub fn (p &SmtpPool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            p.client.close_conn(fd)
+        }
+    }
+}
+
+// Convenient delegate to send mail borrowing from pool
+pub fn (p &SmtpPool) send_mail(msg Message) bool {
+    fd := p.get_conn()
+    if fd < 0 {
+        >> errors.new("smtp pool failed to acquire connection")
+    }
+    p.client.send_mail_on_fd(fd, msg) or (err) {
+        p.client.close_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << true
+}
+
+pub fn (p &SmtpPool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                if fd >= 0 {
+                    p.client.close_conn(fd)
+                }
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

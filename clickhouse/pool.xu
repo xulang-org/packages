@@ -1,0 +1,115 @@
+@"github.com/xulang-org/packages/clickhouse"
+
+#net
+#net/pool
+#errors
+#strings
+
+// Connection Pool for ClickHouse.
+// Manages reusable TCP socket connections.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub user string
+    pub password string
+    pub database string
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, user string, password string, database string, max_idle int) Pool {
+    c := new_client(endpoint, user, password, database)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    state := pool.new_state()
+    << Pool{
+        host: c.host,
+        port: c.port,
+        user: c.user,
+        password: c.password,
+        database: c.database,
+        state: state,
+        max_idle: cap_val
+    }
+}
+
+pub fn (p &Pool) get() Client {
+    << Client{
+        host: p.host + "",
+        port: p.port,
+        user: p.user + "",
+        password: p.password + "",
+        database: p.database + ""
+    }
+}
+
+pub fn (p &Pool) dup() Pool {
+    << Pool{host: strings.clone(&p.host), port: p.port, user: strings.clone(&p.user), password: strings.clone(&p.password), database: strings.clone(&p.database), state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.host + ":" + str(p.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) exec(sql_query string) int {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
+    mut c := p.get()
+    mut reusable := false
+    result := c.exec_at(fd, sql_query, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) query(sql_query string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
+    mut c := p.get()
+    mut reusable := false
+    result := c.query_at(fd, sql_query, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) query_tsv(sql_query string) [][]string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
+    mut c := p.get()
+    mut reusable := false
+    result := c.query_tsv_at(fd, sql_query, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

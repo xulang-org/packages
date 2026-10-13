@@ -1,0 +1,50 @@
+@"github.com/xulang-org/packages/influxdb"
+
+#strings
+#errors
+
+pub fn (c &mut Client) health() bool {
+    mut reusable := false
+    << c.health_at(-1, mut &reusable) or >>
+}
+
+fn (c &mut Client) health_at(fd int, reusable &mut bool) bool {
+    resp := c.request_at(fd, "GET", "/health", "", "", "application/json", reusable) or (err) {
+        >> err
+    }
+    if resp.status_code == 200 {
+        << true
+    }
+    >> errors.new("influxdb health check failed with status " + str(resp.status_code))
+}
+
+pub fn (c &mut Client) ping() bool {
+    mut reusable := false
+    << c.ping_at(-1, mut &reusable) or >>
+}
+
+fn (c &mut Client) ping_at(fd int, reusable &mut bool) bool {
+    resp := c.request_at(fd, "GET", "/ping", "", "", "", reusable) or (err) {
+        >> err
+    }
+    if resp.status_code == 204 || resp.status_code == 200 {
+        << true
+    }
+    >> errors.new("influxdb ping failed with status " + str(resp.status_code))
+}
+
+pub fn (c &mut Client) query_flux(flux string) string {
+    mut reusable := false
+    << c.query_flux_at(-1, flux, mut &reusable) or >>
+}
+
+fn (c &mut Client) query_flux_at(fd int, flux string, reusable &mut bool) string {
+    path := "/api/v2/query?org=" + c.org
+    resp := c.request_at(fd, "POST", path, flux, "application/vnd.flux", "application/csv", reusable) or (err) {
+        >> err
+    }
+    if resp.status_code >= 200 && resp.status_code < 300 {
+        << resp.body
+    }
+    >> errors.new("influxdb query failed with status " + str(resp.status_code) + ": " + resp.body)
+}

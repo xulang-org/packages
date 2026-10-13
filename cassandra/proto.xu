@@ -1,0 +1,80 @@
+@"github.com/xulang-org/packages/cassandra"
+
+#strings
+#errors
+
+const proto_req_v4 = 4
+const proto_resp_v4 = 132 // 0x84
+
+pub const opcode_error = 0
+pub const opcode_startup = 1
+pub const opcode_ready = 2
+pub const opcode_authenticate = 3
+pub const opcode_query = 7
+pub const opcode_result = 8
+
+pub const result_kind_void = 1
+pub const result_kind_rows = 2
+pub const result_kind_set_keyspace = 3
+pub const result_kind_prepared = 4
+pub const result_kind_schema_change = 5
+
+pub struct Frame {
+    pub version int
+    pub flags int
+    pub stream int
+    pub opcode int
+    pub body string
+}
+
+pub fn encode_u16(val int) string {
+    b1 := string_from_byte((val >> 8) & 255)
+    b2 := string_from_byte(val & 255)
+    << b1 + b2
+}
+
+pub fn encode_u32(val int) string {
+    b1 := string_from_byte((val >> 24) & 255)
+    b2 := string_from_byte((val >> 16) & 255)
+    b3 := string_from_byte((val >> 8) & 255)
+    b4 := string_from_byte(val & 255)
+    << b1 + b2 + b3 + b4
+}
+
+pub fn decode_u16(b1 int, b2 int) int {
+    << ((b1 & 255) << 8) | (b2 & 255)
+}
+
+pub fn decode_u32(b1 int, b2 int, b3 int, b4 int) int {
+    << ((b1 & 255) << 24) | ((b2 & 255) << 16) | ((b3 & 255) << 8) | (b4 & 255)
+}
+
+pub fn build_frame(opcode int, stream int, body string) string {
+    mut hdr := string_from_byte(proto_req_v4)
+    hdr = hdr + string_from_byte(0) // flags = 0
+    hdr = hdr + encode_u16(stream)
+    hdr = hdr + string_from_byte(opcode)
+    hdr = hdr + encode_u32(body.len)
+    << hdr + body
+}
+
+pub fn build_startup_frame() string {
+    // String map: 1 pair
+    // "CQL_VERSION" -> "3.0.0"
+    mut body := encode_u16(1) // count = 1
+    key := "CQL_VERSION"
+    body = body + encode_u16(key.len) + key
+    val := "3.0.0"
+    body = body + encode_u16(val.len) + val
+    << build_frame(opcode_startup, 1, body)
+}
+
+pub fn build_query_frame(cql string, stream int) string {
+    // [long string] query: [u32 len] + cql
+    // [consistency]: [u16] 1 (ONE)
+    // [flags]: [u8] 0
+    mut body := encode_u32(cql.len) + cql
+    body = body + encode_u16(1) // Consistency ONE
+    body = body + string_from_byte(0) // Flags 0
+    << build_frame(opcode_query, stream, body)
+}

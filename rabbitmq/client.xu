@@ -1,0 +1,429 @@
+@"github.com/xulang-org/packages/rabbitmq"
+
+#net
+#errors
+#strings
+
+pub struct Message {
+    pub exchange string
+    pub routing_key string
+    pub body string
+    pub message_count int
+}
+
+pub struct Client {
+    pub fd int
+    pub host string
+    pub port int
+    pub user string
+    pub password string
+    pub vhost string
+    pub channel_id int
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn (c &mut Client) write_exact(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(c.fd, &part) or (err) {
+            >> errors.new("rabbitmq: write failed: " + err.msg())
+        }
+        if n <= 0 {
+            >> errors.new("rabbitmq: connection closed by peer")
+        }
+        off = off + n
+    }
+    << 0
+}
+
+pub fn (c &mut Client) read_exact(n int) string {
+    mut res := ""
+    while res.len < n {
+        chunk := net.conn_read(c.fd, n - res.len) or (err) {
+            >> errors.new("rabbitmq: read failed: " + err.msg())
+        }
+        if chunk.len == 0 {
+            >> errors.new("rabbitmq: connection closed by peer")
+        }
+        res = res + chunk
+    }
+    << res
+}
+
+pub fn (c &mut Client) send_frame(frame_type int, channel int, payload string) int {
+    f := build_frame(frame_type, channel, payload)
+    << c.write_exact(f)
+}
+
+pub fn (c &mut Client) read_frame() Frame {
+    // Read 7-byte header: type (1B), channel (2B), payload_size (4B)
+    hdr := c.read_exact(7) or >>
+    frame_type := decode_i8(hdr + "", 0)
+    channel := decode_i16(hdr + "", 1)
+    size := decode_i32(hdr + "", 3)
+
+    mut payload := ""
+    if size > 0 {
+        payload = c.read_exact(size) or >>
+    }
+
+    // Read 1-byte frame-end (0xCE)
+    end_byte := c.read_exact(1) or >>
+    if decode_i8(end_byte + "", 0) != frame_end {
+        >> errors.new("rabbitmq: invalid frame end byte")
+    }
+
+    << Frame{frame_type: frame_type, channel: channel, payload: payload}
+}
+
+pub fn connect(host string, port int, user string, password string, vhost string) Client {
+    mut h := host
+    if h.len == 0 {
+        h = "127.0.0.1"
+    }
+    mut p := port
+    if p <= 0 {
+        p = 5672
+    }
+    mut u := user
+    if u.len == 0 {
+        u = "guest"
+    }
+    mut pwd := password
+    if pwd.len == 0 {
+        pwd = "guest"
+    }
+    mut vh := vhost
+    if vh.len == 0 {
+        vh = "/"
+    }
+
+    addr := h + ":" + str(p)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("rabbitmq: dial failed: " + err.msg())
+    }
+
+    mut client := Client{
+        fd: fd,
+        host: h,
+        port: p,
+        user: u,
+        password: pwd,
+        vhost: vh,
+        channel_id: 1
+    }
+
+    // 1. Send Protocol Header: 'A', 'M', 'Q', 'P', 0, 0, 9, 1
+    mut proto_hdr := ""
+    proto_hdr.push_byte(65) // 'A'
+    proto_hdr.push_byte(77) // 'M'
+    proto_hdr.push_byte(81) // 'Q'
+    proto_hdr.push_byte(80) // 'P'
+    proto_hdr.push_byte(0)
+    proto_hdr.push_byte(0)
+    proto_hdr.push_byte(9)
+    proto_hdr.push_byte(1)
+    client.write_exact(proto_hdr) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // 2. Expect Connection.Start (Class 10, Method 10)
+    f1 := client.read_frame() or (err) {
+        safe_close(fd)
+        >> err
+    }
+    if f1.frame_type != frame_method || f1.payload.len < 4 {
+        safe_close(fd)
+        >> errors.new("rabbitmq: expected Connection.Start method frame")
+    }
+    c_id1 := decode_i16(f1.payload + "", 0)
+    m_id1 := decode_i16(f1.payload + "", 2)
+    if c_id1 != class_connection || m_id1 != 10 {
+        safe_close(fd)
+        >> errors.new("rabbitmq: unexpected method in handshake (class=" + str(c_id1) + ", method=" + str(m_id1) + ")")
+    }
+
+    // 3. Send Connection.Start-Ok (Class 10, Method 11)
+    // Response format: \0username\0password
+    mut plain_resp := ""
+    plain_resp.push_byte(0)
+    plain_resp = plain_resp + client.user + ""
+    plain_resp.push_byte(0)
+    plain_resp = plain_resp + client.password + ""
+
+    mut start_ok_args := encode_empty_table() // client_properties
+    start_ok_args = start_ok_args + encode_shortstr("PLAIN") // mechanism
+    start_ok_args = start_ok_args + encode_longstr(plain_resp) // response
+    start_ok_args = start_ok_args + encode_shortstr("en_US") // locale
+
+    start_ok_payload := build_method_payload(class_connection, 11, start_ok_args)
+    client.send_frame(frame_method, 0, start_ok_payload) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // 4. Expect Connection.Tune (Class 10, Method 30)
+    f2 := client.read_frame() or (err) {
+        safe_close(fd)
+        >> err
+    }
+    if f2.frame_type != frame_method || f2.payload.len < 12 {
+        safe_close(fd)
+        >> errors.new("rabbitmq: expected Connection.Tune method frame")
+    }
+    channel_max := decode_i16(f2.payload + "", 4)
+    frame_max := decode_i32(f2.payload + "", 6)
+    heartbeat := decode_i16(f2.payload + "", 10)
+
+    // 5. Send Connection.Tune-Ok (Class 10, Method 31)
+    mut tune_ok_args := encode_i16(channel_max)
+    tune_ok_args = tune_ok_args + encode_i32(frame_max)
+    tune_ok_args = tune_ok_args + encode_i16(heartbeat)
+    tune_ok_payload := build_method_payload(class_connection, 31, tune_ok_args)
+    client.send_frame(frame_method, 0, tune_ok_payload) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // 6. Send Connection.Open (Class 10, Method 40)
+    mut open_args := encode_shortstr(client.vhost + "")
+    open_args = open_args + encode_shortstr("") // reserved-1
+    open_args = open_args + encode_i8(0) // reserved-2 / flags
+    open_payload := build_method_payload(class_connection, 40, open_args)
+    client.send_frame(frame_method, 0, open_payload) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // 7. Expect Connection.Open-Ok (Class 10, Method 41)
+    f3 := client.read_frame() or (err) {
+        safe_close(fd)
+        >> err
+    }
+    if f3.frame_type != frame_method || f3.payload.len < 4 {
+        safe_close(fd)
+        >> errors.new("rabbitmq: expected Connection.Open-Ok method frame")
+    }
+
+    // 8. Open Channel 1 (Class 20, Method 10)
+    ch_open_args := encode_shortstr("") // out-of-band
+    ch_open_payload := build_method_payload(class_channel, 10, ch_open_args)
+    client.send_frame(frame_method, 1, ch_open_payload) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // 9. Expect Channel.Open-Ok (Class 20, Method 11)
+    f4 := client.read_frame() or (err) {
+        safe_close(fd)
+        >> err
+    }
+    if f4.frame_type != frame_method || f4.payload.len < 4 {
+        safe_close(fd)
+        >> errors.new("rabbitmq: expected Channel.Open-Ok method frame")
+    }
+
+    << client
+}
+
+pub fn (c &mut Client) declare_queue(queue_name string, durable bool) int {
+    mut args := encode_i16(0) // ticket / reserved-1
+    args = args + encode_shortstr(queue_name)
+
+    // bitmask: passive=1, durable=2, exclusive=4, auto_delete=8, nowait=16
+    mut flags := 0
+    if durable {
+        flags = flags | 2
+    }
+    args = args + encode_i8(flags)
+    args = args + encode_empty_table() // arguments
+
+    payload := build_method_payload(class_queue, 10, args)
+    c.send_frame(frame_method, c.channel_id, payload) or >>
+
+    // Read Queue.Declare-Ok (Class 50, Method 11)
+    resp := c.read_frame() or >>
+    if resp.frame_type != frame_method || resp.payload.len < 4 {
+        >> errors.new("rabbitmq: invalid Queue.Declare response")
+    }
+    c_id := decode_i16(resp.payload + "", 0)
+    m_id := decode_i16(resp.payload + "", 2)
+    if c_id == class_channel && m_id == 40 {
+        >> errors.new("rabbitmq: channel closed by server")
+    }
+    if c_id == class_connection && m_id == 50 {
+        >> errors.new("rabbitmq: connection closed by server")
+    }
+    if c_id != class_queue || m_id != 11 {
+        >> errors.new("rabbitmq: expected Queue.Declare-Ok, got class=" + str(c_id) + ", method=" + str(m_id))
+    }
+    << 0
+}
+
+pub fn (c &mut Client) declare_exchange(exchange_name string, exchange_type string, durable bool) int {
+    mut args := encode_i16(0) // ticket / reserved-1
+    args = args + encode_shortstr(exchange_name)
+    args = args + encode_shortstr(exchange_type)
+
+    mut flags := 0
+    if durable {
+        flags = flags | 2
+    }
+    args = args + encode_i8(flags)
+    args = args + encode_empty_table() // arguments
+
+    payload := build_method_payload(class_exchange, 10, args)
+    c.send_frame(frame_method, c.channel_id, payload) or >>
+
+    resp := c.read_frame() or >>
+    if resp.frame_type != frame_method || resp.payload.len < 4 {
+        >> errors.new("rabbitmq: invalid Exchange.Declare response")
+    }
+    << 0
+}
+
+pub fn (c &mut Client) bind_queue(queue_name string, exchange_name string, routing_key string) int {
+    mut args := encode_i16(0) // ticket / reserved-1
+    args = args + encode_shortstr(queue_name)
+    args = args + encode_shortstr(exchange_name)
+    args = args + encode_shortstr(routing_key)
+    args = args + encode_i8(0) // nowait
+    args = args + encode_empty_table() // arguments
+
+    payload := build_method_payload(class_queue, 20, args)
+    c.send_frame(frame_method, c.channel_id, payload) or >>
+
+    resp := c.read_frame() or >>
+    if resp.frame_type != frame_method || resp.payload.len < 4 {
+        >> errors.new("rabbitmq: invalid Queue.Bind response")
+    }
+    << 0
+}
+
+pub fn (c &mut Client) publish(exchange_name string, routing_key string, message_body string) int {
+    // 1. Method Frame: Basic.Publish (Class 60, Method 40)
+    mut pub_args := encode_i16(0) // ticket
+    pub_args = pub_args + encode_shortstr(exchange_name)
+    pub_args = pub_args + encode_shortstr(routing_key)
+    pub_args = pub_args + encode_i8(0) // mandatory=0, immediate=0
+    pub_payload := build_method_payload(class_basic, 40, pub_args)
+    c.send_frame(frame_method, c.channel_id, pub_payload) or >>
+
+    // 2. Header Frame: Content Header
+    mut hdr_payload := encode_i16(class_basic)
+    hdr_payload = hdr_payload + encode_i16(0) // weight = 0
+    hdr_payload = hdr_payload + encode_i64(message_body.len) // body size
+    hdr_payload = hdr_payload + encode_i16(0) // property flags = 0
+    c.send_frame(frame_header, c.channel_id, hdr_payload) or >>
+
+    // 3. Body Frame: Content Body
+    if message_body.len > 0 {
+        c.send_frame(frame_body, c.channel_id, message_body) or >>
+    }
+    << 0
+}
+
+pub fn (c &mut Client) get(queue_name string, auto_ack bool) string {
+    // Method Frame: Basic.Get (Class 60, Method 70)
+    mut get_args := encode_i16(0) // ticket
+    get_args = get_args + encode_shortstr(queue_name)
+    mut ack_flag := 0
+    if auto_ack {
+        ack_flag = 1
+    }
+    get_args = get_args + encode_i8(ack_flag)
+    get_payload := build_method_payload(class_basic, 70, get_args)
+    c.send_frame(frame_method, c.channel_id, get_payload) or >>
+
+    // Expect response: Basic.Get-Ok (71) or Basic.Get-Empty (72)
+    m_frame := c.read_frame() or >>
+    if m_frame.frame_type != frame_method || m_frame.payload.len < 4 {
+        >> errors.new("rabbitmq: invalid Basic.Get response")
+    }
+    method_id := decode_i16(m_frame.payload + "", 2)
+    if method_id == 72 { // Basic.Get-Empty
+        << ""
+    }
+    if method_id != 71 { // Expected Basic.Get-Ok
+        >> errors.new("rabbitmq: unexpected method in Basic.Get response: " + str(method_id))
+    }
+
+    // Read Content Header Frame
+    hdr_frame := c.read_frame() or >>
+    if hdr_frame.frame_type != frame_header {
+        >> errors.new("rabbitmq: expected content header frame after Basic.Get-Ok")
+    }
+    body_size := decode_i64(hdr_frame.payload + "", 4)
+
+    // Read Content Body Frame(s)
+    mut total_body := ""
+    while total_body.len < body_size {
+        body_frame := c.read_frame() or >>
+        if body_frame.frame_type != frame_body {
+            >> errors.new("rabbitmq: expected content body frame")
+        }
+        total_body = total_body + body_frame.payload
+    }
+    << total_body
+}
+
+pub fn (c &mut Client) ping() bool {
+    res := c.declare_queue("xu_ping_queue", true) or (err) {
+        << false
+    }
+    << true
+}
+
+pub fn (c &mut Client) close() {
+    if c.fd >= 0 {
+        // Close Channel (Class 20, Method 40)
+        mut ch_close_args := encode_i16(200) // reply-code = 200 (OK)
+        ch_close_args = ch_close_args + encode_shortstr("Normal shutdown")
+        ch_close_args = ch_close_args + encode_i16(0) // class-id
+        ch_close_args = ch_close_args + encode_i16(0) // method-id
+        ch_close_payload := build_method_payload(class_channel, 40, ch_close_args)
+        c.send_frame(frame_method, c.channel_id, ch_close_payload) or (e) {
+            safe_close(c.fd)
+            c.fd = -1
+            <<
+        }
+
+        // Read Channel.Close-Ok
+        c.read_frame() or (e) {
+            safe_close(c.fd)
+            c.fd = -1
+            <<
+        }
+
+        // Close Connection (Class 10, Method 50)
+        mut conn_close_args := encode_i16(200)
+        conn_close_args = conn_close_args + encode_shortstr("Normal shutdown")
+        conn_close_args = conn_close_args + encode_i16(0)
+        conn_close_args = conn_close_args + encode_i16(0)
+        conn_close_payload := build_method_payload(class_connection, 50, conn_close_args)
+        c.send_frame(frame_method, 0, conn_close_payload) or (e) {
+            safe_close(c.fd)
+            c.fd = -1
+            <<
+        }
+
+        // Read Connection.Close-Ok
+        c.read_frame() or (e) {
+            safe_close(c.fd)
+            c.fd = -1
+            <<
+        }
+
+        safe_close(c.fd)
+        c.fd = -1
+    }
+}

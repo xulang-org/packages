@@ -1,0 +1,60 @@
+@"github.com/xulang-org/packages/nacos"
+
+#errors
+#strings
+
+pub fn (c Client) register_instance(service string, ip string, port int, group string) bool {
+    mut reusable := false
+    << c.register_instance_at(-1, service, ip, port, group, mut &reusable)
+}
+
+fn (c Client) register_instance_at(fd int, service string, ip string, port int, group string, reusable &mut bool) bool {
+    mut g := group
+    if g.len == 0 {
+        g = "DEFAULT_GROUP"
+    }
+    mut path := "/nacos/v1/ns/instance?serviceName=" + service
+    path = path + "&ip=" + ip
+    path = path + "&port=" + str(port)
+    path = path + "&groupName=" + g
+    path = path + "&ephemeral=true"
+    resp := c.request_at(fd, "POST", path, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c Client) get_instances(service string, group string) string {
+    mut reusable := false
+    << c.get_instances_at(-1, service, group, mut &reusable) or >>
+}
+
+fn (c Client) get_instances_at(fd int, service string, group string, reusable &mut bool) string {
+    mut g := group
+    if g.len == 0 {
+        g = "DEFAULT_GROUP"
+    }
+    path := "/nacos/v1/ns/instance/list?serviceName=" + service + "&groupName=" + g
+    resp := c.request_at(fd, "GET", path, "", reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("nacos: failed to get instances (status " + str(resp.status_code) + ")")
+    }
+    << resp.body
+}
+
+pub fn (c Client) deregister_instance(service string, ip string, port int, group string) bool {
+    mut reusable := false
+    << c.deregister_instance_at(-1, service, ip, port, group, mut &reusable)
+}
+
+fn (c Client) deregister_instance_at(fd int, service string, ip string, port int, group string, reusable &mut bool) bool {
+    mut g := group
+    if g.len == 0 {
+        g = "DEFAULT_GROUP"
+    }
+    path := "/nacos/v1/ns/instance?serviceName=" + service + "&ip=" + ip + "&port=" + str(port) + "&groupName=" + g
+    resp := c.request_at(fd, "DELETE", path, "", reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}

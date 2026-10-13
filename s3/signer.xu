@@ -1,0 +1,60 @@
+@"github.com/xulang-org/packages/s3"
+
+#crypto/hmac
+#crypto/sha256
+#encoding/hex
+#strings
+
+fn raw_from_hex(hex_str string) string {
+    raw := hex.decode_string(hex_str) or (err) {
+        << ""
+    }
+    << raw
+}
+
+pub fn sha256_hex(data string) string {
+    << sha256.sum256(data)
+}
+
+fn hmac_raw(key string, data string) string {
+    hex_res := hmac.sum256(&key, &data)
+    << raw_from_hex(hex_res)
+}
+
+pub fn hmac_hex(key string, data string) string {
+    << hmac.sum256(&key, &data)
+}
+
+pub fn compute_auth_header(
+    method string,
+    path string,
+    host string,
+    access_key string,
+    secret_key string,
+    region string,
+    amz_date string,
+    date_stamp string,
+    payload_hash string
+) string {
+    mut uri := path
+    if uri.len == 0 || (uri[0] & 255) != 47 {
+        uri = "/" + uri
+    }
+
+    canonical_headers := "host:" + host + "\nx-amz-content-sha256:" + payload_hash + "\nx-amz-date:" + amz_date + "\n"
+    signed_headers := "host;x-amz-content-sha256;x-amz-date"
+    canonical_request := method + "\n" + uri + "\n\n" + canonical_headers + "\n" + signed_headers + "\n" + payload_hash
+
+    canon_hash := sha256_hex(canonical_request)
+    credential_scope := date_stamp + "/" + region + "/s3/aws4_request"
+    string_to_sign := "AWS4-HMAC-SHA256\n" + amz_date + "\n" + credential_scope + "\n" + canon_hash
+
+    k_date := hmac_raw("AWS4" + secret_key, date_stamp)
+    k_region := hmac_raw(k_date, region)
+    k_service := hmac_raw(k_region, "s3")
+    k_signing := hmac_raw(k_service, "aws4_request")
+
+    signature := hmac_hex(k_signing, string_to_sign)
+
+    << "AWS4-HMAC-SHA256 Credential=" + access_key + "/" + credential_scope + ", SignedHeaders=" + signed_headers + ", Signature=" + signature
+}

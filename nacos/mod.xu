@@ -1,0 +1,4 @@
+@"github.com/xulang-org/packages/nacos"
+
+// Alibaba Nacos Service Registration and Dynamic Configuration Client for Xu
+// Supports OpenAPI v1/v2 service registration, discovery, heartbeat, and config publishing.

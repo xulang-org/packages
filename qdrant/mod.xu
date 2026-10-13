@@ -1,0 +1,13 @@
+@"github.com/xulang-org/packages/qdrant"
+
+#errors
+
+// Public API convenience helpers for Qdrant Vector Database
+
+pub fn open(endpoint string) Client {
+    << new_client(endpoint, "")
+}
+
+pub fn open_auth(endpoint string, api_key string) Client {
+    << new_client(endpoint, api_key)
+}

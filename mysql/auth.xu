@@ -1,0 +1,108 @@
+@"github.com/xulang-org/packages/mysql"
+
+#crypto/sha1
+#encoding/hex
+#strings
+
+fn native_token(password string, scramble string) string {
+    if password.len == 0 { << "" }
+    a := hex.decode_string(sha1.sum(password)) or (err) { << "" }
+    b := hex.decode_string(sha1.sum(strings.clone(&a))) or (err) { << "" }
+    c := hex.decode_string(sha1.sum(scramble + b)) or (err) { << "" }
+    mut out := ""
+    mut i := 0
+    while i < a.len && i < c.len {
+        out.push_byte((a[i] & 255) ^ (c[i] & 255))
+        i += 1
+    }
+    << out
+}
+
+fn trim_scramble(s string) string {
+    mut end := s.len
+    while end > 0 && (s[end - 1] & 255) == 0 { end -= 1 }
+    << s[0:end]
+}
+
+fn handshake(fd int, cfg &Config) string {
+    p := recv_packet(fd)
+    if p.err.len > 0 { << p.err }
+    if p.payload.len < 1 || (p.payload[0] & 255) != 10 { << "mysql: unsupported server handshake" }
+    mut off := 1
+    sv := cstring(&p.payload, off)
+    if sv.err.len > 0 { << sv.err }
+    off += sv.data.len + 1
+    if off + 4 + 8 + 1 + 2 > p.payload.len { << "mysql: malformed server handshake" }
+    off += 4
+    scramble1 := p.payload[off:off + 8]
+    off += 9
+    cap_low := le16_at(&p.payload, off)
+    if cap_low < 0 { << "mysql: malformed server handshake" }
+    off += 2
+    mut cap_flags := cap_low
+    mut scramble2 := ""
+    mut plugin := "mysql_native_password"
+    if off < p.payload.len {
+        if off + 1 + 2 + 1 + 10 > p.payload.len { << "mysql: malformed server handshake" }
+        off += 1
+        off += 2
+        cap_high := le16_at(&p.payload, off)
+        off += 2
+        cap_flags = cap_flags | (cap_high << 16)
+        if off >= p.payload.len { << "mysql: malformed server handshake" }
+        auth_len := p.payload[off] & 255
+        off += 1
+        off += 10
+        mut n2 := auth_len - 8
+        if n2 < 13 { n2 = 13 }
+        if n2 > p.payload.len - off { n2 = p.payload.len - off }
+        if n2 > 0 {
+            scramble2 = p.payload[off:off + n2]
+            off += n2
+        }
+        if off < p.payload.len {
+            pr := cstring(&p.payload, off)
+            if pr.err.len == 0 && pr.data.len > 0 { plugin = pr.data }
+        }
+    }
+    if plugin != "mysql_native_password" && plugin != "" {
+        << "mysql: authentication plugin " + plugin + " is not supported; use mysql_native_password"
+    }
+    if (cap_flags & 512) == 0 || (cap_flags & 32768) == 0 {
+        << "mysql: server does not support protocol 4.1 secure authentication"
+    }
+    mut cap := 1 | 8 | 512 | 32768 | 8192 | 131072 | 524288
+    // CLIENT_CONNECT_WITH_DB is only valid when a database is present.
+    if cfg.database.len == 0 { cap = cap & (0 - 9) }
+    auth := native_token(cfg.password, trim_scramble(scramble1 + scramble2))
+    body := le32(cap) + le32(16777216) + string_from_byte(45)
+    mut resp := body
+    for i in 0:23 { resp = resp + string_from_byte(0) }
+    resp = resp + cfg.user + string_from_byte(0)
+    resp = resp + string_from_byte(auth.len) + auth
+    if cfg.database.len > 0 { resp = resp + cfg.database + string_from_byte(0) }
+    resp = resp + "mysql_native_password" + string_from_byte(0)
+    e := send_packet(fd, 1, resp)
+    if e.len > 0 { << e }
+    p2 := recv_packet(fd)
+    if p2.err.len > 0 { << p2.err }
+    if p2.payload.len == 0 { << "mysql: empty authentication response" }
+    if (p2.payload[0] & 255) == 0 { << "" }
+    if (p2.payload[0] & 255) == 255 { << err_text(p2.payload) }
+    if (p2.payload[0] & 255) == 254 {
+        sw := cstring(&p2.payload, 1)
+        if sw.err.len > 0 { << sw.err }
+        if sw.data != "mysql_native_password" { << "mysql: authentication plugin " + sw.data + " is not supported" }
+        sstart := 1 + sw.data.len + 1
+        mut scramble := p2.payload[sstart:p2.payload.len]
+        scramble = trim_scramble(scramble)
+        e2 := send_packet(fd, p2.seq + 1, native_token(cfg.password, scramble))
+        if e2.len > 0 { << e2 }
+        p3 := recv_packet(fd)
+        if p3.err.len > 0 { << p3.err }
+        if p3.payload.len > 0 && (p3.payload[0] & 255) == 0 { << "" }
+        if p3.payload.len > 0 && (p3.payload[0] & 255) == 255 { << err_text(p3.payload) }
+    }
+    if (p2.payload[0] & 255) == 1 { << "mysql: caching_sha2_password is not supported; use mysql_native_password" }
+    << "mysql: malformed authentication response"
+}

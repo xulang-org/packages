@@ -1,0 +1,246 @@
+@"github.com/xulang-org/packages/websocket"
+
+#net
+#strings
+#errors
+
+pub struct WsClient {
+    pub host string
+    pub port int
+    pub path string
+}
+
+fn read_exact(fd int, need int) string {
+    mut buf := ""
+    while buf.len < need {
+        want := need - buf.len
+        chunk := net.conn_read(fd, want) or (err) {
+            >> errors.new("ws read error: " + err.msg())
+        }
+        if chunk.len == 0 {
+            >> errors.new("ws read unexpected EOF")
+        }
+        buf = buf + chunk
+    }
+    << buf
+}
+
+fn write_all(fd int, data string) bool {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) or (err) {
+            >> errors.new("ws write error: " + err.msg())
+        }
+        if n <= 0 {
+            <-
+        }
+        off = off + n
+    }
+    << true
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn new_client(endpoint string) WsClient {
+    mut ep := endpoint
+    prefix_ws := "ws://"
+    if ep.len >= prefix_ws.len && ep[0:prefix_ws.len] == prefix_ws {
+        ep = ep[prefix_ws.len:ep.len]
+    }
+    prefix_http := "http://"
+    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
+        ep = ep[prefix_http.len:ep.len]
+    }
+
+    mut host := "127.0.0.1"
+    mut port := 8080
+    mut path := "/"
+
+    slash := strings.index_of(&ep, "/")
+    if slash >= 0 {
+        path = ep[slash:ep.len]
+        ep = ep[0:slash]
+    }
+
+    colon := strings.index_of(&ep, ":")
+    if colon >= 0 {
+        host = ep[0:colon]
+        port_str := ep[(colon + 1):ep.len]
+        p_val := parse_int(port_str) or (err) {
+            port = 8080
+            << WsClient{host: host, port: 8080, path: path}
+        }
+        port = p_val
+    } else {
+        if ep.len > 0 {
+            host = ep
+        }
+    }
+
+    << WsClient{
+        host: host,
+        port: port,
+        path: path
+    }
+}
+
+pub fn (c WsClient) connect() int {
+    addr := c.host + ":" + str(c.port)
+    fd := net.dial(strings.clone(&addr)) or (err) {
+        >> errors.new("ws dial failed: " + err.msg())
+    }
+
+    client_key := "dGhlIHNhbXBsZSBub25jZQ=="
+    req := build_handshake_request(c.host, c.port, c.path, client_key + "")
+    write_all(fd, req) or (err) {
+        safe_close(fd)
+        >> err
+    }
+
+    // Read HTTP response headers until "\r\n\r\n"
+    mut resp := ""
+    mut found_header_end := false
+    while !found_header_end {
+        chunk := net.conn_read(fd, 256) or (err) {
+            safe_close(fd)
+            >> errors.new("ws handshake read error: " + err.msg())
+        }
+        if chunk.len == 0 {
+            safe_close(fd)
+            >> errors.new("ws handshake unexpected EOF")
+        }
+        resp = resp + chunk
+        if strings.index_of(&resp, "\r\n\r\n") >= 0 {
+            found_header_end = true
+        }
+    }
+
+    res := parse_handshake_response(resp)
+    if res.status_code != 101 {
+        safe_close(fd)
+        >> errors.new("ws handshake rejected, status: " + str(res.status_code))
+    }
+
+    expected_accept := compute_accept_key(client_key)
+    if res.accept_key != expected_accept {
+        safe_close(fd)
+        >> errors.new("ws handshake Sec-WebSocket-Accept mismatch: expected " + expected_accept + ", got " + res.accept_key)
+    }
+
+    << fd
+}
+
+pub fn (c WsClient) send_text(fd int, text string) bool {
+    f := build_frame(opcode_text, text, true, true)
+    << write_all(fd, f)
+}
+
+pub fn (c WsClient) send_binary(fd int, data string) bool {
+    f := build_frame(opcode_binary, data, true, true)
+    << write_all(fd, f)
+}
+
+pub fn (c WsClient) send_ping(fd int, payload string) bool {
+    f := build_frame(opcode_ping, payload, true, true)
+    << write_all(fd, f)
+}
+
+pub fn (c WsClient) send_pong(fd int, payload string) bool {
+    f := build_frame(opcode_pong, payload, true, true)
+    << write_all(fd, f)
+}
+
+pub fn (c WsClient) close_conn(fd int) {
+    if fd >= 0 {
+        f := build_frame(opcode_close, "", true, true)
+        write_all(fd, f) or (e) {
+            <<
+        }
+        safe_close(fd)
+    }
+}
+
+pub fn (c WsClient) read_frame(fd int) Frame {
+    hdr := read_exact(fd, 2) or >>
+    b0 := hdr[0] & 255
+    b1 := hdr[1] & 255
+
+    fin := (b0 & 128) != 0
+    opcode := b0 & 15
+    masked := (b1 & 128) != 0
+    len_code := b1 & 127
+
+    mut payload_len := len_code
+    if len_code == 126 {
+        ext := read_exact(fd, 2) or >>
+        e0 := ext[0] & 255
+        e1 := ext[1] & 255
+        payload_len = (e0 << 8) | e1
+    } else if len_code == 127 {
+        ext := read_exact(fd, 8) or >>
+        mut l := 0
+        mut i := 0
+        while i < 8 {
+            eb := ext[i] & 255
+            l = (l << 8) | eb
+            i = i + 1
+        }
+        payload_len = l
+    }
+
+    mut m0 := 0
+    mut m1 := 0
+    mut m2 := 0
+    mut m3 := 0
+    if masked {
+        mbytes := read_exact(fd, 4) or >>
+        m0 = mbytes[0] & 255
+        m1 = mbytes[1] & 255
+        m2 = mbytes[2] & 255
+        m3 = mbytes[3] & 255
+    }
+
+    mut payload := ""
+    if payload_len > 0 {
+        raw_payload := read_exact(fd, payload_len) or >>
+        if masked {
+            payload = apply_mask(raw_payload, m0, m1, m2, m3)
+        } else {
+            payload = raw_payload
+        }
+    }
+
+    // Auto-respond to Ping frames with Pong
+    if opcode == opcode_ping {
+        c.send_pong(fd, payload) or (err) {
+            << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload}
+        }
+    }
+
+    << Frame{
+        fin: fin,
+        opcode: opcode,
+        masked: masked,
+        payload: payload
+    }
+}
+
+pub fn (c WsClient) read_text(fd int) string {
+    while true {
+        f := c.read_frame(fd) or >>
+        if f.opcode == opcode_text {
+            << f.payload
+        }
+        if f.opcode == opcode_close {
+            >> errors.new("ws connection closed by peer")
+        }
+    }
+    << ""
+}

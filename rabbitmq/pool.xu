@@ -1,0 +1,176 @@
+@"github.com/xulang-org/packages/rabbitmq"
+
+#net
+#errors
+#strings
+#time
+
+// Connection Pool for RabbitMQ AMQP 0-9-1.
+// Manages reusable TCP client connections and channels via scalar channel.
+pub struct Pool {
+    pub host string
+    pub port int
+    pub user string
+    pub password string
+    pub vhost string
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn new_pool(host string, port int, user string, password string, vhost string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    mut h := host
+    if h.len == 0 {
+        h = "127.0.0.1"
+    }
+    mut p := port
+    if p <= 0 {
+        p = 5672
+    }
+    mut u := user
+    if u.len == 0 {
+        u = "guest"
+    }
+    mut pwd := password
+    if pwd.len == 0 {
+        pwd = "guest"
+    }
+    mut vh := vhost
+    if vh.len == 0 {
+        vh = "/"
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{
+        host: h,
+        port: p,
+        user: u,
+        password: pwd,
+        vhost: vh,
+        idle: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(host string, port int, user string, password string, vhost string, max_idle int) Pool {
+    << new_pool(host, port, user, password, vhost, max_idle)
+}
+
+pub fn (p &Pool) get() Client {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << Client{
+                    fd: fd,
+                    host: p.host + "",
+                    port: p.port,
+                    user: p.user + "",
+                    password: p.password + "",
+                    vhost: p.vhost + "",
+                    channel_id: 1
+                }
+            }
+        }
+        else {
+            mut c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
+            << c
+        }
+    }
+    mut c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
+    << c
+}
+
+pub fn (p &Pool) get_conn() int {
+    mut c := p.get() or (err) {
+        << -1
+    }
+    << c.fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &Pool) put(c Client) {
+    p.put_conn(c.fd)
+}
+
+pub fn (p &Pool) declare_queue(queue_name string, durable bool) int {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.declare_queue(queue_name, durable) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) publish(exchange_name string, routing_key string, body string) int {
+    mut c := p.get() or >>
+    fd := c.fd
+    res := c.publish(exchange_name, routing_key, body) or (err) {
+        p.put_conn(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) get_message(queue_name string, auto_ack bool) string {
+    mut attempts := 0
+    while attempts < 5 {
+        attempts = attempts + 1
+        mut c := p.get() or >>
+        fd := c.fd
+        res := c.get(queue_name, auto_ack) or (err) {
+            p.put_conn(fd)
+            >> err
+        }
+        p.put_conn(fd)
+        if res.len > 0 {
+            << res
+        }
+        if attempts < 5 {
+            time.sleep(50000000) // 50ms
+        }
+    }
+    << ""
+}
+
+pub fn (p &Pool) ping() bool {
+    mut c := p.get() or (err) {
+        << false
+    }
+    fd := c.fd
+    ok := c.ping()
+    p.put_conn(fd)
+    << ok
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

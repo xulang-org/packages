@@ -1,0 +1,121 @@
+@"github.com/xulang-org/packages/nacos"
+
+#net
+#net/pool
+#errors
+#strings
+
+pub struct Pool {
+    pub client Client
+    pub state chan pool.State
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, namespace string, max_idle int) Pool {
+    cli := new_client(endpoint, namespace)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := pool.new_state()
+    << Pool{
+        client: cli,
+        state: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(endpoint string, namespace string, max_idle int) Pool {
+    << new_pool(endpoint, namespace, max_idle)
+}
+
+// Shares sockets and close state; clones configuration strings.
+pub fn (p &Pool) dup() Pool {
+    << Pool{client: Client{host: strings.clone(&p.client.host), port: p.client.port, namespace_id: strings.clone(&p.client.namespace_id)}, state: p.state, max_idle: p.max_idle}
+}
+
+pub fn (p &Pool) get_conn() int {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    cached := sockets.take()
+    if cached == -2 { << -1 }
+    if cached >= 0 { << cached }
+    addr := p.client.host + ":" + str(p.client.port)
+    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    if !sockets.adopt(fd) { << -1 }
+    << fd
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, true)
+}
+
+pub fn (p &Pool) discard_conn(fd int) {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.release(fd, false)
+}
+
+pub fn (p &Pool) register_instance(service string, ip string, port int, group string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.register_instance_at(fd, service, ip, port, group, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) get_instances(service string, group string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.get_instances_at(fd, service, group, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) deregister_instance(service string, ip string, port int, group string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.deregister_instance_at(fd, service, ip, port, group, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) publish_config(data_id string, group string, content string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.publish_config_at(fd, data_id, group, content, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) get_config(data_id string, group string) string {
+    fd := p.get_conn()
+    if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
+    mut reusable := false
+    result := p.client.get_config_at(fd, data_id, group, mut &reusable) or (err) {
+        p.discard_conn(fd)
+        >> err
+    }
+    if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) remove_config(data_id string, group string) bool {
+    fd := p.get_conn()
+    if fd < 0 { << false }
+    mut reusable := false
+    result := p.client.remove_config_at(fd, data_id, group, mut &reusable)
+    if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
+    << result
+}
+
+pub fn (p &Pool) close() {
+    sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
+    sockets.close()
+}

@@ -1,0 +1,88 @@
+@"github.com/xulang-org/packages/qdrant"
+
+#errors
+#strings
+#encoding/json
+#strconv
+
+pub struct Point {
+    pub id int
+    pub vector []string
+    pub payload_json string
+}
+
+pub struct ScoredPoint {
+    pub id int
+    pub score string
+    pub payload_json string
+}
+
+fn format_vector_json(vec []string) string {
+    mut res := "["
+    mut i := 0
+    while i < vec.len {
+        if i > 0 {
+            res = res + ","
+        }
+        res = res + vec[i]
+        i = i + 1
+    }
+    res = res + "]"
+    << res
+}
+
+pub fn (c &mut Client) upsert_point(collection string, id int, vector []string, payload_json string) bool {
+    mut reusable := false
+    << c.upsert_point_at(-1, collection, id, vector, payload_json, mut &reusable)
+}
+
+fn (c &mut Client) upsert_point_at(fd int, collection string, id int, vector []string, payload_json string, reusable &mut bool) bool {
+    vec_json := format_vector_json(vector)
+    mut body := "{\"points\":[{\"id\":" + str(id) + ",\"vector\":" + vec_json
+    if payload_json.len > 0 {
+        body = body + ",\"payload\":" + payload_json
+    }
+    body = body + "}]}"
+
+    resp := c.request_at(fd, "PUT", "/collections/" + collection + "/points?wait=true", body, reusable) or (err) {
+        << false
+    }
+    << resp.status_code == 200
+}
+
+pub fn (c &mut Client) search(collection string, vector []string, limit int) []ScoredPoint {
+    mut reusable := false
+    << c.search_at(-1, collection, vector, limit, mut &reusable) or >>
+}
+
+fn (c &mut Client) search_at(fd int, collection string, vector []string, limit int, reusable &mut bool) []ScoredPoint {
+    vec_json := format_vector_json(vector)
+    body := "{\"vector\":" + vec_json + ",\"limit\":" + str(limit) + ",\"with_payload\":true}"
+
+    resp := c.request_at(fd, "POST", "/collections/" + collection + "/points/search", body, reusable) or >>
+    if resp.status_code != 200 {
+        >> errors.new("qdrant: search failed (status " + str(resp.status_code) + "): " + resp.body)
+    }
+
+    raw := resp.body
+    d := json.parse(&raw)
+    if !d.ok() { >> errors.new("qdrant: invalid JSON: " + d.error()) }
+    nodes := d.get(d.root(), "result")
+    if nodes < 0 || !d.is_list(nodes) { >> errors.new("qdrant: missing result array") }
+    mut results := []ScoredPoint{}
+    for i in 0:d.count(nodes) {
+        hit := d.at(nodes, i)
+        if !d.is_dict(hit) { >> errors.new("qdrant: invalid scored point") }
+        id := d.get(hit, "id")
+        score := d.get(hit, "score")
+        if id < 0 || !d.is_number(id) { >> errors.new("qdrant: this API requires integer ids") }
+        if score < 0 || !d.is_number(score) { >> errors.new("qdrant: missing score") }
+        text := d.text(id)
+        value := strconv.atoi(&text) or >>
+        payload := d.get(hit, "payload")
+        mut payload_json := ""
+        if payload >= 0 { payload_json = d.encode(payload) or >> }
+        results.push(ScoredPoint{id: value, score: d.text(score), payload_json: payload_json})
+    }
+    << results
+}

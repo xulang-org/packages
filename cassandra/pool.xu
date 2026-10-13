@@ -1,0 +1,88 @@
+@"github.com/xulang-org/packages/cassandra"
+
+#net
+#errors
+#strings
+
+pub struct Pool {
+    pub client Client
+    pub idle chan int
+    pub max_idle int
+}
+
+pub fn new_pool(endpoint string, keyspace string, max_idle int) Pool {
+    cli := new_client(endpoint, keyspace)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{
+        client: cli,
+        idle: ch,
+        max_idle: cap_val
+    }
+}
+
+pub fn open_pool(endpoint string, keyspace string, max_idle int) Pool {
+    << new_pool(endpoint, keyspace, max_idle)
+}
+
+pub fn (p &Pool) get_conn() int {
+    select {
+        fd := <-p.idle {
+            if fd >= 0 {
+                << fd
+            }
+        }
+        else {
+            fd := p.client.connect() or (err) {
+                << -1
+            }
+            << fd
+        }
+    }
+    << -1
+}
+
+pub fn (p &Pool) put_conn(fd int) {
+    if fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- fd {
+            <<
+        }
+        else {
+            safe_close(fd)
+        }
+    }
+}
+
+pub fn (p &Pool) execute(cql string) string {
+    fd := p.get_conn()
+    if fd < 0 {
+        >> errors.new("cassandra pool: failed to get connection")
+    }
+    res := p.client.execute_on_fd(fd, cql) or (err) {
+        safe_close(fd)
+        >> err
+    }
+    p.put_conn(fd)
+    << res
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

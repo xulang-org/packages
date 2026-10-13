@@ -1,0 +1,60 @@
+@"github.com/xulang-org/packages/postgres"
+
+#net
+#database/sql/driver
+
+// Direct wire helpers — no database/sql pool, no driver.Conn interface.
+// The sql.DB pool corrupts Conn interfaces in large binaries; these open a
+// TCP connection, run one statement, and close.
+
+pub struct WireResult {
+    pub columns []string
+    pub cells []string
+    pub ncols int
+    pub rows_affected int
+    pub err string
+}
+
+fn wire_fail(msg string) WireResult {
+    << WireResult{columns: []string{}, cells: []string{}, ncols: 0, rows_affected: 0, err: msg}
+}
+
+fn wire_from_qr(qr QueryResult) WireResult {
+    cols := copy_strings(&qr.columns)
+    cells := copy_strings(&qr.cells)
+    << WireResult{columns: cols, cells: cells, ncols: qr.ncols, rows_affected: qr.rows_affected, err: qr.err}
+}
+
+pub fn query_sql(dsn string, q string) WireResult {
+    cfg := parse_dsn(dsn) or (err) {
+        << wire_fail(err.msg())
+    }
+    fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
+        << wire_fail(err.msg())
+    }
+    serr := startup(fd, &cfg)
+    if serr.len > 0 {
+        close_fd(fd)
+        << wire_fail(serr)
+    }
+    qr := query_wire(fd, q, []driver.NamedValue{}, 1)
+    close_fd(fd)
+    << wire_from_qr(qr)
+}
+
+pub fn exec_sql(dsn string, q string) WireResult {
+    cfg := parse_dsn(dsn) or (err) {
+        << wire_fail(err.msg())
+    }
+    fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
+        << wire_fail(err.msg())
+    }
+    serr := startup(fd, &cfg)
+    if serr.len > 0 {
+        close_fd(fd)
+        << wire_fail(serr)
+    }
+    qr := query_wire(fd, q, []driver.NamedValue{}, 0)
+    close_fd(fd)
+    << wire_from_qr(qr)
+}

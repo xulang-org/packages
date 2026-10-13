@@ -1,0 +1,140 @@
+@"github.com/xulang-org/packages/mysql"
+
+#net
+#strings
+
+struct ReadResult {
+    pub data string
+    pub err string
+}
+
+struct Packet {
+    pub payload string
+    pub seq int
+    pub err string
+}
+
+struct LenResult {
+    pub n int
+    pub next int
+    pub null int
+    pub err string
+}
+
+struct ColumnDef {
+    pub name string
+    pub kind int
+}
+
+struct QueryResult {
+    pub columns []string
+    pub cells []string
+    pub ncols int
+    pub last_id int
+    pub rows_affected int
+    pub err string
+}
+
+fn empty_query() QueryResult {
+    << QueryResult{columns: []string{}, cells: []string{}, ncols: 0, last_id: 0, rows_affected: 0, err: ""}
+}
+
+fn le16(v int) string { << string_from_byte(v & 255) + string_from_byte((v >> 8) & 255) }
+fn le24(v int) string { << string_from_byte(v & 255) + string_from_byte((v >> 8) & 255) + string_from_byte((v >> 16) & 255) }
+fn le32(v int) string { << string_from_byte(v & 255) + string_from_byte((v >> 8) & 255) + string_from_byte((v >> 16) & 255) + string_from_byte((v >> 24) & 255) }
+
+fn le16_at(s &string, off int) int {
+    if off < 0 || off + 1 >= s.len { << -1 }
+    << (s[off] & 255) | ((s[off + 1] & 255) << 8)
+}
+
+fn le24_at(s &string, off int) int {
+    if off < 0 || off + 2 >= s.len { << -1 }
+    << (s[off] & 255) | ((s[off + 1] & 255) << 8) | ((s[off + 2] & 255) << 16)
+}
+
+fn le32_at(s &string, off int) int {
+    if off < 0 || off + 3 >= s.len { << -1 }
+    << (s[off] & 255) | ((s[off + 1] & 255) << 8) | ((s[off + 2] & 255) << 16) | ((s[off + 3] & 255) << 24)
+}
+
+fn read_exact(fd int, n int) ReadResult {
+    if n < 0 || n > 16777216 { << ReadResult{data: "", err: "mysql: invalid packet length"} }
+    mut out := ""
+    while out.len < n {
+        part := net.conn_read(fd, n - out.len) or (err) { << ReadResult{data: "", err: "mysql: connection: " + err.msg()} }
+        if part.len == 0 { << ReadResult{data: "", err: "mysql: connection closed"} }
+        out = out + part
+    }
+    << ReadResult{data: out, err: ""}
+}
+
+fn write_all(fd int, data string) string {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) or (err) { << "mysql: connection: " + err.msg() }
+        if n <= 0 { << "mysql: connection closed" }
+        off += n
+    }
+    << ""
+}
+
+fn recv_packet(fd int) Packet {
+    h := read_exact(fd, 4)
+    if h.err.len > 0 { << Packet{payload: "", seq: 0, err: h.err} }
+    n := le24_at(&h.data, 0)
+    if n < 0 || n > 16777216 { << Packet{payload: "", seq: 0, err: "mysql: invalid packet length"} }
+    b := read_exact(fd, n)
+    if b.err.len > 0 { << Packet{payload: "", seq: 0, err: b.err} }
+    << Packet{payload: b.data, seq: h.data[3] & 255, err: ""}
+}
+
+fn send_packet(fd int, seq int, payload string) string {
+    frame := le24(payload.len) + string_from_byte(seq & 255) + payload
+    << write_all(fd, frame)
+}
+
+fn cstring(body &string, off int) ReadResult {
+    if off < 0 || off > body.len { << ReadResult{data: "", err: "mysql: malformed cstring"} }
+    mut out := ""
+    mut i := off
+    while i < body.len {
+        if (body[i] & 255) == 0 { << ReadResult{data: out, err: ""} }
+        out.push_byte(body[i] & 255)
+        i += 1
+    }
+    << ReadResult{data: "", err: "mysql: malformed cstring"}
+}
+
+fn err_text(body string) string {
+    if body.len < 3 { << "mysql: server error"}
+    mut off := 3
+    if off < body.len && (body[off] & 255) == 35 { off += 6 }
+    if off < body.len { << "mysql: " + body[off:body.len] }
+    << "mysql: server error"
+}
+
+fn read_len(s &string, off int) LenResult {
+    if off < 0 || off >= s.len { << LenResult{n: 0, next: off, null: 0, err: "mysql: malformed length-encoded value"} }
+    b := s[off] & 255
+    if b < 251 { << LenResult{n: b, next: off + 1, null: 0, err: ""} }
+    if b == 251 { << LenResult{n: 0, next: off + 1, null: 1, err: ""} }
+    if b == 252 {
+        n := le16_at(s, off + 1)
+        if n < 0 { << LenResult{n: 0, next: off, null: 0, err: "mysql: malformed length-encoded value"} }
+        << LenResult{n: n, next: off + 3, null: 0, err: ""}
+    }
+    if b == 253 {
+        n := le24_at(s, off + 1)
+        if n < 0 { << LenResult{n: 0, next: off, null: 0, err: "mysql: malformed length-encoded value"} }
+        << LenResult{n: n, next: off + 4, null: 0, err: ""}
+    }
+    if b == 254 {
+        if off + 8 >= s.len { << LenResult{n: 0, next: off, null: 0, err: "mysql: malformed length-encoded value"} }
+        mut n := 0
+        for i in 0:8 { n = n | ((s[off + 1 + i] & 255) << (8 * i)) }
+        << LenResult{n: n, next: off + 9, null: 0, err: ""}
+    }
+    << LenResult{n: 0, next: off, null: 0, err: "mysql: malformed length-encoded value"}
+}

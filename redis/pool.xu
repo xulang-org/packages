@@ -1,0 +1,97 @@
+@"github.com/xulang-org/packages/redis"
+
+#errors
+#net
+
+pub struct Pool {
+    pub addr string
+    pub auth string
+    pub db int
+    pub idle chan int
+    pub max_idle int
+}
+
+fn safe_close(fd int) {
+    if fd >= 0 {
+        net.conn_close(fd) or (e) {
+            <<
+        }
+    }
+}
+
+pub fn new_pool(addr string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{addr: addr, auth: "", db: 0, idle: ch, max_idle: cap_val}
+}
+
+pub fn new_pool_auth(addr string, auth string, max_idle int) Pool {
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{addr: addr, auth: auth, db: 0, idle: ch, max_idle: cap_val}
+}
+
+pub fn new_pool_url(raw string, max_idle int) Pool {
+    opt := parse_url(raw)
+    mut cap_val := max_idle
+    if cap_val <= 0 {
+        cap_val = 10
+    }
+    ch := chan int{cap: cap_val}
+    << Pool{addr: opt.addr, auth: opt.password, db: opt.db, idle: ch, max_idle: cap_val}
+}
+
+pub fn (p &Pool) get() Client {
+    select {
+        fd := <-p.idle {
+            << Client{fd: fd, buf: "", addr: p.addr}
+        }
+        else {
+            mut c := dial(p.addr) or >>
+            if p.auth.len > 0 {
+                c.auth(p.auth) or >>
+            }
+            if p.db > 0 {
+                c.select_db(p.db) or >>
+            }
+            << c
+        }
+    }
+    mut c := dial(p.addr) or >>
+    << c
+}
+
+pub fn (p &Pool) put(c Client) {
+    if c.fd < 0 {
+        <<
+    }
+    select {
+        p.idle <- c.fd {
+            <<
+        }
+        else {
+            safe_close(c.fd)
+        }
+    }
+}
+
+pub fn (p &Pool) close() {
+    mut done := false
+    while !done {
+        select {
+            fd := <-p.idle {
+                safe_close(fd)
+            }
+            else {
+                done = true
+                <-
+            }
+        }
+    }
+}

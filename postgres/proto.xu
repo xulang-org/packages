@@ -1,0 +1,119 @@
+@"github.com/xulang-org/packages/postgres"
+
+#net
+#strings
+
+struct ReadResult {
+    pub data string
+    pub err string
+}
+
+struct Packet {
+    pub typ int
+    pub body string
+    pub err string
+}
+
+struct QueryResult {
+    pub columns []string
+    pub cells []string
+    pub ncols int
+    pub last_id int
+    pub rows_affected int
+    pub err string
+}
+
+fn empty_query() QueryResult {
+    << QueryResult{columns: []string{}, cells: []string{}, ncols: 0, last_id: 0, rows_affected: 0, err: ""}
+}
+
+fn be16(v int) string {
+    << string_from_byte((v >> 8) & 255) + string_from_byte(v & 255)
+}
+
+fn be32(v int) string {
+    << string_from_byte((v >> 24) & 255) + string_from_byte((v >> 16) & 255) + string_from_byte((v >> 8) & 255) + string_from_byte(v & 255)
+}
+
+fn be16_at(s &string, off int) int {
+    if off < 0 || off + 1 >= s.len { << -1 }
+    << ((s[off] & 255) << 8) | (s[off + 1] & 255)
+}
+
+fn be32_at(s &string, off int) int {
+    if off < 0 || off + 3 >= s.len { << -1 }
+    << ((s[off] & 255) << 24) | ((s[off + 1] & 255) << 16) | ((s[off + 2] & 255) << 8) | (s[off + 3] & 255)
+}
+
+// DataRow lengths are signed Int32. OIDs and other unsigned fields keep
+// using be32_at so values with the high bit set remain intact.
+fn be_i32_at(s &string, off int) int {
+    n := be32_at(s, off)
+    if n >= 2147483648 { << n - 4294967296 }
+    << n
+}
+
+fn read_exact(fd int, n int) ReadResult {
+    if n < 0 || n > 16777216 { << ReadResult{data: "", err: "postgres: invalid packet length"} }
+    mut out := ""
+    while out.len < n {
+        need := n - out.len
+        part := net.conn_read(fd, need) or (err) { << ReadResult{data: "", err: err.msg()} }
+        if part.len == 0 { << ReadResult{data: "", err: "postgres: connection closed"} }
+        out = out + part
+    }
+    << ReadResult{data: out, err: ""}
+}
+
+fn write_all(fd int, data string) string {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len] + ""
+        n := net.conn_write(fd, &part) or (err) { << err.msg() }
+        if n <= 0 { << "postgres: connection closed" }
+        off += n
+    }
+    << ""
+}
+
+fn send_packet(fd int, typ int, body string) string {
+    frame := string_from_byte(typ & 255) + be32(body.len + 4) + body
+    << write_all(fd, frame)
+}
+
+fn recv_packet(fd int) Packet {
+    h := read_exact(fd, 5)
+    if h.err.len > 0 { << Packet{typ: 0, body: "", err: h.err} }
+    n := be32_at(&h.data, 1)
+    if n < 4 || n > 16777216 { << Packet{typ: 0, body: "", err: "postgres: invalid packet length"} }
+    b := read_exact(fd, n - 4)
+    if b.err.len > 0 { << Packet{typ: 0, body: "", err: b.err} }
+    << Packet{typ: h.data[0] & 255, body: b.data, err: ""}
+}
+
+fn cstring(body &string, off int) ReadResult {
+    if off < 0 || off > body.len { << ReadResult{data: "", err: "postgres: malformed cstring"} }
+    mut out := ""
+    mut i := off
+    while i < body.len {
+        if (body[i] & 255) == 0 { << ReadResult{data: out, err: ""} }
+        out.push_byte(body[i] & 255)
+        i += 1
+    }
+    << ReadResult{data: "", err: "postgres: malformed cstring"}
+}
+
+fn error_text(body string) string {
+    mut i := 0
+    mut msg := "postgres: server error"
+    while i < body.len {
+        tag := body[i] & 255
+        i += 1
+        if tag == 0 { <- }
+        r := cstring(&body, i)
+        if r.err.len > 0 { <- }
+        if tag == 77 { msg = "postgres: " + r.data }
+        i += r.data.len + 1
+    }
+    << msg
+}
