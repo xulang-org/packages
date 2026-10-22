@@ -1,5 +1,5 @@
 module: "github.com/xulang-org/packages"
-version: !ver 0.1.1
+version: !ver 0.1.2
 xu: !ver 0.8.3
 native:
   sqlite_native: file:./sqlite/native/sqlite.xulib
