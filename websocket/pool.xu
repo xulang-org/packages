@@ -57,6 +57,19 @@ pub fn (p &WsPool) put_conn(fd int) {
 
 // Executes an echo round-trip borrowing from pool
 pub fn (p &WsPool) echo_text(text string) string {
+    if p.client.secure {
+        mut tc := p.client.connect_secure() or >>
+        result := p.client.send_text_secure(mut &tc, text) or (err) {
+            p.client.close_secure(mut &tc)
+            >> err
+        }
+        out := p.client.read_text_secure(mut &tc) or (err) {
+            p.client.close_secure(mut &tc)
+            >> err
+        }
+        p.client.close_secure(mut &tc)
+        << out
+    }
     fd := p.get_conn()
     if fd < 0 {
         >> errors.new("ws pool failed to get connection")

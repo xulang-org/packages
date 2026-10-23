@@ -10,6 +10,7 @@
 pub struct Pool {
     pub host string
     pub port int
+    pub secure bool
     pub token string
     pub org string
     pub bucket string
@@ -27,6 +28,7 @@ pub fn new_pool(endpoint string, token string, org string, bucket string, max_id
     << Pool{
         host: c.host,
         port: c.port,
+        secure: c.secure,
         token: c.token,
         org: c.org,
         bucket: c.bucket,
@@ -43,6 +45,7 @@ pub fn (p &Pool) get() Client {
     << Client{
         host: p.host + "",
         port: p.port,
+        secure: p.secure,
         token: p.token + "",
         org: p.org + "",
         bucket: p.bucket + ""
@@ -51,10 +54,11 @@ pub fn (p &Pool) get() Client {
 
 // Shares sockets and close state; clones configuration strings.
 pub fn (p &Pool) dup() Pool {
-    << Pool{host: strings.clone(&p.host), port: p.port, token: strings.clone(&p.token), org: strings.clone(&p.org), bucket: strings.clone(&p.bucket), state: p.state, max_idle: p.max_idle}
+    << Pool{host: strings.clone(&p.host), port: p.port, secure: p.secure, token: strings.clone(&p.token), org: strings.clone(&p.org), bucket: strings.clone(&p.bucket), state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -66,16 +70,23 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &Pool) write_point(point Point) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.write_point(point) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
     mut reusable := false
@@ -89,6 +100,11 @@ pub fn (p &Pool) write_point(point Point) bool {
 }
 
 pub fn (p &Pool) write_line(line string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.write_line(line) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
     mut reusable := false
@@ -102,6 +118,11 @@ pub fn (p &Pool) write_line(line string) bool {
 }
 
 pub fn (p &Pool) write_raw(lines string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.write_raw(lines) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
     mut reusable := false
@@ -115,6 +136,11 @@ pub fn (p &Pool) write_raw(lines string) bool {
 }
 
 pub fn (p &Pool) query_flux(flux string) string {
+    if p.secure {
+        mut c := p.get()
+        result := c.query_flux(flux) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
     mut reusable := false
@@ -128,6 +154,11 @@ pub fn (p &Pool) query_flux(flux string) string {
 }
 
 pub fn (p &Pool) ping() bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.ping() or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
     mut reusable := false

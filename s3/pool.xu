@@ -10,6 +10,7 @@
 pub struct Pool {
     pub host string
     pub port int
+    pub secure bool
     pub endpoint string
     pub access_key string
     pub secret_key string
@@ -28,6 +29,7 @@ pub fn new_pool(endpoint string, access_key string, secret_key string, region st
     << Pool{
         host: c.host,
         port: c.port,
+        secure: c.secure,
         endpoint: endpoint,
         access_key: access_key,
         secret_key: secret_key,
@@ -41,6 +43,7 @@ pub fn (p &Pool) get() Client {
     << Client{
         host: p.host + "",
         port: p.port,
+        secure: p.secure,
         access_key: p.access_key + "",
         secret_key: p.secret_key + "",
         region: p.region + ""
@@ -49,10 +52,11 @@ pub fn (p &Pool) get() Client {
 
 // Shares sockets and close state; clones configuration strings.
 pub fn (p &Pool) dup() Pool {
-    << Pool{host: strings.clone(&p.host), port: p.port, endpoint: strings.clone(&p.endpoint), access_key: strings.clone(&p.access_key), secret_key: strings.clone(&p.secret_key), region: strings.clone(&p.region), state: p.state, max_idle: p.max_idle}
+    << Pool{host: strings.clone(&p.host), port: p.port, secure: p.secure, endpoint: strings.clone(&p.endpoint), access_key: strings.clone(&p.access_key), secret_key: strings.clone(&p.secret_key), region: strings.clone(&p.region), state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -64,16 +68,23 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &Pool) make_bucket(bucket string) int {
+    if p.secure {
+        mut c := p.get()
+        result := c.make_bucket(bucket) or (err) { << 0 }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
     mut reusable := false
@@ -87,6 +98,11 @@ pub fn (p &Pool) make_bucket(bucket string) int {
 }
 
 pub fn (p &Pool) bucket_exists(bucket string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.bucket_exists(bucket) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -97,6 +113,11 @@ pub fn (p &Pool) bucket_exists(bucket string) bool {
 }
 
 pub fn (p &Pool) remove_bucket(bucket string) int {
+    if p.secure {
+        mut c := p.get()
+        result := c.remove_bucket(bucket) or (err) { << 0 }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
     mut reusable := false
@@ -110,6 +131,11 @@ pub fn (p &Pool) remove_bucket(bucket string) int {
 }
 
 pub fn (p &Pool) put_object(bucket string, key string, data string, content_type string) int {
+    if p.secure {
+        mut c := p.get()
+        result := c.put_object(bucket, key, data, content_type) or (err) { << 0 }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
     mut reusable := false
@@ -123,6 +149,11 @@ pub fn (p &Pool) put_object(bucket string, key string, data string, content_type
 }
 
 pub fn (p &Pool) get_object(bucket string, key string) string {
+    if p.secure {
+        mut c := p.get()
+        result := c.get_object(bucket, key) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
     mut reusable := false
@@ -136,6 +167,11 @@ pub fn (p &Pool) get_object(bucket string, key string) string {
 }
 
 pub fn (p &Pool) remove_object(bucket string, key string) int {
+    if p.secure {
+        mut c := p.get()
+        result := c.remove_object(bucket, key) or (err) { << 0 }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
     mut reusable := false
@@ -149,6 +185,11 @@ pub fn (p &Pool) remove_object(bucket string, key string) int {
 }
 
 pub fn (p &Pool) object_exists(bucket string, key string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.object_exists(bucket, key) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false

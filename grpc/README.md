@@ -33,10 +33,14 @@ fn main() {
 
 ## 当前传输范围
 
-- 使用明文 HTTP/2（h2c prior knowledge），尚不提供 TLS、压缩或 streaming RPC。
+- 支持明文 HTTP/2（h2c prior knowledge）与 `https://` 的 HTTP/2 TLS（ALPN h2）；仍不提供压缩或 streaming RPC。
 - 每次 unary 调用读取完整 DATA 消息及 HPACK trailers；`Response.status` 来自 `grpc-status`，非零状态由调用方处理。缺失状态、消息截断、多条 unary 消息或压缩标志会报错。
 - HPACK 支持静态表、literal 与 Huffman；通过 `HEADER_TABLE_SIZE=0` 禁用动态表。支持 CONTINUATION、PADDED 和 PING/SETTINGS ACK。
 - 请求消息最多 65,530 字节，依赖初始请求窗口至少 65,535；更小窗口明确拒绝。响应消息最多 16 MiB、帧最多 16 KiB、头部最多 64 KiB。
 - 连接池的高层调用复用与完整 HTTP/2 会话管理仍在 packages 审计待办中，当前回归覆盖的是直接 unary 调用。
 
 在仓库根执行 `make packages-test` 可验证非零状态、DATA 分帧、Huffman trailers、长路径、压缩与截断拒绝。
+
+## TLS
+
+`grpc.new_client("https://host:port")` performs certificate verification with SNI. The secure unary path keeps the same frame and trailer limits as h2c; the pool's legacy fd checkout remains h2c-only.

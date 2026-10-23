@@ -25,11 +25,16 @@ pub fn new_pool(endpoint string, user string, pass string, db string, max_idle i
     }
 }
 
+fn client_copy(p &Pool) Neo4jClient {
+    << Neo4jClient{host: strings.clone(&p.client.host), port: p.client.port, secure: p.client.secure, user: strings.clone(&p.client.user), password: strings.clone(&p.client.password), database: strings.clone(&p.client.database), auth_header: strings.clone(&p.client.auth_header)}
+}
+
 // Copies configuration while sharing the connection and close lifecycle.
 pub fn (p &Pool) dup() Pool {
     c := Neo4jClient{
         host: strings.clone(&p.client.host),
         port: p.client.port,
+        secure: p.client.secure,
         user: strings.clone(&p.client.user),
         password: strings.clone(&p.client.password),
         database: strings.clone(&p.client.database),
@@ -39,6 +44,7 @@ pub fn (p &Pool) dup() Pool {
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.client.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -50,11 +56,13 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.client.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.client.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
@@ -64,6 +72,9 @@ pub fn open_pool(endpoint string, user string, pass string, db string, max_idle 
 }
 
 pub fn (p &Pool) execute(stmt string) string {
+    if p.client.secure {
+        << p.client.execute(stmt) or >>
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("neo4j: pool closed or dial failed") }
     mut reusable := false

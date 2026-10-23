@@ -1,0 +1,41 @@
+@"github.com/xulang-org/packages/mysql"
+
+#crypto/tls
+transport #github.com/xulang-org/packages/transport
+
+fn read_exact_tls(tc &mut transport.Conn, n int) ReadResult {
+    if n < 0 || n > 16777216 { << ReadResult{data: "", err: "mysql: invalid packet length"} }
+    mut out := ""
+    while out.len < n {
+        part := tc.read(n - out.len) or (err) { << ReadResult{data: "", err: "mysql: connection: " + err.msg()} }
+        if part.len == 0 { << ReadResult{data: "", err: "mysql: connection closed"} }
+        out = out + part
+    }
+    << ReadResult{data: out, err: ""}
+}
+
+fn write_all_tls(tc &mut transport.Conn, data string) string {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := tc.write(&part) or (err) { << "mysql: connection: " + err.msg() }
+        if n <= 0 { << "mysql: connection closed" }
+        off += n
+    }
+    << ""
+}
+
+fn recv_packet_tls(tc &mut transport.Conn) Packet {
+    h := read_exact_tls(tc, 4)
+    if h.err.len > 0 { << Packet{payload: "", seq: 0, err: h.err} }
+    n := le24_at(&h.data, 0)
+    if n < 0 || n > 16777216 { << Packet{payload: "", seq: 0, err: "mysql: invalid packet length"} }
+    b := read_exact_tls(tc, n)
+    if b.err.len > 0 { << Packet{payload: "", seq: 0, err: b.err} }
+    << Packet{payload: b.data, seq: h.data[3] & 255, err: ""}
+}
+
+fn send_packet_tls(tc &mut transport.Conn, seq int, payload string) string {
+    frame := le24(payload.len) + string_from_byte(seq & 255) + payload
+    << write_all_tls(tc, frame)
+}

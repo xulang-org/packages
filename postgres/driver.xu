@@ -7,6 +7,9 @@
 #strconv
 #strings
 #time
+#crypto/tls
+#crypto/x509
+transport #github.com/xulang-org/packages/transport
 
 pub struct PostgresDriver {
     pub tag int
@@ -15,6 +18,8 @@ pub struct PostgresDriver {
 
 struct PgState {
     pub fd int
+    pub secure int
+    pub tc_chan chan transport.Conn
     pub closed int
     pub open_err string
     pub tx int
@@ -187,6 +192,87 @@ fn query_wire(fd int, q string, args []driver.NamedValue, want_rows int) QueryRe
     << qr
 }
 
+
+fn query_wire_tls(tc &mut transport.Conn, q string, args []driver.NamedValue, want_rows int) QueryResult {
+    mut qr := empty_query()
+    mut types := []int{}
+    mut e := ""
+    if args.len == 0 {
+        e = send_packet_tls(tc, 81, q + string_from_byte(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+    } else {
+        // Parse + Bind + Describe + Execute + Sync. Values are sent in text
+        // format, letting PostgreSQL perform the normal input conversion.
+        e = send_packet_tls(tc, 80, string_from_byte(0) + q + string_from_byte(0) + be16(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet_tls(tc, 66, string_from_byte(0) + string_from_byte(0) + be16(0) + be16(args.len) + pg_args(&args) + be16(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet_tls(tc, 68, string_from_byte(80) + string_from_byte(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet_tls(tc, 69, string_from_byte(0) + be32(0))
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+        e = send_packet_tls(tc, 83, "")
+        if e.len > 0 {
+            qr.err = e
+            << qr
+        }
+    }
+    mut done := 0
+    while done == 0 {
+        p := recv_packet_tls(tc)
+        if p.err.len > 0 {
+            qr.err = p.err
+            << qr
+        }
+        if p.typ == 84 {
+            desc := parse_row_description(p.body + "")
+            if desc.err.len > 0 {
+                qr.err = desc.err
+                << qr
+            }
+            qr.columns = copy_strings(&desc.columns)
+            qr.ncols = desc.ncols
+            // Re-read OIDs from the description for typed cell conversion.
+            mut off := 2
+            for i in 0:qr.ncols {
+                r := cstring(&p.body, off)
+                off += r.data.len + 1
+                types.push(be32_at(&p.body, off + 6))
+                off += 18
+            }
+        } else if p.typ == 68 {
+            e2 := append_data_row(mut &qr, p.body, &types)
+            if e2.len > 0 {
+                qr.err = e2
+                << qr
+            }
+        } else if p.typ == 67 {
+            tag := cstring(&p.body, 0)
+            if tag.err.len == 0 { qr.rows_affected = command_rows(tag.data) }
+        } else if p.typ == 69 {
+            qr.err = error_text(p.body)
+        } else if p.typ == 90 {
+            done = 1
+        }
+    }
+    << qr
+}
+
 fn pg_arg_val(args &[]driver.NamedValue, i int) string {
     if i < 0 || i >= args.len {
         << be32(-1)
@@ -239,6 +325,16 @@ fn pg_args(args &[]driver.NamedValue) string {
 fn take_st(c &PgConn) PgState { << <- c.st }
 fn put_st(c &PgConn, s PgState) { c.st <- s }
 
+fn query_state(s &mut PgState, q string, args []driver.NamedValue, want_rows int) QueryResult {
+    if s.secure != 0 {
+        mut tc := <-s.tc_chan
+        qr := query_wire_tls(mut &tc, q, args, want_rows)
+        s.tc_chan <- tc
+        << qr
+    }
+    << query_wire(s.fd, q, args, want_rows)
+}
+
 fn close_fd(fd int) {
     net.conn_close(fd) or (err) {
         <<
@@ -246,25 +342,85 @@ fn close_fd(fd int) {
     <<
 }
 
+fn close_tls_quiet(tc &mut transport.Conn) int {
+    tc.close() or (err) { << 0 }
+    << 0
+}
+
+fn closed_tc_chan() chan transport.Conn {
+    ch := chan transport.Conn{cap: 1}
+    ch <- transport.closed_conn()
+    << ch
+}
+
+fn failed_conn(msg string) driver.Conn {
+    ch := chan PgState{cap: 1}
+    ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: msg, tx: 0}
+    << driver.Conn(PgConn{st: ch})
+}
+
+fn new_conn_tls(cfg Config) driver.Conn {
+    port_text := str(cfg.port)
+    addr := net.join_host_port(&cfg.host, &port_text)
+    mut raw := net.dial_to("tcp", addr) or (err) { << failed_conn(err.msg()) }
+    ssl_request := be32(8) + be32(80877103)
+    raw.write(&ssl_request) or (err) {
+        raw.close() or (close_err) { << failed_conn(err.msg()) }
+        << failed_conn(err.msg())
+    }
+    answer := raw.read(1) or (err) {
+        raw.close() or (close_err) { << failed_conn(err.msg()) }
+        << failed_conn(err.msg())
+    }
+    if answer != "S" {
+        raw.close() or (close_err) { << failed_conn("postgres: server refused TLS") }
+        << failed_conn("postgres: server refused TLS")
+    }
+    mut tc_cfg := tls.new_config(cfg.host + "")
+    if cfg.root_cert_file.len > 0 {
+        pem := read_file(cfg.root_cert_file) or (err) { << failed_conn(err.msg()) }
+        ncert := x509.append_certificates(mut &tc_cfg.root_cas, &pem) or (err) {
+            << failed_conn(err.msg())
+        }
+        if ncert <= 0 { << failed_conn("postgres: no certificates in sslrootcert") }
+    }
+    tls_conn := tls.client(raw, &tc_cfg) or (err) { << failed_conn(err.msg()) }
+    mut tr := transport.Conn{fd: -1, tls_conn: tls_conn, secure: true, closed: false, eof: false, buf: ""}
+    startup_err := startup_tls(mut &tr, &cfg)
+    ch := chan PgState{cap: 1}
+    tcch := chan transport.Conn{cap: 1}
+    if startup_err.len > 0 { tr.close() or (close_err) { << failed_conn(startup_err) } }
+    tcch <- tr
+    if startup_err.len > 0 {
+        ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: startup_err, tx: 0}
+    } else {
+        ch <- PgState{fd: -1, secure: 1, tc_chan: tcch, closed: 0, open_err: "", tx: 0}
+    }
+    << driver.Conn(PgConn{st: ch})
+}
+
 fn new_conn(cfg Config) driver.Conn {
+    if cfg.ssl_mode != "disable" {
+        << new_conn_tls(cfg)
+    }
     fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
         ch := chan PgState{cap: 1}
-        ch <- PgState{fd: -1, closed: 1, open_err: err.msg(), tx: 0}
+        ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: err.msg(), tx: 0}
         << driver.Conn(PgConn{st: ch})
     }
     err := startup(fd, &cfg)
     ch := chan PgState{cap: 1}
     if err.len > 0 {
         close_fd(fd)
-        ch <- PgState{fd: -1, closed: 1, open_err: err, tx: 0}
-    } else { ch <- PgState{fd: fd, closed: 0, open_err: "", tx: 0} }
+        ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: err, tx: 0}
+    } else { ch <- PgState{fd: fd, secure: 0, tc_chan: closed_tc_chan(), closed: 0, open_err: "", tx: 0} }
     << driver.Conn(PgConn{st: ch})
 }
 
 fn (d PostgresDriver) open(name string) driver.Conn {
     cfg := parse_dsn(name) or (err) {
         ch := chan PgState{cap: 1}
-        ch <- PgState{fd: -1, closed: 1, open_err: err.msg(), tx: 0}
+        ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: err.msg(), tx: 0}
         << driver.Conn(PgConn{st: ch})
     }
     << new_conn(cfg)
@@ -309,7 +465,7 @@ fn (c PgConn) ping() string {
         put_st(&c, s)
         << "sql: connection is closed"
     }
-    qr := query_wire(s.fd, "SELECT 1", []driver.NamedValue{}, 1)
+    qr := query_state(mut &s, "SELECT 1", []driver.NamedValue{}, 1)
     if qr.err.len > 0 {
         s.closed = 1
         put_st(&c, s)
@@ -328,11 +484,15 @@ fn (c PgConn) close() string {
     fd := s.fd
     s.closed = 1
     s.fd = -1
-    put_st(&c, s)
-    if fd >= 0 {
+    if s.secure != 0 {
+        mut tc := <-s.tc_chan
+        close_tls_quiet(mut &tc)
+        s.tc_chan <- transport.closed_conn()
+    } else if fd >= 0 {
         _ := send_packet(fd, 88, "")
         close_fd(fd)
     }
+    put_st(&c, s)
     << ""
 }
 
@@ -352,7 +512,7 @@ fn (c PgConn) reset_session(ctx &context.Context) string {
     }
     // Only clear an open transaction — do not issue ROLLBACK on every checkout.
     if s.tx != 0 {
-        qr := query_wire(s.fd, "ROLLBACK", []driver.NamedValue{}, 0)
+        qr := query_state(mut &s, "ROLLBACK", []driver.NamedValue{}, 0)
         if qr.err.len > 0 {
             s.closed = 1
             put_st(&c, s)
@@ -375,7 +535,7 @@ fn (c PgConn) exec(q string, args []driver.NamedValue) driver.ExecResult {
         put_st(&c, s)
         << fail_exec("sql: connection is closed")
     }
-    qr := query_wire(s.fd, q, args, 0)
+    qr := query_state(mut &s, q, args, 0)
     if qr.err.len > 0 {
         if strings.contains(&qr.err, "connection") {
             s.closed = 1
@@ -400,7 +560,7 @@ fn (c PgConn) query(q string, args []driver.NamedValue) driver.RowsResult {
         put_st(&c, s)
         << fail_rows("sql: connection is closed")
     }
-    qr := query_wire(s.fd, q, args, 1)
+    qr := query_state(mut &s, q, args, 1)
     if qr.err.len > 0 {
         if strings.contains(&qr.err, "connection") {
             s.closed = 1
@@ -435,7 +595,7 @@ fn (c PgConn) begin_tx(iso int, ro bool) driver.Tx {
     if iso == 4 { q = q + " ISOLATION LEVEL REPEATABLE READ" }
     if iso == 2 { q = q + " ISOLATION LEVEL READ COMMITTED" }
     if ro { q = q + " READ ONLY" }
-    qr := query_wire(s.fd, q, []driver.NamedValue{}, 0)
+    qr := query_state(mut &s, q, []driver.NamedValue{}, 0)
     if qr.err.len == 0 { s.tx = 1 }
     put_st(&c, s)
     << driver.Tx(PgTx{st: c.st})
@@ -448,7 +608,7 @@ fn (t PgTx) commit() string {
         put_st(&c, s)
         << "sql: connection is closed"
     }
-    qr := query_wire(s.fd, "COMMIT", []driver.NamedValue{}, 0)
+    qr := query_state(mut &s, "COMMIT", []driver.NamedValue{}, 0)
     s.tx = 0
     put_st(&c, s)
     << qr.err
@@ -461,7 +621,7 @@ fn (t PgTx) rollback() string {
         put_st(&c, s)
         << "sql: connection is closed"
     }
-    qr := query_wire(s.fd, "ROLLBACK", []driver.NamedValue{}, 0)
+    qr := query_state(mut &s, "ROLLBACK", []driver.NamedValue{}, 0)
     s.tx = 0
     put_st(&c, s)
     << qr.err

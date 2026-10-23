@@ -2,8 +2,10 @@
 
 #net
 #net/http
+#crypto/tls
 #errors
 #strings
+transport #github.com/xulang-org/packages/transport
 
 pub struct Response {
     pub status_code int
@@ -14,6 +16,7 @@ pub struct Response {
 pub struct Client {
     pub host string
     pub port int
+    pub secure bool
     pub tenant string
     pub database string
 }
@@ -37,6 +40,12 @@ fn safe_close(fd int) {
 }
 
 pub fn new_client(endpoint string) Client {
+    if strings.has_prefix(&endpoint, "https://") {
+        ep := transport.parse_endpoint(endpoint, 8000) or (err) {
+            << Client{host: "127.0.0.1", port: 8000, secure: true, tenant: "default_tenant", database: "default_database"}
+        }
+        << Client{host: ep.host, port: ep.port, secure: true, tenant: "default_tenant", database: "default_database"}
+    }
     mut ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
@@ -65,12 +74,25 @@ pub fn new_client(endpoint string) Client {
     << Client{
         host: host,
         port: port,
+        secure: false,
         tenant: "default_tenant",
         database: "default_database"
     }
 }
 
 pub fn (c Client) request(method string, path string, body string) Response {
+    if c.secure {
+        mut req := method + " " + path + " HTTP/1.1\r\n"
+        req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+        req = req + "Content-Type: application/json\r\n"
+        req = req + "Content-Length: " + str(body.len) + "\r\n"
+        req = req + "Connection: close\r\n\r\n"
+        if body.len > 0 { req = req + body }
+        ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
+        cfg := tls.new_config(c.host + "")
+        resp := transport.request_raw(ep, cfg, req, method + "") or >>
+        << Response{status_code: resp.status_code, headers: resp.headers, body: resp.body}
+    }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) { >> err }
     mut reusable := false
@@ -112,6 +134,10 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
 }
 
 fn (c Client) request_at(fd int, method string, path string, body string, reusable &mut bool) Response {
+    if c.secure {
+        *reusable = false
+        << c.request(method, path, body) or >>
+    }
     if fd < 0 { << c.request(method, path, body) or >> }
     << c.request_on_fd(fd, method, path, body, reusable) or >>
 }

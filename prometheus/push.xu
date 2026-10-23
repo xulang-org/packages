@@ -2,12 +2,15 @@
 
 #net
 #net/http
+#crypto/tls
 #errors
 #strings
+transport #github.com/xulang-org/packages/transport
 
 pub struct Pusher {
     pub host string
     pub port int
+    pub secure bool
     pub job string
 }
 
@@ -30,6 +33,10 @@ fn safe_close(fd int) {
 }
 
 pub fn new_pusher(endpoint string, job string) Pusher {
+    if strings.has_prefix(&endpoint, "https://") {
+        ep := transport.parse_endpoint(endpoint, 9091) or (err) { << Pusher{host: "127.0.0.1", port: 9091, secure: true, job: job + ""} }
+        << Pusher{host: ep.host, port: ep.port, secure: true, job: job + ""}
+    }
     mut ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
@@ -55,10 +62,22 @@ pub fn new_pusher(endpoint string, job string) Pusher {
             host = ep
         }
     }
-    << Pusher{host: host, port: port, job: job + ""}
+    << Pusher{host: host, port: port, secure: false, job: job + ""}
 }
 
 pub fn (p &Pusher) push(metrics_text string) bool {
+    if p.secure {
+        path := "/metrics/job/" + p.job
+        mut req := "POST " + path + " HTTP/1.1\r\n"
+        req = req + "Host: " + p.host + ":" + str(p.port) + "\r\n"
+        req = req + "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n"
+        req = req + "Content-Length: " + str(metrics_text.len) + "\r\n"
+        req = req + "Connection: close\r\n\r\n" + metrics_text
+        ep := transport.Endpoint{scheme: "https", host: p.host + "", port: p.port, path: "", secure: true}
+        cfg := tls.new_config(p.host + "")
+        resp := transport.request_raw(ep, cfg, req, "POST") or (err) { << false }
+        << resp.status_code >= 200 && resp.status_code < 300
+    }
     addr := p.host + ":" + str(p.port)
     fd := net.dial(strings.clone(&addr)) or (err) { << false }
     mut reusable := false

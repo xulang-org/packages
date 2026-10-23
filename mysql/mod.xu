@@ -9,8 +9,9 @@
 // the text protocol, transactions, Prepare-shaped statements, and the
 // mysql_native_password authentication plugin.  `?` parameters are escaped
 // by the driver before COM_QUERY is sent; placeholders inside SQL strings and
-// comments are left untouched.  TLS and caching_sha2_password are reserved
-// for a later version and are rejected by the DSN parser.
+// comments are left untouched. TLS is negotiated with CLIENT_SSL after the
+// server greeting; caching_sha2_password remains explicitly rejected until
+// its RSA exchange is implemented.
 //
 // DSNs accepted by parse_dsn/open:
 //   user:password@tcp(127.0.0.1:3306)/database?tls=false

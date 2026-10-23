@@ -62,8 +62,12 @@ fn main() int {
 }
 ```
 
+## TLS
+
+DSN 的 `tls=true`、`tls=required` 或 `tls=verify` 会在 MySQL 初始握手后发送 `CLIENT_SSL` 请求，并在同一 TCP 连接上升级到 TLS；服务端不声明 TLS、握手失败、证书链或主机名校验失败都会使连接打开失败，不会回退到明文。`tlsrootcert=/absolute/path/ca.pem` 可指定自签名根证书。
+
 ## 模块边界与迁移
 
 数据库协议、认证、DSN 和 SQL 驱动实现统一位于本模块。通用连接池与事务管理由 `#database/sql` 提供，驱动契约由 `#database/sql/driver` 提供。标准库不再维护另一份 `mysql` 驱动。
 
-Xu 1.0.0 移除了 `#database/sql/mysql`。迁移时，在项目 `xu.xun` 声明上面的依赖，并将导入改为 `#github.com/xulang-org/packages/mysql`；`sql.open(mysql.driver(), dsn)` 的调用方式保持不变。首版驱动不提供 TLS。
+Xu 1.0.0 移除了 `#database/sql/mysql`。迁移时，在项目 `xu.xun` 声明上面的依赖，并将导入改为 `#github.com/xulang-org/packages/mysql`；`sql.open(mysql.driver(), dsn)` 的调用方式保持不变。

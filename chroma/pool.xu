@@ -25,13 +25,18 @@ pub fn new_pool(endpoint string, max_idle int) Pool {
     }
 }
 
+pub fn (p &Pool) get() Client {
+    << Client{host: strings.clone(&p.client.host), port: p.client.port, secure: p.client.secure, tenant: strings.clone(&p.client.tenant), database: strings.clone(&p.client.database)}
+}
+
 // Copies configuration while sharing the connection and close lifecycle.
 pub fn (p &Pool) dup() Pool {
-    c := Client{host: strings.clone(&p.client.host), port: p.client.port, tenant: strings.clone(&p.client.tenant), database: strings.clone(&p.client.database)}
+    c := Client{host: strings.clone(&p.client.host), port: p.client.port, secure: p.client.secure, tenant: strings.clone(&p.client.tenant), database: strings.clone(&p.client.database)}
     << Pool{client: c, state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.client.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -43,11 +48,13 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.client.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.client.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
@@ -57,6 +64,11 @@ pub fn open_pool(endpoint string, max_idle int) Pool {
 }
 
 pub fn (p &Pool) heartbeat() bool {
+    if p.client.secure {
+        c := p.get()
+        result := c.heartbeat() or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -69,6 +81,11 @@ pub fn (p &Pool) heartbeat() bool {
 }
 
 pub fn (p &Pool) create_collection(name string) string {
+    if p.client.secure {
+        c := p.get()
+        result := c.create_collection(name) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
     mut reusable := false
@@ -81,6 +98,11 @@ pub fn (p &Pool) create_collection(name string) string {
 }
 
 pub fn (p &Pool) add(col_id string, ids_json string, embeddings_json string, documents_json string) bool {
+    if p.client.secure {
+        c := p.get()
+        result := c.add(col_id, ids_json, embeddings_json, documents_json) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -93,6 +115,11 @@ pub fn (p &Pool) add(col_id string, ids_json string, embeddings_json string, doc
 }
 
 pub fn (p &Pool) query(col_id string, query_embeddings_json string, n_results int) string {
+    if p.client.secure {
+        c := p.get()
+        result := c.query(col_id, query_embeddings_json, n_results) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
     mut reusable := false
@@ -105,6 +132,11 @@ pub fn (p &Pool) query(col_id string, query_embeddings_json string, n_results in
 }
 
 pub fn (p &Pool) delete_collection(name string) bool {
+    if p.client.secure {
+        c := p.get()
+        result := c.delete_collection(name) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false

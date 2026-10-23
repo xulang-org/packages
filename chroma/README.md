@@ -43,3 +43,7 @@ fn main() {
 池结构的 `idle` 字段替换为共享 `state`，请通过构造函数创建池。并发任务使用 `p.dup()` 复制配置并共享关闭状态。`max_idle` 只限制空闲连接数，不限制并发打开数；目前没有闲置过期、最大连接数或等待超时策略。
 
 手工借用 `get_conn()` 后，必须恰好调用一次 `put_conn(fd)` 或 `discard_conn(fd)`；协议或网络出错时使用后者。`close()` 可重复调用，池副本共享关闭状态。
+
+## TLS
+
+`http://` and `https://` endpoints are accepted. HTTPS uses Xu `crypto/tls`, verifies the server against the system root pool, and sends the endpoint host as SNI. Secure business calls establish a verified TLS connection per request; manual fd pool APIs remain for plaintext sockets until the connection-object pool migration is complete.

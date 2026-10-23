@@ -2,8 +2,10 @@
 
 #net
 #net/http
+#crypto/tls
 #errors
 #strings
+transport #github.com/xulang-org/packages/transport
 
 pub struct Response {
     pub status_code int
@@ -13,6 +15,7 @@ pub struct Response {
 pub struct Client {
     pub host string
     pub port int
+    pub secure bool
     pub user string
     pub password string
     pub database string
@@ -66,6 +69,16 @@ fn parse_endpoint(raw string) []string {
 }
 
 pub fn new_client(endpoint string, user string, password string, database string) Client {
+    if strings.has_prefix(&endpoint, "https://") {
+        ep := transport.parse_endpoint(endpoint, 8123) or (err) {
+            << Client{host: "127.0.0.1", port: 8123, secure: true, user: user, password: password, database: database}
+        }
+        mut u := user
+        if u.len == 0 { u = "default" }
+        mut db := database
+        if db.len == 0 { db = "default" }
+        << Client{host: ep.host, port: ep.port, secure: true, user: u, password: password, database: db}
+    }
     ep_parts := parse_endpoint(endpoint)
     host := ep_parts[0]
     port := parse_int_def(ep_parts[1], 8123)
@@ -80,6 +93,7 @@ pub fn new_client(endpoint string, user string, password string, database string
     << Client{
         host: host,
         port: port,
+        secure: false,
         user: u,
         password: password,
         database: db
@@ -144,6 +158,21 @@ pub fn parse_tsv(raw string) [][]string {
 }
 
 pub fn (c &mut Client) request(sql_query string) Response {
+    if c.secure {
+        mut req := "POST / HTTP/1.1\r\n"
+        req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+        if c.user.len > 0 { req = req + "X-ClickHouse-User: " + c.user + "\r\n" }
+        if c.password.len > 0 { req = req + "X-ClickHouse-Key: " + c.password + "\r\n" }
+        if c.database.len > 0 { req = req + "X-ClickHouse-Database: " + c.database + "\r\n" }
+        req = req + "Content-Type: text/plain; charset=utf-8\r\n"
+        req = req + "Content-Length: " + str(sql_query.len) + "\r\n"
+        req = req + "Connection: close\r\n\r\n"
+        if sql_query.len > 0 { req = req + sql_query }
+        ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
+        cfg := tls.new_config(c.host + "")
+        resp := transport.request_raw(ep, cfg, req, "POST") or >>
+        << Response{status_code: resp.status_code, body: resp.body}
+    }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) { >> err }
     mut reusable := false

@@ -3,11 +3,16 @@
 #net
 #strings
 #errors
+#crypto/tls
+#crypto/rand
+#encoding/base64
+transport #github.com/xulang-org/packages/transport
 
 pub struct WsClient {
     pub host string
     pub port int
     pub path string
+    pub secure bool
 }
 
 fn read_exact(fd int, need int) string {
@@ -49,6 +54,14 @@ fn safe_close(fd int) {
 }
 
 pub fn new_client(endpoint string) WsClient {
+    if strings.has_prefix(&endpoint, "wss://") {
+        ep := transport.parse_endpoint("https://" + endpoint[6:endpoint.len], 443) or (err) {
+            << WsClient{host: "127.0.0.1", port: 443, path: "/", secure: true}
+        }
+        mut path0 := ep.path
+        if path0.len == 0 { path0 = "/" }
+        << WsClient{host: ep.host, port: ep.port, path: path0, secure: true}
+    }
     mut ep := endpoint
     prefix_ws := "ws://"
     if ep.len >= prefix_ws.len && ep[0:prefix_ws.len] == prefix_ws {
@@ -75,7 +88,7 @@ pub fn new_client(endpoint string) WsClient {
         port_str := ep[(colon + 1):ep.len]
         p_val := parse_int(port_str) or (err) {
             port = 8080
-            << WsClient{host: host, port: 8080, path: path}
+            << WsClient{host: host, port: 8080, path: path, secure: false}
         }
         port = p_val
     } else {
@@ -87,17 +100,129 @@ pub fn new_client(endpoint string) WsClient {
     << WsClient{
         host: host,
         port: port,
-        path: path
+        path: path,
+        secure: false
     }
 }
 
+fn read_exact_secure(c &mut transport.Conn, need int) string {
+    mut buf := ""
+    while buf.len < need {
+        chunk := c.read(need - buf.len) or >>
+        if chunk.len == 0 { >> errors.new("wss read unexpected EOF") }
+        buf = buf + chunk
+    }
+    << buf
+}
+
+fn write_secure(c &mut transport.Conn, data string) int {
+    << c.write_all(data) or >>
+}
+
+pub fn (c WsClient) connect_secure() transport.Conn {
+    if !c.secure { >> errors.new("ws: endpoint is not wss") }
+    ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: c.path + "", secure: true}
+    cfg := tls.new_config(c.host + "")
+    mut tc := transport.dial(ep, cfg, transport.default_timeout_ns) or >>
+    nonce := rand.read(16) or >>
+    key := base64.encode_to_string(nonce)
+    req := build_handshake_request(c.host, c.port, c.path, key + "")
+    write_secure(mut &tc, req) or (err) {
+        tc.close()
+        >> err
+    }
+    mut resp := ""
+    while strings.index_of(&resp, "\r\n\r\n") < 0 {
+        chunk := tc.read(256) or (err) {
+            tc.close()
+            >> err
+        }
+        if chunk.len == 0 {
+            tc.close()
+            >> errors.new("wss handshake unexpected EOF")
+        }
+        resp = resp + chunk
+    }
+    parsed := parse_handshake_response(resp)
+    if parsed.status_code != 101 {
+        tc.close()
+        >> errors.new("wss handshake rejected")
+    }
+    if parsed.accept_key != compute_accept_key(key) {
+        tc.close()
+        >> errors.new("wss handshake accept mismatch")
+    }
+    << tc
+}
+
+pub fn (c WsClient) send_text_secure(tc &mut transport.Conn, text string) bool {
+    write_secure(tc, build_frame(opcode_text, text, true, true)) or (err) { << false }
+    << true
+}
+
+pub fn (c WsClient) send_pong_secure(tc &mut transport.Conn, payload string) bool {
+    write_secure(tc, build_frame(opcode_pong, payload, true, true)) or (err) { << false }
+    << true
+}
+
+pub fn (c WsClient) read_frame_secure(tc &mut transport.Conn) Frame {
+    hdr := read_exact_secure(tc, 2) or >>
+    b0 := hdr[0] & 255
+    b1 := hdr[1] & 255
+    fin := (b0 & 128) != 0
+    opcode := b0 & 15
+    masked := (b1 & 128) != 0
+    code := b1 & 127
+    mut n := code
+    if code == 126 {
+        ext := read_exact_secure(tc, 2) or >>
+        n = ((ext[0] & 255) << 8) | (ext[1] & 255)
+    } else if code == 127 {
+        ext := read_exact_secure(tc, 8) or >>
+        n = 0
+        for i in 0:8 { n = (n << 8) | (ext[i] & 255) }
+    }
+    mut m0 := 0
+    mut m1 := 0
+    mut m2 := 0
+    mut m3 := 0
+    if masked {
+        mask := read_exact_secure(tc, 4) or >>
+        m0 = mask[0] & 255
+        m1 = mask[1] & 255
+        m2 = mask[2] & 255
+        m3 = mask[3] & 255
+    }
+    mut payload := ""
+    if n > 0 { payload = read_exact_secure(tc, n) or >> }
+    if masked { payload = apply_mask(payload, m0, m1, m2, m3) }
+    if opcode == opcode_ping { c.send_pong_secure(tc, payload) or (err) { << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload} } }
+    << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload}
+}
+
+pub fn (c WsClient) read_text_secure(tc &mut transport.Conn) string {
+    while true {
+        f := c.read_frame_secure(tc) or >>
+        if f.opcode == opcode_text { << f.payload }
+        if f.opcode == opcode_close { >> errors.new("wss connection closed by peer") }
+    }
+    << ""
+}
+
+pub fn (c WsClient) close_secure(tc &mut transport.Conn) {
+    write_secure(tc, build_frame(opcode_close, "", true, true)) or (err) { << }
+    tc.close()
+}
+
 pub fn (c WsClient) connect() int {
+    if c.secure { >> errors.new("ws: use connect_secure for wss endpoint") }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("ws dial failed: " + err.msg())
     }
 
-    client_key := "dGhlIHNhbXBsZSBub25jZQ=="
+    nonce := rand.read(16) or >>
+    client_key := base64.encode_to_string(nonce)
     req := build_handshake_request(c.host, c.port, c.path, client_key + "")
     write_all(fd, req) or (err) {
         safe_close(fd)

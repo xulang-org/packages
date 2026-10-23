@@ -2,13 +2,16 @@
 
 #net
 #net/http
+#crypto/tls
 #errors
 #strings
 #encoding/base64
+transport #github.com/xulang-org/packages/transport
 
 pub struct Neo4jClient {
     pub host string
     pub port int
+    pub secure bool
     pub user string
     pub password string
     pub database string
@@ -34,6 +37,17 @@ fn safe_close(fd int) {
 }
 
 pub fn new_client(endpoint string, user string, pass string, db string) Neo4jClient {
+    mut secure := false
+    if strings.has_prefix(&endpoint, "https://") {
+        secure = true
+        ep0 := transport.parse_endpoint(endpoint, 7474) or (err) {
+            << Neo4jClient{host: "127.0.0.1", port: 7474, secure: true, user: user, password: pass, database: "neo4j", auth_header: "Basic " + base64.encode_to_string(user + ":" + pass)}
+        }
+        mut database0 := db
+        if database0.len == 0 { database0 = "neo4j" }
+        raw0 := user + ":" + pass
+        << Neo4jClient{host: ep0.host, port: ep0.port, secure: true, user: user, password: pass, database: database0, auth_header: "Basic " + base64.encode_to_string(raw0)}
+    }
     mut ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
@@ -72,6 +86,7 @@ pub fn new_client(endpoint string, user string, pass string, db string) Neo4jCli
     << Neo4jClient{
         host: host,
         port: port,
+        secure: secure,
         user: user,
         password: pass,
         database: database,
@@ -103,6 +118,26 @@ fn escape_json(s string) string {
 }
 
 pub fn (c Neo4jClient) execute(stmt string) string {
+    if c.secure {
+        escaped := escape_json(stmt)
+        payload := "{\"statements\":[{\"statement\":\"" + escaped + "\"}]}"
+        path := "/db/" + c.database + "/tx/commit"
+        mut req := "POST " + path + " HTTP/1.1\r\n"
+        req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+        req = req + "Authorization: " + c.auth_header + "\r\n"
+        req = req + "Content-Type: application/json\r\n"
+        req = req + "Accept: application/json; charset=UTF-8\r\n"
+        req = req + "Content-Length: " + str(payload.len) + "\r\n"
+        req = req + "Connection: close\r\n\r\n" + payload
+        ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
+        cfg := tls.new_config(c.host + "")
+        resp := transport.request_raw(ep, cfg, req, "POST") or >>
+        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("neo4j: HTTP status " + str(resp.status_code) + ": " + resp.body) }
+        needle := "\"errors\":["
+        pos := strings.index_of(&resp.body, needle + "")
+        if pos >= 0 && pos + needle.len < resp.body.len && (resp.body[pos + needle.len] & 255) != 93 { >> errors.new("neo4j cypher error: " + resp.body) }
+        << resp.body
+    }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("neo4j dial failed: " + err.msg())

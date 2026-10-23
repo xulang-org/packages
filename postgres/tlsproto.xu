@@ -1,0 +1,42 @@
+@"github.com/xulang-org/packages/postgres"
+
+#crypto/tls
+transport #github.com/xulang-org/packages/transport
+
+fn read_exact_tls(tc &mut transport.Conn, n int) ReadResult {
+    if n < 0 || n > 16777216 { << ReadResult{data: "", err: "postgres: invalid packet length"} }
+    mut out := ""
+    while out.len < n {
+        need := n - out.len
+        part := tc.read(need) or (err) { << ReadResult{data: "", err: err.msg()} }
+        if part.len == 0 { << ReadResult{data: "", err: "postgres: connection closed"} }
+        out = out + part
+    }
+    << ReadResult{data: out, err: ""}
+}
+
+fn write_all_tls(tc &mut transport.Conn, data string) string {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len] + ""
+        n := tc.write(&part) or (err) { << err.msg() }
+        if n <= 0 { << "postgres: connection closed" }
+        off += n
+    }
+    << ""
+}
+
+fn send_packet_tls(tc &mut transport.Conn, typ int, body string) string {
+    frame := string_from_byte(typ & 255) + be32(body.len + 4) + body
+    << write_all_tls(tc, frame)
+}
+
+fn recv_packet_tls(tc &mut transport.Conn) Packet {
+    h := read_exact_tls(tc, 5)
+    if h.err.len > 0 { << Packet{typ: 0, body: "", err: h.err} }
+    n := be32_at(&h.data, 1)
+    if n < 4 || n > 16777216 { << Packet{typ: 0, body: "", err: "postgres: invalid packet length"} }
+    b := read_exact_tls(tc, n - 4)
+    if b.err.len > 0 { << Packet{typ: 0, body: "", err: b.err} }
+    << Packet{typ: h.data[0] & 255, body: b.data, err: ""}
+}

@@ -99,11 +99,16 @@ pub fn build_grpc_hpack_headers(path string) string {
 }
 
 fn build_grpc_headers_for_host(path string, authority string) string {
+    << build_grpc_headers_for_host_scheme(path, authority, "http")
+}
+
+pub fn build_grpc_headers_for_host_scheme(path string, authority string, scheme string) string {
     mut block := ""
     // 1. :method: POST (static table index 3) -> 0x80 | 3 = 0x83
     block = block + string_from_byte(131)
     // 2. :scheme: http (static table index 6) -> 0x80 | 6 = 0x86
-    block = block + string_from_byte(134)
+    if scheme == "https" { block = block + string_from_byte(135) }
+    else { block = block + string_from_byte(134) }
     // 3. :path
     block = block + encode_hpack_literal(":path", path)
     if authority.len > 0 { block = block + encode_hpack_literal(":authority", authority) }

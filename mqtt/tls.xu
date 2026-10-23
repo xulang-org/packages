@@ -1,0 +1,72 @@
+@"github.com/xulang-org/packages/mqtt"
+
+#crypto/tls
+#errors
+transport #github.com/xulang-org/packages/transport
+
+pub struct TlsClient {
+    pub conn transport.Conn
+    pub host string
+    pub port int
+}
+
+pub fn tls_connect(endpoint string, default_port int) TlsClient {
+    raw := endpoint + ""
+    ep := transport.parse_endpoint(raw + "", default_port) or >>
+    cfg := tls.new_config(ep.host + "")
+    << tls_connect_config(raw + "", default_port, cfg) or >>
+}
+
+pub fn tls_connect_config(endpoint string, default_port int, cfg tls.Config) TlsClient {
+    mut ep := transport.parse_endpoint(endpoint, default_port) or >>
+    ep.scheme = "tls"
+    ep.secure = true
+    host := ep.host + ""
+    port := ep.port
+    tc := transport.dial(ep, cfg, transport.default_timeout_ns) or >>
+    << TlsClient{conn: tc, host: host, port: port}
+}
+
+pub fn (c &mut TlsClient) write_all(data string) int {
+    mut tc := mut &c.conn
+    << tc.write_all(data) or >>
+}
+
+pub fn (c &mut TlsClient) read(max int) string {
+    mut tc := mut &c.conn
+    << tc.read(max) or >>
+}
+
+pub fn (c &mut TlsClient) read_exact(need int) string {
+    if need < 0 || need > transport.max_message_bytes { >> errors.new("mqtt: invalid TLS read length") }
+    mut out := ""
+    while out.len < need {
+        part := c.read(need - out.len) or >>
+        if part.len == 0 { >> errors.new("mqtt: TLS connection closed") }
+        out = out + part
+    }
+    << out
+}
+
+pub fn (c &mut TlsClient) close() int {
+    mut tc := mut &c.conn
+    << tc.close() or >>
+}
+
+pub fn (c &mut TlsClient) set_deadline(t_ns int) int {
+    mut tc := mut &c.conn
+    mut tls_c := mut &tc.tls_conn
+    << tls_c.set_deadline(t_ns) or >>
+}
+
+pub fn (c &mut TlsClient) set_read_deadline(t_ns int) int {
+    mut tc := mut &c.conn
+    mut tls_c := mut &tc.tls_conn
+    << tls_c.set_read_deadline(t_ns) or >>
+}
+
+pub fn (c &mut TlsClient) set_write_deadline(t_ns int) int {
+    mut tc := mut &c.conn
+    mut tls_c := mut &tc.tls_conn
+    << tls_c.set_write_deadline(t_ns) or >>
+}

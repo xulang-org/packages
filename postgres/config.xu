@@ -11,10 +11,11 @@ pub struct Config {
     pub password string
     pub database string
     pub ssl_mode string
+    pub root_cert_file string
 }
 
 fn empty_config() Config {
-    << Config{host: "127.0.0.1", port: 5432, user: "", password: "", database: "", ssl_mode: "disable"}
+    << Config{host: "127.0.0.1", port: 5432, user: "", password: "", database: "", ssl_mode: "disable", root_cert_file: ""}
 }
 
 pub fn new_config() Config {
@@ -67,6 +68,7 @@ fn set_option(c &mut Config, key string, value string) {
     if k == "dbname" { c.database = v }
     if k == "database" { c.database = v }
     if k == "sslmode" { c.ssl_mode = v }
+    if k == "sslrootcert" { c.root_cert_file = v }
 }
 
 fn parse_port_or_default(v string) int {
@@ -200,8 +202,8 @@ pub fn parse_dsn(dsn string) Config {
     if c.user.len == 0 { c.user = "postgres" }
     if c.database.len == 0 { c.database = c.user + "" }
     if c.ssl_mode.len == 0 { c.ssl_mode = "disable" }
-    if c.ssl_mode != "disable" {
-        >> errors.new("postgres: TLS is not available; use sslmode=disable")
+    if c.ssl_mode != "disable" && c.ssl_mode != "require" && c.ssl_mode != "verify-ca" && c.ssl_mode != "verify-full" {
+        >> errors.new("postgres: unsupported sslmode")
     }
     << c
 }

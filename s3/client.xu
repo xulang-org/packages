@@ -2,9 +2,11 @@
 
 #net
 #net/http
+#crypto/tls
 #time
 #errors
 #strings
+transport #github.com/xulang-org/packages/transport
 
 pub struct Response {
     pub status_code int
@@ -14,6 +16,7 @@ pub struct Response {
 pub struct Client {
     pub host string
     pub port int
+    pub secure bool
     pub access_key string
     pub secret_key string
     pub region string
@@ -38,38 +41,22 @@ fn safe_close(fd int) {
 }
 
 fn parse_endpoint(raw string) []string {
-    mut ep := raw
-    prefix_http := "http://"
-    if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
-        ep = ep[prefix_http.len:ep.len]
+    ep := transport.parse_endpoint(raw, 9000) or (err) {
+        << ["127.0.0.1", "9000", "false"]
     }
-    mut host := "127.0.0.1"
-    mut port := 9000
-    mut colon := -1
-    mut i := 0
-    while i < ep.len {
-        if (ep[i] & 255) == 58 {
-            colon = i
-            <-
-        }
-        i = i + 1
-    }
-    if colon >= 0 {
-        host = ep[0:colon]
-        p_str := ep[(colon + 1):ep.len]
-        port = parse_int_def(p_str, 9000)
-    } else {
-        if ep.len > 0 {
-            host = ep
-        }
-    }
-    << [host, str(port)]
+    << [ep.host, str(ep.port), if_secure(ep.secure)]
+}
+
+fn if_secure(v bool) string {
+    if v { << "true" }
+    << "false"
 }
 
 pub fn new_client(endpoint string, access_key string, secret_key string, region string) Client {
     ep_parts := parse_endpoint(endpoint)
     host := ep_parts[0]
     port := parse_int_def(ep_parts[1], 9000)
+    secure := ep_parts[2] == "true"
     mut reg := region
     if reg.len == 0 {
         reg = "us-east-1"
@@ -77,6 +64,7 @@ pub fn new_client(endpoint string, access_key string, secret_key string, region 
     << Client{
         host: host,
         port: port,
+        secure: secure,
         access_key: access_key,
         secret_key: secret_key,
         region: reg
@@ -104,6 +92,20 @@ fn get_amz_dates() []string {
 }
 
 pub fn (c &mut Client) request(method string, path string, body string, content_type string) Response {
+    if c.secure {
+        ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
+        cfg := tls.new_config(c.host + "")
+        mut tc := transport.dial(ep, cfg, transport.default_timeout_ns) or (err) {
+            >> errors.new("s3: TLS dial failed: " + err.msg())
+        }
+        mut reusable := false
+        result := c.request_on_transport(mut &tc, method, path, body, content_type, mut &reusable) or (err) {
+            tc.close()
+            >> err
+        }
+        tc.close()
+        << result
+    }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("s3: dial failed: " + err.msg())
@@ -118,49 +120,44 @@ pub fn (c &mut Client) request(method string, path string, body string, content_
 }
 
 fn (c &mut Client) request_at(fd int, method string, path string, body string, content_type string, reusable &mut bool) Response {
+    if c.secure { << c.request(method, path, body, content_type) or >> }
     if fd < 0 { << c.request(method, path, body, content_type) or >> }
     << c.request_on_fd(fd, method, path, body, content_type, reusable) or >>
 }
 
-fn (c &mut Client) request_on_fd(fd int, method string, path string, body string, content_type string, reusable &mut bool) Response {
-    *reusable = false
-
+fn (c &mut Client) build_request(method string, path string, body string, content_type string) string {
     mut p := path
-    if p.len == 0 || (p[0] & 255) != 47 {
-        p = "/" + p
-    }
-
+    if p.len == 0 || (p[0] & 255) != 47 { p = "/" + p }
     dates := get_amz_dates()
     amz_date := dates[0]
     date_stamp := dates[1]
     payload_hash := sha256_hex(body + "")
-
     host_hdr := c.host + ":" + str(c.port)
-    auth_hdr := compute_auth_header(
-        method + "",
-        p + "",
-        host_hdr + "",
-        c.access_key + "",
-        c.secret_key + "",
-        c.region + "",
-        amz_date + "",
-        date_stamp,
-        payload_hash + ""
-    )
-
+    auth_hdr := compute_auth_header(method + "", p + "", host_hdr + "", c.access_key + "", c.secret_key + "", c.region + "", amz_date + "", date_stamp, payload_hash + "")
     mut req := method + " " + p + " HTTP/1.1\r\n"
     req = req + "Host: " + host_hdr + "\r\n"
     req = req + "x-amz-date: " + amz_date + "\r\n"
     req = req + "x-amz-content-sha256: " + payload_hash + "\r\n"
     req = req + "Authorization: " + auth_hdr + "\r\n"
-    if content_type.len > 0 {
-        req = req + "Content-Type: " + content_type + "\r\n"
-    }
+    if content_type.len > 0 { req = req + "Content-Type: " + content_type + "\r\n" }
     req = req + "Content-Length: " + str(body.len) + "\r\n"
     req = req + "Connection: keep-alive\r\n\r\n"
-    if body.len > 0 {
-        req = req + body
-    }
+    if body.len > 0 { req = req + body }
+    << req
+}
+
+fn (c &mut Client) request_on_transport(tc &mut transport.Conn, method string, path string, body string, content_type string, reusable &mut bool) Response {
+    *reusable = false
+    req := c.build_request(method + "", path, body, content_type)
+    tc.write_all(req) or (err) { >> errors.new("s3: TLS write failed: " + err.msg()) }
+    resp := transport.read_response(tc, method + "") or >>
+    *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method + "")
+    << Response{status_code: resp.status_code, body: resp.body}
+}
+
+fn (c &mut Client) request_on_fd(fd int, method string, path string, body string, content_type string, reusable &mut bool) Response {
+    *reusable = false
+    req := c.build_request(method + "", path, body, content_type)
 
     // Send request
     mut off := 0
@@ -179,6 +176,6 @@ fn (c &mut Client) request_on_fd(fd int, method string, path string, body string
     resp := http.read_response(fd, method + "") or (err) {
         >> err
     }
-    *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method)
+    *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method + "")
     << Response{status_code: resp.status_code, body: resp.body}
 }

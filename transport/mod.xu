@@ -1,0 +1,377 @@
+@"github.com/xulang-org/packages/transport"
+
+#crypto/tls
+#errors
+#net
+#net/http
+#strings
+
+// Shared client transport for external drivers.
+//
+// A connection keeps the complete TLS state when secure is true.  Callers
+// must pass Conn values around instead of retaining only fd; an fd alone
+// cannot represent a live TLS session.
+
+pub const default_timeout_ns = 30000000000
+pub const max_header_bytes = 1048576
+pub const max_message_bytes = 10485760
+
+pub struct Endpoint {
+    pub scheme string
+    pub host string
+    pub port int
+    pub path string
+    pub secure bool
+}
+
+pub struct Conn {
+    pub fd int
+    pub tls_conn tls.Conn
+    pub secure bool
+    pub closed bool
+    pub eof bool
+    pub buf string
+}
+
+fn starts(s string, prefix string) bool {
+    << s.len >= prefix.len && s[0:prefix.len] == prefix
+}
+
+fn default_scheme(raw string) string {
+    if starts(raw, "https://") { << "https" }
+    if starts(raw, "http://") { << "http" }
+    if starts(raw, "tls://") { << "tls" }
+    if starts(raw, "tcp://") { << "tcp" }
+    << "tcp"
+}
+
+fn scheme_port(scheme string, fallback int) int {
+    if scheme == "https" { << 443 }
+    if scheme == "tls" { << fallback }
+    if scheme == "http" { << 80 }
+    << fallback
+}
+
+// parse_endpoint accepts scheme://host[:port][/path] and host[:port].
+// The path is retained for callers that need a base URL; query handling is
+// intentionally left to the individual protocol driver.
+pub fn parse_endpoint(raw string, fallback_port int) Endpoint {
+    mut rest := raw + ""
+    mut scheme := default_scheme(rest + "")
+    marker := strings.index_of(&rest, "://")
+    if marker >= 0 {
+        scheme = strings.to_lower(&rest[0:marker])
+        rest = rest[marker + 3:rest.len]
+    }
+    mut path := ""
+    slash := strings.index_of(&rest, "/")
+    if slash >= 0 {
+        path = rest[slash:rest.len]
+        rest = rest[0:slash]
+    }
+    mut host := rest + ""
+    mut port := scheme_port(scheme + "", fallback_port)
+    if host.len > 0 && (host[0] & 255) == 91 {
+        close := strings.index_of(&host, "]")
+        if close < 0 { >> errors.new("transport: invalid IPv6 endpoint") }
+        name := host[1:close]
+        if close + 1 < host.len && (host[close + 1] & 255) == 58 {
+            port = parse_int(host[close + 2:host.len]) or >> errors.new("transport: invalid port")
+        }
+        host = name
+    } else {
+        colon := strings.last_index_byte(&host, 58)
+        if colon >= 0 {
+            p := host[colon + 1:host.len]
+            parsed := parse_int(p) or >> errors.new("transport: invalid port")
+            port = parsed
+            host = host[0:colon]
+        }
+    }
+    if host.len == 0 { >> errors.new("transport: missing host") }
+    if port <= 0 || port > 65535 { >> errors.new("transport: invalid port") }
+    if scheme != "http" && scheme != "https" && scheme != "tcp" && scheme != "tls" {
+        >> errors.new("transport: unsupported endpoint scheme")
+    }
+    << Endpoint{scheme: scheme + "", host: host + "", port: port, path: path + "", secure: scheme == "https" || scheme == "tls"}
+}
+
+pub fn secure_endpoint(ep Endpoint) bool { << ep.secure }
+
+pub fn dial(ep Endpoint, cfg tls.Config, timeout_ns int) Conn {
+    mut wait := timeout_ns
+    if wait <= 0 { wait = default_timeout_ns }
+    port_text := str(ep.port)
+    addr := net.join_host_port(&ep.host, &port_text)
+    if ep.secure {
+        mut tc := cfg
+        if tc.server_name.len == 0 { tc.server_name = ep.host + "" }
+        d := tls.Dialer{timeout_ns: wait, config: tc}
+        conn := d.dial("tcp", addr) or >>
+        << Conn{fd: -1, tls_conn: conn, secure: true, closed: false, eof: false, buf: ""}
+    }
+    fd := net.dial_ns(addr, wait) or >>
+    << Conn{fd: fd, tls_conn: tls.closed_conn(), secure: false, closed: false, eof: false, buf: ""}
+}
+
+pub fn from_fd(fd int) Conn {
+    if fd < 0 { >> errors.new("transport: invalid file descriptor") }
+    << Conn{fd: fd, tls_conn: tls.closed_conn(), secure: false, closed: false, eof: false, buf: ""}
+}
+
+pub fn closed_conn() Conn {
+    << Conn{fd: -1, tls_conn: tls.closed_conn(), secure: false, closed: true, eof: true, buf: ""}
+}
+
+fn raw_read(c &mut Conn, max int) string {
+    if c.secure {
+        tc := mut &c.tls_conn
+        s := tc.read(max) or >>
+        if s.len == 0 { c.eof = true }
+        << s
+    }
+    s := net.conn_read(c.fd, max)
+    if s.len == 0 { c.eof = true }
+    << s
+}
+
+pub fn (c &mut Conn) read(max int) string {
+    if c.closed { >> errors.new("transport: connection is closed") }
+    if c.buf.len > 0 {
+        if max <= 0 || c.buf.len <= max {
+            out := c.buf
+            c.buf = ""
+            << out
+        }
+        out := c.buf[0:max]
+        c.buf = c.buf[max:c.buf.len]
+        << out
+    }
+    << raw_read(c, max)
+}
+
+pub fn (c &mut Conn) write(data &string) int {
+    if c.closed { >> errors.new("transport: connection is closed") }
+    if c.secure {
+        tc := mut &c.tls_conn
+        << tc.write(data) or >>
+    }
+    << net.conn_write(c.fd, data)
+}
+
+pub fn (c &mut Conn) write_all(data string) int {
+    mut off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := c.write(&part) or >>
+        if n <= 0 { >> errors.new("transport: connection closed during write") }
+        off = off + n
+    }
+    << 0
+}
+
+pub fn (c &mut Conn) close() int {
+    if c.closed { << 0 }
+    c.closed = true
+    if c.secure {
+        tc := mut &c.tls_conn
+        tc.close() or (err) { << 0 }
+        << 0
+    }
+    net.conn_close(c.fd) or (err) { << 0 }
+    c.eof = true
+    << 0
+}
+
+// request_raw performs one HTTP request on a fresh connection. It is used by
+// drivers while their legacy plaintext fd pools are being migrated to Conn
+// pools; the TLS handshake and certificate verification still happen here.
+pub fn request_raw(ep Endpoint, cfg tls.Config, request string, method string) http.Response {
+    mut c := dial(ep, cfg, default_timeout_ns) or >>
+    c.write_all(request) or (err) {
+        c.close()
+        >> err
+    }
+    resp := read_response(mut &c, method + "") or (err) {
+        c.close()
+        >> err
+    }
+    c.close()
+    << resp
+}
+
+fn find_header_end(s &string) int {
+    mut i := 0
+    while i + 3 < s.len {
+        if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 && (s[i + 2] & 255) == 13 && (s[i + 3] & 255) == 10 {
+            << i
+        }
+        i = i + 1
+    }
+    << -1
+}
+
+fn find_crlf(s &string, start int) int {
+    mut i := start
+    while i + 1 < s.len {
+        if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 { << i }
+        i = i + 1
+    }
+    << -1
+}
+
+fn read_more(c &mut Conn) int {
+    chunk := raw_read(c, 4096) or >>
+    if chunk.len == 0 { << 0 }
+    c.buf = c.buf + chunk
+    if c.buf.len > max_message_bytes { >> errors.new("transport: HTTP response too large") }
+    << chunk.len
+}
+
+fn decimal(s string) int {
+    if s.len == 0 { >> errors.new("transport: empty Content-Length") }
+    mut n := 0
+    for i in 0:s.len {
+        d := (s[i] & 255) - 48
+        if d < 0 || d > 9 { >> errors.new("transport: invalid Content-Length") }
+        if n > (max_message_bytes - d) / 10 { >> errors.new("transport: Content-Length too large") }
+        n = n * 10 + d
+    }
+    << n
+}
+
+fn take_chunked(c &mut Conn, start int) string {
+    mut pos := start
+    mut out := ""
+    while true {
+        mut end := find_crlf(&c.buf, pos)
+        while end < 0 {
+            n := read_more(c) or >>
+            if n == 0 { >> errors.new("transport: incomplete chunk size") }
+            end = find_crlf(&c.buf, pos)
+        }
+        line := c.buf[pos:end]
+        semi := strings.index_of(&line, ";")
+        mut size_text := line + ""
+        if semi >= 0 { size_text = line[0:semi] }
+        size := parse_hex(size_text) or >>
+        pos = end + 2
+        if size == 0 {
+            mut trailer := find_header_end(&c.buf[pos:c.buf.len])
+            while trailer < 0 {
+                n := read_more(c) or >>
+                if n == 0 { >> errors.new("transport: incomplete chunk trailers") }
+                trailer = find_header_end(&c.buf[pos:c.buf.len])
+            }
+            trailer_text := c.buf[pos:pos + trailer]
+            trailer_lines := strings.split(&trailer_text, "\r\n")
+            for ti in 0:trailer_lines.len {
+                if trailer_lines[ti].len == 0 { -> }
+                if strings.index_of(&trailer_lines[ti], ":") < 1 { >> errors.new("transport: invalid chunk trailer") }
+            }
+            pos = pos + trailer + 4
+            c.buf = c.buf[pos:c.buf.len]
+            << out
+        }
+        if out.len + size > max_message_bytes { >> errors.new("transport: chunked body too large") }
+        need := pos + size + 2
+        while c.buf.len < need {
+            n := read_more(c) or >>
+            if n == 0 { >> errors.new("transport: incomplete chunk body") }
+        }
+        out = out + c.buf[pos:pos + size]
+        if (c.buf[pos + size] & 255) != 13 || (c.buf[pos + size + 1] & 255) != 10 { >> errors.new("transport: invalid chunk terminator") }
+        pos = need
+    }
+    << out
+}
+
+fn parse_hex(s string) int {
+    if s.len == 0 { >> errors.new("transport: empty chunk size") }
+    mut n := 0
+    for i in 0:s.len {
+        c := s[i] & 255
+        mut d := -1
+        if c >= 48 && c <= 57 { d = c - 48 }
+        else if c >= 65 && c <= 70 { d = c - 55 }
+        else if c >= 97 && c <= 102 { d = c - 87 }
+        else { >> errors.new("transport: invalid chunk size") }
+        if n > (max_message_bytes - d) / 16 { >> errors.new("transport: chunk size too large") }
+        n = n * 16 + d
+    }
+    << n
+}
+
+// read_response reads one HTTP/1.x response while retaining bytes belonging
+// to the next response in Conn.buf. It works for both TCP and TLS sessions.
+pub fn read_response(c &mut Conn, method string) http.Response {
+    mut interim := 0
+    while interim < 16 {
+        mut end := find_header_end(&c.buf)
+        while end < 0 {
+            if c.buf.len > max_header_bytes { >> errors.new("transport: HTTP headers too large") }
+            n := read_more(c) or >>
+            if n == 0 { >> errors.new("transport: incomplete HTTP headers") }
+            end = find_header_end(&c.buf)
+        }
+        head := c.buf[0:end]
+        lines := strings.split(&head, "\r\n")
+        status := lines[0] + ""
+        if status.len < 12 || (status[0:9] != "HTTP/1.1 " && status[0:9] != "HTTP/1.0 ") { >> errors.new("transport: invalid HTTP status") }
+        code := decimal(status[9:12]) or >>
+        mut length := -1
+        mut chunked := false
+        mut transfer_seen := false
+        for i in 1:lines.len {
+            line := lines[i] + ""
+            colon := strings.index_of(&line, ":")
+            if colon < 1 { >> errors.new("transport: invalid HTTP header") }
+            name := strings.to_lower(&line[0:colon])
+            value := strings.trim_space(&line[colon + 1:line.len])
+            if name == "content-length" {
+                n := decimal(value) or >>
+                if length >= 0 && length != n { >> errors.new("transport: conflicting Content-Length") }
+                length = n
+            }
+            if name == "transfer-encoding" {
+                if transfer_seen { >> errors.new("transport: duplicate Transfer-Encoding") }
+                transfer_seen = true
+                low := strings.to_lower(&value)
+                if low != "chunked" { >> errors.new("transport: unsupported Transfer-Encoding") }
+                chunked = true
+            }
+        }
+        if chunked && length >= 0 { >> errors.new("transport: ambiguous HTTP framing") }
+        if code >= 100 && code < 200 {
+            if code == 101 { >> errors.new("transport: protocol upgrade is unsupported") }
+            c.buf = c.buf[end + 4:c.buf.len]
+            interim = interim + 1
+            ->
+        }
+        mut body := ""
+        if method == "HEAD" || code == 204 || code == 304 {
+            c.buf = c.buf[end + 4:c.buf.len]
+        } else if chunked {
+            body = take_chunked(c, end + 4) or >>
+        } else if length >= 0 {
+            need := end + 4 + length
+            while c.buf.len < need {
+                n := read_more(c) or >>
+                if n == 0 { >> errors.new("transport: incomplete HTTP body") }
+            }
+            body = c.buf[end + 4:need]
+            c.buf = c.buf[need:c.buf.len]
+        } else {
+            // EOF-delimited bodies cannot be reused safely.
+            while true {
+                n := read_more(c) or >>
+                if n == 0 { <- }
+            }
+            body = c.buf[end + 4:c.buf.len]
+            c.buf = ""
+            c.close()
+        }
+        << http.Response{status_code: code, status: status, headers: head, body: body, sticky: ""}
+    }
+    >> errors.new("transport: too many informational responses")
+}

@@ -23,3 +23,7 @@ echoed := p.echo_text("Hello WebSocket!") or panic
 // 关闭连接池
 p.close()
 ```
+
+## TLS
+
+`wss://` endpoints use `WsClient.connect_secure()`, `send_text_secure()`, and `read_text_secure()` with certificate verification and SNI. The legacy integer-fd API remains for `ws://`.

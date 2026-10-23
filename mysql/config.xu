@@ -11,10 +11,11 @@ pub struct Config {
     pub password string
     pub database string
     pub tls_mode string
+    pub root_cert_file string
 }
 
 fn empty_config() Config {
-    << Config{host: "127.0.0.1", port: 3306, user: "", password: "", database: "", tls_mode: "false"}
+    << Config{host: "127.0.0.1", port: 3306, user: "", password: "", database: "", tls_mode: "false", root_cert_file: ""}
 }
 
 pub fn new_config() Config {
@@ -63,6 +64,7 @@ fn set_option(c &mut Config, key string, value string) {
     if k == "password" || k == "pass" { c.password = v }
     if k == "dbname" || k == "database" { c.database = v }
     if k == "tls" || k == "tlsmode" { c.tls_mode = v }
+    if k == "tlsrootcert" || k == "sslca" { c.root_cert_file = v }
 }
 
 fn parse_port_or_default(v string) int {
@@ -179,8 +181,8 @@ pub fn parse_dsn(dsn string) Config {
     if c.user.len == 0 { c.user = "root" }
     if c.database.len == 0 { c.database = c.user }
     if c.tls_mode.len == 0 { c.tls_mode = "false" }
-    if c.tls_mode != "false" && c.tls_mode != "0" && c.tls_mode != "disabled" {
-        >> errors.new("mysql: TLS is not available; use tls=false")
+    if c.tls_mode != "false" && c.tls_mode != "0" && c.tls_mode != "disabled" && c.tls_mode != "true" && c.tls_mode != "required" && c.tls_mode != "verify" {
+        >> errors.new("mysql: unsupported TLS mode")
     }
     << c
 }

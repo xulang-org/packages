@@ -10,6 +10,7 @@
 pub struct Pool {
     pub host string
     pub port int
+    pub secure bool
     pub endpoint string
     pub state chan pool.State
     pub max_idle int
@@ -25,6 +26,7 @@ pub fn new_pool(endpoint string, max_idle int) Pool {
     << Pool{
         host: c.host,
         port: c.port,
+        secure: c.secure,
         endpoint: endpoint,
         state: ch,
         max_idle: cap_val
@@ -32,15 +34,16 @@ pub fn new_pool(endpoint string, max_idle int) Pool {
 }
 
 pub fn (p &Pool) get() Client {
-    << Client{host: p.host + "", port: p.port}
+    << Client{host: p.host + "", port: p.port, secure: p.secure}
 }
 
 // Shares sockets and close state; clones configuration strings.
 pub fn (p &Pool) dup() Pool {
-    << Pool{host: strings.clone(&p.host), port: p.port, endpoint: strings.clone(&p.endpoint), state: p.state, max_idle: p.max_idle}
+    << Pool{host: strings.clone(&p.host), port: p.port, secure: p.secure, endpoint: strings.clone(&p.endpoint), state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -52,16 +55,23 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &Pool) put(key string, value string) int {
+    if p.secure {
+        mut c := p.get()
+        result := c.put(key, value) or (err) { << 0 }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
     mut reusable := false
@@ -75,6 +85,11 @@ pub fn (p &Pool) put(key string, value string) int {
 }
 
 pub fn (p &Pool) get_key(key string) string {
+    if p.secure {
+        mut c := p.get()
+        result := c.get(key) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
     mut reusable := false
@@ -88,6 +103,11 @@ pub fn (p &Pool) get_key(key string) string {
 }
 
 pub fn (p &Pool) delete(key string) int {
+    if p.secure {
+        mut c := p.get()
+        result := c.delete(key) or (err) { << 0 }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
     mut reusable := false
@@ -101,6 +121,11 @@ pub fn (p &Pool) delete(key string) int {
 }
 
 pub fn (p &Pool) exists(key string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.exists(key) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false

@@ -2,14 +2,17 @@
 
 #net
 #net/http
+#crypto/tls
 #strings
 #errors
 #encoding/json
 #strconv
+transport #github.com/xulang-org/packages/transport
 
 pub struct MilvusClient {
     pub host string
     pub port int
+    pub secure bool
     pub token string
 }
 
@@ -45,6 +48,12 @@ fn parse_int_def(s string, def int) int {
 }
 
 pub fn new_client(endpoint string) MilvusClient {
+    if strings.has_prefix(&endpoint, "https://") {
+        ep := transport.parse_endpoint(endpoint, 19530) or (err) {
+            << MilvusClient{host: "127.0.0.1", port: 19530, secure: true, token: ""}
+        }
+        << MilvusClient{host: ep.host, port: ep.port, secure: true, token: ""}
+    }
     mut ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
@@ -67,6 +76,7 @@ pub fn new_client(endpoint string) MilvusClient {
     << MilvusClient{
         host: host,
         port: port,
+        secure: false,
         token: ""
     }
 }
@@ -108,6 +118,19 @@ fn (c MilvusClient) request_on_fd(fd int, method string, path string, body strin
 }
 
 pub fn (c MilvusClient) do_request(method string, path string, body string) string {
+    if c.secure {
+        mut req := method + " " + path + " HTTP/1.1\r\n"
+        req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+        req = req + "Content-Type: application/json\r\n"
+        if c.token.len > 0 { req = req + "Authorization: Bearer " + c.token + "\r\n" }
+        req = req + "Content-Length: " + str(body.len) + "\r\n"
+        req = req + "Connection: close\r\n\r\n" + body
+        ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
+        cfg := tls.new_config(c.host + "")
+        resp := transport.request_raw(ep, cfg, req, method + "") or >>
+        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body) }
+        << resp.body
+    }
     fd := c.connect() or >>
     res := c.do_request_on_fd(fd, method, path, body) or (err) {
         safe_close(fd)
@@ -118,6 +141,10 @@ pub fn (c MilvusClient) do_request(method string, path string, body string) stri
 }
 
 fn (c MilvusClient) request_at(fd int, method string, path string, body string, reusable &mut bool) string {
+    if c.secure {
+        *reusable = false
+        << c.do_request(method, path, body) or >>
+    }
     if fd < 0 { << c.do_request(method, path, body) or >> }
     << c.request_on_fd(fd, method, path, body, reusable) or >>
 }

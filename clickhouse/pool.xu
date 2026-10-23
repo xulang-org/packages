@@ -10,6 +10,7 @@
 pub struct Pool {
     pub host string
     pub port int
+    pub secure bool
     pub user string
     pub password string
     pub database string
@@ -27,6 +28,7 @@ pub fn new_pool(endpoint string, user string, password string, database string, 
     << Pool{
         host: c.host,
         port: c.port,
+        secure: c.secure,
         user: c.user,
         password: c.password,
         database: c.database,
@@ -39,6 +41,7 @@ pub fn (p &Pool) get() Client {
     << Client{
         host: p.host + "",
         port: p.port,
+        secure: p.secure,
         user: p.user + "",
         password: p.password + "",
         database: p.database + ""
@@ -46,10 +49,11 @@ pub fn (p &Pool) get() Client {
 }
 
 pub fn (p &Pool) dup() Pool {
-    << Pool{host: strings.clone(&p.host), port: p.port, user: strings.clone(&p.user), password: strings.clone(&p.password), database: strings.clone(&p.database), state: p.state, max_idle: p.max_idle}
+    << Pool{host: strings.clone(&p.host), port: p.port, secure: p.secure, user: strings.clone(&p.user), password: strings.clone(&p.password), database: strings.clone(&p.database), state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -61,16 +65,24 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &Pool) exec(sql_query string) int {
+    if p.secure {
+        mut c := p.get()
+        resp := c.request(sql_query) or >>
+        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
+        << 0
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
     mut c := p.get()
@@ -84,6 +96,12 @@ pub fn (p &Pool) exec(sql_query string) int {
 }
 
 pub fn (p &Pool) query(sql_query string) string {
+    if p.secure {
+        mut c := p.get()
+        resp := c.request(sql_query) or >>
+        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
+        << resp.body
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
     mut c := p.get()
@@ -97,6 +115,12 @@ pub fn (p &Pool) query(sql_query string) string {
 }
 
 pub fn (p &Pool) query_tsv(sql_query string) [][]string {
+    if p.secure {
+        mut c := p.get()
+        resp := c.request(sql_query) or >>
+        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
+        << parse_tsv(resp.body)
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
     mut c := p.get()

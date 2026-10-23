@@ -67,8 +67,12 @@ fn main() int {
 }
 ```
 
+## TLS
+
+`sslmode=disable` 保持明文连接；`require`、`verify-ca` 和 `verify-full` 先完成 PostgreSQL SSLRequest，再在同一 TCP 连接上升级到 TLS。默认执行证书链和主机名校验；自签名根证书可通过 `sslrootcert=/absolute/path/ca.pem` 指定。证书错误、主机名错误和服务器拒绝升级都会使连接打开失败，不会回退到明文。
+
 ## 模块边界与迁移
 
 数据库协议、认证、DSN 和 SQL 驱动实现统一位于本模块。通用连接池与事务管理由 `#database/sql` 提供，驱动契约由 `#database/sql/driver` 提供。标准库不再维护另一份 `postgres` 驱动。
 
-Xu 1.0.0 移除了 `#database/sql/postgres`。迁移时，在项目 `xu.xun` 声明上面的依赖，并将导入改为 `#github.com/xulang-org/packages/postgres`；`sql.open(postgres.driver(), dsn)` 的调用方式保持不变。首版驱动不提供 TLS。
+Xu 1.0.0 移除了 `#database/sql/postgres`。迁移时，在项目 `xu.xun` 声明上面的依赖，并将导入改为 `#github.com/xulang-org/packages/postgres`；`sql.open(postgres.driver(), dsn)` 的调用方式保持不变。

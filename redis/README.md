@@ -73,3 +73,8 @@ fn main() int {
 当前支持 RESP3 的 map、set、push、bool、double、big number、verbatim 和 blob error；attributes、流式字符串与未知长度聚合明确拒绝。double/big number 保留数值文本。深度最多 64 层、聚合最多 100,000 项、单条响应最多 16 MiB。收到 push 不会自动派发订阅消息。
 
 协议回归入口：`make packages-test`。连接池生命周期仍见仓库的 packages 审计待办。
+
+
+## TLS
+
+使用 `tls_connect(endpoint, default_port)` 建立带系统根证书验证和 SNI 的 TLS 连接；需要自定义 CA 时使用 `tls_connect_config(endpoint, default_port, cfg)`；返回的 `TlsClient` 提供 `read_exact`、`write_all` 和 `close`，协议帧可在同一会话上收发。TLS 握手、证书错误和超时都会直接返回错误，不会回退到明文。

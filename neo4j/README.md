@@ -35,3 +35,7 @@ fn main() {
 `get_conn()` 在关闭或拨号失败时返回 -1；每个借出的 fd 必须且只能归还一次。确认协议流同步时用 `put_conn(fd)`，读写失败或无法确认流状态时用 `discard_conn(fd)`；不要先手动关闭再归还。`close()` 可重复调用，关闭空闲连接并拒绝新借用；正在借出的连接可完成操作，归还时关闭。并发拨号期间关闭池，新拨出的连接也会立即关闭。
 
 `max_idle` 仅限制保留的空闲连接数量，不限制总打开数量；当前没有 max_open、等待队列、空闲超时或请求截止时间。每个借出的连接仅支持串行 HTTP/1.x 请求，不支持 pipelining。业务方法遇到 HTTP 错误、截断或解析失败会淘汰连接；Connection: close、默认 HTTP/1.0 和依赖 EOF 定界的成功响应保留结果但不入池。不会自动重试业务请求。
+
+## TLS
+
+`http://` and `https://` endpoints are accepted. HTTPS uses Xu `crypto/tls`, verifies the server against the system root pool, and sends the endpoint host as SNI. Secure business calls establish a verified TLS connection per request; manual fd pool APIs remain for plaintext sockets until the connection-object pool migration is complete.

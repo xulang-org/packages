@@ -53,6 +53,11 @@ fn main() {
 
 按 [BSON 1.1 格式](https://bsonspec.org/spec.html) 的字段边界读取根字段，并校验嵌套文档/数组、长度与终止字节，深度最多 64 层。字符串内容和子文档里的 `ok` 不会决定根命令状态。`run_command` 检查 `responseTo`、OP_MSG framing、根 `ok`、`writeErrors` 和 `writeConcernError`，写错误会返回错误。
 
-目前仅处理未压缩、flags=0、单个 kind=0 文档的 OP_MSG；其他 flags/sections 明确拒绝。`find_first_string` 从 `cursor.firstBatch[0]` 读取字符串字段。报文最大 16 MiB；完整认证、TLS、拓扑发现和连接池会话管理不在本轮修复范围。
+目前仅处理未压缩、flags=0、单个 kind=0 文档的 OP_MSG；其他 flags/sections 明确拒绝。`find_first_string` 从 `cursor.firstBatch[0]` 读取字符串字段。报文最大 16 MiB；认证与拓扑发现仍由服务端负责；TLS 连接可通过 `tls_connect(endpoint, 27017)` 建立，并复用同一 BSON 帧接口。
 
 回归入口：`make packages-test`。
+
+
+## TLS
+
+使用 `tls_connect(endpoint, default_port)` 建立带系统根证书验证和 SNI 的 TLS 连接；需要自定义 CA 时使用 `tls_connect_config(endpoint, default_port, cfg)`；返回的 `TlsClient` 提供 `read_exact`、`write_all` 和 `close`，协议帧可在同一会话上收发。TLS 握手、证书错误和超时都会直接返回错误，不会回退到明文。

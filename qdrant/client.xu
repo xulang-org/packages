@@ -2,8 +2,10 @@
 
 #net
 #net/http
+#crypto/tls
 #errors
 #strings
+transport #github.com/xulang-org/packages/transport
 
 pub struct Response {
     pub status_code int
@@ -13,6 +15,7 @@ pub struct Response {
 pub struct Client {
     pub host string
     pub port int
+    pub secure bool
     pub api_key string
 }
 
@@ -35,6 +38,10 @@ fn safe_close(fd int) {
 }
 
 fn parse_endpoint(raw string) Client {
+    if strings.has_prefix(&raw, "https://") {
+        ep := transport.parse_endpoint(raw, 6333) or (err) { << Client{host: "127.0.0.1", port: 6333, secure: true, api_key: ""} }
+        << Client{host: ep.host, port: ep.port, secure: true, api_key: ""}
+    }
     mut ep := raw
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
@@ -60,7 +67,7 @@ fn parse_endpoint(raw string) Client {
             host = ep
         }
     }
-    << Client{host: host, port: port, api_key: ""}
+    << Client{host: host, port: port, secure: false, api_key: ""}
 }
 
 pub fn new_client(endpoint string, api_key string) Client {
@@ -70,6 +77,20 @@ pub fn new_client(endpoint string, api_key string) Client {
 }
 
 pub fn (c &mut Client) request(method string, path string, body string) Response {
+    if c.secure {
+        mut p := path
+        if p.len == 0 || (p[0] & 255) != 47 { p = "/" + p }
+        mut req := method + " " + p + " HTTP/1.1\r\n"
+        req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+        if c.api_key.len > 0 { req = req + "api-key: " + c.api_key + "\r\n" }
+        req = req + "Content-Type: application/json\r\n"
+        req = req + "Content-Length: " + str(body.len) + "\r\n"
+        req = req + "Connection: close\r\n\r\n" + body
+        ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
+        cfg := tls.new_config(c.host + "")
+        resp := transport.request_raw(ep, cfg, req, method + "") or >>
+        << Response{status_code: resp.status_code, body: resp.body}
+    }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("qdrant: dial failed: " + err.msg())
@@ -84,6 +105,10 @@ pub fn (c &mut Client) request(method string, path string, body string) Response
 }
 
 fn (c &mut Client) request_at(fd int, method string, path string, body string, reusable &mut bool) Response {
+    if c.secure {
+        *reusable = false
+        << c.request(method, path, body) or >>
+    }
     if fd < 0 { << c.request(method, path, body) or >> }
     << c.request_on_fd(fd, method, path, body, reusable) or >>
 }

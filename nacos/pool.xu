@@ -25,16 +25,21 @@ pub fn new_pool(endpoint string, namespace string, max_idle int) Pool {
     }
 }
 
+fn client_copy(p &Pool) Client {
+    << Client{host: strings.clone(&p.client.host), port: p.client.port, secure: p.client.secure, namespace_id: strings.clone(&p.client.namespace_id)}
+}
+
 pub fn open_pool(endpoint string, namespace string, max_idle int) Pool {
     << new_pool(endpoint, namespace, max_idle)
 }
 
 // Shares sockets and close state; clones configuration strings.
 pub fn (p &Pool) dup() Pool {
-    << Pool{client: Client{host: strings.clone(&p.client.host), port: p.client.port, namespace_id: strings.clone(&p.client.namespace_id)}, state: p.state, max_idle: p.max_idle}
+    << Pool{client: Client{host: strings.clone(&p.client.host), port: p.client.port, secure: p.client.secure, namespace_id: strings.clone(&p.client.namespace_id)}, state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.client.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -46,16 +51,23 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.client.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.client.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &Pool) register_instance(service string, ip string, port int, group string) bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.register_instance(service, ip, port, group) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -65,6 +77,11 @@ pub fn (p &Pool) register_instance(service string, ip string, port int, group st
 }
 
 pub fn (p &Pool) get_instances(service string, group string) string {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.get_instances(service, group) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
     mut reusable := false
@@ -77,6 +94,11 @@ pub fn (p &Pool) get_instances(service string, group string) string {
 }
 
 pub fn (p &Pool) deregister_instance(service string, ip string, port int, group string) bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.deregister_instance(service, ip, port, group) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -86,6 +108,11 @@ pub fn (p &Pool) deregister_instance(service string, ip string, port int, group 
 }
 
 pub fn (p &Pool) publish_config(data_id string, group string, content string) bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.publish_config(data_id, group, content) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -95,6 +122,11 @@ pub fn (p &Pool) publish_config(data_id string, group string, content string) bo
 }
 
 pub fn (p &Pool) get_config(data_id string, group string) string {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.get_config(data_id, group) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
     mut reusable := false
@@ -107,6 +139,11 @@ pub fn (p &Pool) get_config(data_id string, group string) string {
 }
 
 pub fn (p &Pool) remove_config(data_id string, group string) bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.remove_config(data_id, group) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false

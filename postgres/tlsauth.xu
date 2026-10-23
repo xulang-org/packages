@@ -1,0 +1,143 @@
+@"github.com/xulang-org/packages/postgres"
+
+#crypto/md5
+#crypto/rand
+#crypto/sha256
+#crypto/hmac
+#crypto/subtle
+#encoding/base64
+#encoding/hex
+#strconv
+#strings
+transport #github.com/xulang-org/packages/transport
+
+fn md5_password_tls(user string, pass string, salt string) string {
+    first := md5.sum(pass + user)
+    second := md5.sum(first + salt)
+    << "md5" + second
+}
+
+fn raw_hash_hex_tls(hexs string) string {
+    raw := hex.decode_string(hexs) or (err) { << "" }
+    << raw
+}
+
+fn hmac_raw_tls(key string, data string) string {
+    << raw_hash_hex_tls(hmac.sum256(&key, &data))
+}
+
+fn scram_attr_tls(msg &string, key string) string {
+    parts := strings.split(msg, ",")
+    prefix := key + "="
+    for i in 0:parts.len {
+        p := parts[i] + ""
+        if strings.has_prefix(&p, prefix) { << p[prefix.len:p.len] + "" }
+    }
+    << ""
+}
+
+fn pbkdf2_sha256_tls(password string, salt string, rounds int) string {
+    mut msg := salt + string_from_byte(0) + string_from_byte(0) + string_from_byte(0) + string_from_byte(1)
+    mut u := hmac_raw_tls(password + "", msg)
+    mut out := u + ""
+    mut i := 1
+    while i < rounds {
+        u = hmac_raw_tls(password + "", u)
+        out = xor_raw_tls(out, u)
+        i += 1
+    }
+    << out
+}
+
+fn xor_raw_tls(a string, b string) string {
+    r := subtle.xor_bytes(&a, &b) or (err) { << "" }
+    << r
+}
+
+fn scram_auth_tls(tc &mut transport.Conn, cfg &Config, initial_body string) string {
+    mech := cstring(&initial_body, 4)
+    if mech.err.len > 0 { << mech.err }
+    if !strings.contains(&initial_body, "SCRAM-SHA-256") { << "postgres: server does not offer SCRAM-SHA-256" }
+    nonce_raw := rand.read(18) or (err) { << err.msg() }
+    nonce := base64.encode_raw(nonce_raw)
+    mut bare := "n=" + strings.replace_all(&cfg.user, "=", "=3D")
+    bare = strings.replace_all(&bare, ",", "=2C") + ",r=" + nonce
+    first := "n,," + bare
+    body := "SCRAM-SHA-256" + string_from_byte(0) + be32(first.len) + first
+    e := send_packet_tls(tc, 112, body)
+    if e.len > 0 { << e }
+    p := recv_packet_tls(tc)
+    if p.err.len > 0 { << p.err }
+    if p.typ != 82 || be32_at(&p.body, 0) != 11 { << "postgres: malformed SCRAM continue" }
+    server_first := p.body[4:p.body.len] + ""
+    snonce := scram_attr_tls(&server_first, "r")
+    salt64 := scram_attr_tls(&server_first, "s")
+    rounds_s := scram_attr_tls(&server_first, "i")
+    if !strings.has_prefix(&snonce, nonce) || salt64.len == 0 || rounds_s.len == 0 { << "postgres: invalid SCRAM challenge" }
+    rounds := strconv.atoi(&rounds_s) or (err) { << "postgres: invalid SCRAM iteration count" }
+    if rounds < 1 || rounds > 1000000 { << "postgres: invalid SCRAM iteration count" }
+    salt := base64.decode_raw(salt64) or (err) { << err.msg() }
+    salted := pbkdf2_sha256_tls(cfg.password, salt, rounds)
+    client_key := hmac_raw_tls(salted + "", "Client Key")
+    stored_key := raw_hash_hex_tls(sha256.sum256(client_key + ""))
+    final_without := "c=biws,r=" + snonce
+    auth_message := bare + "," + server_first + "," + final_without
+    sig := hmac_raw_tls(stored_key, auth_message + "")
+    proof := xor_raw_tls(client_key + "", sig + "")
+    final := final_without + ",p=" + base64.encode_to_string(proof)
+    e2 := send_packet_tls(tc, 112, final)
+    if e2.len > 0 { << e2 }
+    p2 := recv_packet_tls(tc)
+    if p2.err.len > 0 { << p2.err }
+    if p2.typ != 82 || be32_at(&p2.body, 0) != 12 {
+        if p2.typ == 69 { << error_text(p2.body) }
+        << "postgres: malformed SCRAM final " + str(p2.typ) + ":" + str(be32_at(&p2.body, 0))
+    }
+    final_msg := p2.body[4:p2.body.len] + ""
+    verifier := scram_attr_tls(&final_msg, "v")
+    server_key := hmac_raw_tls(salted, "Server Key")
+    expected := base64.encode_to_string(hmac_raw_tls(server_key, auth_message))
+    if verifier.len == 0 || verifier != expected { << "postgres: SCRAM server signature mismatch" }
+    << ""
+}
+
+fn startup_tls(tc &mut transport.Conn, cfg &Config) string {
+    mut body := be32(196608)
+    body = body + "user" + string_from_byte(0) + cfg.user + string_from_byte(0)
+    body = body + "database" + string_from_byte(0) + cfg.database + string_from_byte(0) + string_from_byte(0)
+    frame := be32(body.len + 4) + body
+    e := write_all_tls(tc, frame)
+    if e.len > 0 { << e }
+    mut auth_done := 0
+    while auth_done == 0 {
+        p := recv_packet_tls(tc)
+        if p.err.len > 0 { << p.err }
+        if p.typ == 69 { << error_text(p.body) }
+        if p.typ == 82 {
+            code := be32_at(&p.body, 0)
+            if code == 0 { auth_done = 1 }
+            else if code == 3 {
+                e2 := send_packet_tls(tc, 112, cfg.password + string_from_byte(0))
+                if e2.len > 0 { << e2 }
+            } else if code == 5 {
+                if p.body.len < 8 { << "postgres: malformed MD5 challenge" }
+                salt := p.body[4:8] + ""
+                e3 := send_packet_tls(tc, 112, md5_password_tls(cfg.user, cfg.password, salt) + string_from_byte(0))
+                if e3.len > 0 { << e3 }
+            } else if code == 10 {
+                e4 := scram_auth_tls(tc, cfg, p.body)
+                if e4.len > 0 { << e4 }
+            } else { << "postgres: unsupported authentication method" }
+        }
+        if p.typ == 90 { auth_done = 1 }
+    }
+    // ReadyForQuery is sent after AuthenticationOk. ParameterStatus and
+    // BackendKeyData may appear before it and are intentionally ignored.
+    for i in 0:64 {
+        p := recv_packet_tls(tc)
+        if p.err.len > 0 { << p.err }
+        if p.typ == 69 { << error_text(p.body) }
+        if p.typ == 90 { << "" }
+    }
+    << "postgres: startup did not reach ReadyForQuery"
+}

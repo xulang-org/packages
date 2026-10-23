@@ -10,6 +10,7 @@
 pub struct Pool {
     pub host string
     pub port int
+    pub secure bool
     pub token string
     pub state chan pool.State
     pub max_idle int
@@ -25,6 +26,7 @@ pub fn new_pool(endpoint string, token string, max_idle int) Pool {
     << Pool{
         host: c.host,
         port: c.port,
+        secure: c.secure,
         token: token + "",
         state: ch,
         max_idle: cap_val
@@ -39,16 +41,18 @@ pub fn (p &Pool) get() Client {
     << Client{
         host: p.host + "",
         port: p.port,
+        secure: p.secure,
         token: p.token + ""
     }
 }
 
 // Shares sockets and close state; clones configuration strings.
 pub fn (p &Pool) dup() Pool {
-    << Pool{host: strings.clone(&p.host), port: p.port, token: strings.clone(&p.token), state: p.state, max_idle: p.max_idle}
+    << Pool{host: strings.clone(&p.host), port: p.port, secure: p.secure, token: strings.clone(&p.token), state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -60,16 +64,23 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &Pool) put_kv(key string, val string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.put_kv(key, val) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -80,6 +91,11 @@ pub fn (p &Pool) put_kv(key string, val string) bool {
 }
 
 pub fn (p &Pool) get_kv(key string) string {
+    if p.secure {
+        mut c := p.get()
+        result := c.get_kv(key) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
     mut reusable := false
@@ -93,6 +109,11 @@ pub fn (p &Pool) get_kv(key string) string {
 }
 
 pub fn (p &Pool) delete_kv(key string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.delete_kv(key) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -103,6 +124,11 @@ pub fn (p &Pool) delete_kv(key string) bool {
 }
 
 pub fn (p &Pool) register_service(id string, name string, address string, port int) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.register_service(id, name, address, port) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -113,6 +139,11 @@ pub fn (p &Pool) register_service(id string, name string, address string, port i
 }
 
 pub fn (p &Pool) deregister_service(id string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.deregister_service(id) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -123,6 +154,11 @@ pub fn (p &Pool) deregister_service(id string) bool {
 }
 
 pub fn (p &Pool) get_service(name string) string {
+    if p.secure {
+        mut c := p.get()
+        result := c.get_service(name) or (err) { << "" }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
     mut reusable := false
@@ -136,6 +172,11 @@ pub fn (p &Pool) get_service(name string) string {
 }
 
 pub fn (p &Pool) ping() bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.ping() or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false

@@ -10,6 +10,7 @@
 pub struct Pool {
     pub host string
     pub port int
+    pub secure bool
     pub api_key string
     pub state chan pool.State
     pub max_idle int
@@ -25,6 +26,7 @@ pub fn new_pool(endpoint string, api_key string, max_idle int) Pool {
     << Pool{
         host: c.host,
         port: c.port,
+        secure: c.secure,
         api_key: api_key + "",
         state: ch,
         max_idle: cap_val
@@ -39,16 +41,18 @@ pub fn (p &Pool) get() Client {
     << Client{
         host: p.host + "",
         port: p.port,
+        secure: p.secure,
         api_key: p.api_key + ""
     }
 }
 
 // Shares sockets and close state; clones configuration strings.
 pub fn (p &Pool) dup() Pool {
-    << Pool{host: strings.clone(&p.host), port: p.port, api_key: strings.clone(&p.api_key), state: p.state, max_idle: p.max_idle}
+    << Pool{host: strings.clone(&p.host), port: p.port, secure: p.secure, api_key: strings.clone(&p.api_key), state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &Pool) get_conn() int {
+    if p.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -60,16 +64,23 @@ pub fn (p &Pool) get_conn() int {
 }
 
 pub fn (p &Pool) put_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, true)
 }
 
 pub fn (p &Pool) discard_conn(fd int) {
+    if p.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &Pool) create_collection(name string, vector_size int, distance string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.create_collection(name, vector_size, distance) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -80,6 +91,11 @@ pub fn (p &Pool) create_collection(name string, vector_size int, distance string
 }
 
 pub fn (p &Pool) collection_exists(name string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.collection_exists(name) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -90,6 +106,11 @@ pub fn (p &Pool) collection_exists(name string) bool {
 }
 
 pub fn (p &Pool) delete_collection(name string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.delete_collection(name) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -100,6 +121,11 @@ pub fn (p &Pool) delete_collection(name string) bool {
 }
 
 pub fn (p &Pool) upsert_point(collection string, id int, vector []string, payload_json string) bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.upsert_point(collection, id, vector, payload_json) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -123,6 +149,11 @@ pub fn (p &Pool) search(collection string, vector []string, limit int) []ScoredP
 }
 
 pub fn (p &Pool) ping() bool {
+    if p.secure {
+        mut c := p.get()
+        result := c.ping() or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false

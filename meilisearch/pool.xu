@@ -25,17 +25,23 @@ pub fn open_pool(endpoint string, api_key string, max_idle int) MeiliPool {
     }
 }
 
+fn client_copy(p &MeiliPool) MeiliClient {
+    << MeiliClient{host: strings.clone(&p.client.host), port: p.client.port, secure: p.client.secure, api_key: strings.clone(&p.client.api_key)}
+}
+
 // Copies configuration while sharing the connection and close lifecycle.
 pub fn (p &MeiliPool) dup() MeiliPool {
     c := MeiliClient{
         host: strings.clone(&p.client.host),
         port: p.client.port,
+        secure: p.client.secure,
         api_key: strings.clone(&p.client.api_key)
     }
     << MeiliPool{client: c, state: p.state, max_idle: p.max_idle}
 }
 
 pub fn (p &MeiliPool) get_conn() int {
+    if p.client.secure { << -1 }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     cached := sockets.take()
     if cached == -2 { << -1 }
@@ -51,11 +57,17 @@ pub fn (p &MeiliPool) put_conn(fd int) {
 }
 
 pub fn (p &MeiliPool) discard_conn(fd int) {
+    if p.client.secure { << }
     sockets := pool.SocketPool{state: p.state, max_idle: p.max_idle}
     sockets.release(fd, false)
 }
 
 pub fn (p &MeiliPool) health() bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.health() or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { << false }
     mut reusable := false
@@ -68,6 +80,11 @@ pub fn (p &MeiliPool) health() bool {
 }
 
 pub fn (p &MeiliPool) create_index(uid string, primary_key string) bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.create_index(uid, primary_key) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
     mut reusable := false
@@ -80,6 +97,11 @@ pub fn (p &MeiliPool) create_index(uid string, primary_key string) bool {
 }
 
 pub fn (p &MeiliPool) delete_index(uid string) bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.delete_index(uid) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
     mut reusable := false
@@ -92,6 +114,11 @@ pub fn (p &MeiliPool) delete_index(uid string) bool {
 }
 
 pub fn (p &MeiliPool) add_documents(uid string, json_docs string) bool {
+    if p.client.secure {
+        c := client_copy(p)
+        result := c.add_documents(uid, json_docs) or (err) { << false }
+        << result
+    }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
     mut reusable := false

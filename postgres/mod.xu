@@ -7,9 +7,8 @@
 // This is a small, dependency-free wire driver.  It deliberately uses the
 // extended query protocol for arguments (parameters never get interpolated
 // into SQL) and supports the authentication methods that PostgreSQL servers
-// commonly advertise: trust, cleartext, MD5 and SCRAM-SHA-256.  TLS is not
-// negotiated by this first version; use sslmode=disable explicitly when the
-// server has SSL enabled but does not require it.
+// commonly advertise: trust, cleartext, MD5 and SCRAM-SHA-256. TLS upgrades
+// use PostgreSQL's SSLRequest and preserve the same connection for startup.
 //
 // DSNs accepted by parse_dsn/open:
 //   postgres://user:password@host:5432/database?sslmode=disable

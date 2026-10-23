@@ -2,8 +2,10 @@
 
 #net
 #net/http
+#crypto/tls
 #errors
 #strings
+transport #github.com/xulang-org/packages/transport
 
 pub struct Response {
     pub status_code int
@@ -13,6 +15,7 @@ pub struct Response {
 pub struct Client {
     pub host string
     pub port int
+    pub secure bool
     pub token string
     pub org string
     pub bucket string
@@ -37,6 +40,10 @@ fn safe_close(fd int) {
 }
 
 fn parse_endpoint(raw string) []string {
+    if strings.has_prefix(&raw, "https://") {
+        ep := transport.parse_endpoint(raw, 8086) or (err) { << ["127.0.0.1", "8086", "true"] }
+        << [ep.host, str(ep.port), "true"]
+    }
     mut ep := raw
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
@@ -62,7 +69,7 @@ fn parse_endpoint(raw string) []string {
             host = ep
         }
     }
-    << [host, str(port)]
+    << [host, str(port), "false"]
 }
 
 pub fn new_client(endpoint string, token string, org string, bucket string) Client {
@@ -72,6 +79,7 @@ pub fn new_client(endpoint string, token string, org string, bucket string) Clie
     << Client{
         host: host,
         port: port,
+        secure: ep_parts[2] == "true",
         token: token,
         org: org,
         bucket: bucket
@@ -79,6 +87,22 @@ pub fn new_client(endpoint string, token string, org string, bucket string) Clie
 }
 
 pub fn (c &mut Client) request(method string, path string, body string, content_type string, accept string) Response {
+    if c.secure {
+        mut p := path
+        if p.len == 0 || (p[0] & 255) != 47 { p = "/" + p }
+        mut req := method + " " + p + " HTTP/1.1\r\n"
+        req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
+        if c.token.len > 0 { req = req + "Authorization: Token " + c.token + "\r\n" }
+        if content_type.len > 0 { req = req + "Content-Type: " + content_type + "\r\n" }
+        if accept.len > 0 { req = req + "Accept: " + accept + "\r\n" }
+        req = req + "Content-Length: " + str(body.len) + "\r\n"
+        req = req + "Connection: close\r\n\r\n"
+        if body.len > 0 { req = req + body }
+        ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
+        cfg := tls.new_config(c.host + "")
+        resp := transport.request_raw(ep, cfg, req, method + "") or >>
+        << Response{status_code: resp.status_code, body: resp.body}
+    }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("influxdb: dial failed: " + err.msg())
@@ -93,6 +117,10 @@ pub fn (c &mut Client) request(method string, path string, body string, content_
 }
 
 fn (c &mut Client) request_at(fd int, method string, path string, body string, content_type string, accept string, reusable &mut bool) Response {
+    if c.secure {
+        *reusable = false
+        << c.request(method, path, body, content_type, accept) or >>
+    }
     if fd < 0 { << c.request(method, path, body, content_type, accept) or >> }
     << c.request_on_fd(fd, method, path, body, content_type, accept, reusable) or >>
 }
