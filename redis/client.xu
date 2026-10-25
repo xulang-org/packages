@@ -90,24 +90,24 @@ fn (c &mut Client) read_value_depth(depth int) Value {
         else if prefix == 61 {
             if data.len < 4 || (data[3] & 255) != 58 { >> errors.new("redis: invalid verbatim string") }
             v = str_value(data)
-            v.typ = type_verbatim
+            v.typ = TYPE_VERBATIM
         } else { v = str_value(data) }
     } else if prefix == 42 || prefix == 37 || prefix == 126 || prefix == 62 {
         count := parse_int(text) or >>
         if count == -1 && prefix == 42 { << nil_value() }
         if count < 0 || count > 100000 { >> errors.new("redis: invalid aggregate count") }
-        mut typ := type_arr
+        mut typ := TYPE_ARR
         mut total := count
-        if prefix == 37 { typ = type_map
+        if prefix == 37 { typ = TYPE_MAP
             total = count * 2 }
-        if prefix == 126 { typ = type_set }
-        if prefix == 62 { typ = type_push }
+        if prefix == 126 { typ = TYPE_SET }
+        if prefix == 62 { typ = TYPE_PUSH }
         mut strings_only := []string{}
         for i in 0:total {
             elem := c.read_value_depth(depth + 1) or >>
             raw = raw + elem.raw
             if raw.len > 16777216 { >> errors.new("redis: response size limit exceeded") }
-            if elem.typ == type_str { strings_only.push(elem.str_val + "") }
+            if elem.typ == TYPE_STR { strings_only.push(elem.str_val + "") }
         }
         v = arr_value(strings_only)
         v.typ = typ
@@ -121,7 +121,7 @@ fn (c &mut Client) read_value_depth(depth int) Value {
             strconv.parse_float(&text) or >>
         }
         v = str_value(text)
-        v.typ = type_double
+        v.typ = TYPE_DOUBLE
     } else if prefix == 40 {
         mut start := 0
         if text.len > 0 && (text[0] & 255) == 45 { start = 1 }
@@ -130,7 +130,7 @@ fn (c &mut Client) read_value_depth(depth int) Value {
             if (text[i] & 255) < 48 || (text[i] & 255) > 57 { >> errors.new("redis: malformed big number") }
         }
         v = str_value(text)
-        v.typ = type_big_number
+        v.typ = TYPE_BIG_NUMBER
     } else { >> errors.new("redis: unsupported response prefix: " + str(prefix)) }
     v.raw = raw
     << v

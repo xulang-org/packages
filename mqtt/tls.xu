@@ -23,7 +23,7 @@ pub fn tls_connect_config(endpoint string, default_port int, cfg tls.Config) Tls
     ep.secure = true
     host := ep.host + ""
     port := ep.port
-    tc := transport.dial(ep, cfg, transport.default_timeout_ns) or >>
+    tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or >>
     << TlsClient{conn: tc, host: host, port: port}
 }
 
@@ -38,7 +38,7 @@ pub fn (c &mut TlsClient) read(max int) string {
 }
 
 pub fn (c &mut TlsClient) read_exact(need int) string {
-    if need < 0 || need > transport.max_message_bytes { >> errors.new("mqtt: invalid TLS read length") }
+    if need < 0 || need > transport.MAX_MESSAGE_BYTES { >> errors.new("mqtt: invalid TLS read length") }
     mut out := ""
     while out.len < need {
         part := c.read(need - out.len) or >>

@@ -123,7 +123,7 @@ pub fn (c WsClient) connect_secure() transport.Conn {
     if !c.secure { >> errors.new("ws: endpoint is not wss") }
     ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: c.path + "", secure: true}
     cfg := tls.new_config(c.host + "")
-    mut tc := transport.dial(ep, cfg, transport.default_timeout_ns) or >>
+    mut tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or >>
     nonce := rand.read(16) or >>
     key := base64.encode_to_string(nonce)
     req := build_handshake_request(c.host, c.port, c.path, key + "")
@@ -156,12 +156,12 @@ pub fn (c WsClient) connect_secure() transport.Conn {
 }
 
 pub fn (c WsClient) send_text_secure(tc &mut transport.Conn, text string) bool {
-    write_secure(tc, build_frame(opcode_text, text, true, true)) or (err) { << false }
+    write_secure(tc, build_frame(OPCODE_TEXT, text, true, true)) or (err) { << false }
     << true
 }
 
 pub fn (c WsClient) send_pong_secure(tc &mut transport.Conn, payload string) bool {
-    write_secure(tc, build_frame(opcode_pong, payload, true, true)) or (err) { << false }
+    write_secure(tc, build_frame(OPCODE_PONG, payload, true, true)) or (err) { << false }
     << true
 }
 
@@ -196,21 +196,21 @@ pub fn (c WsClient) read_frame_secure(tc &mut transport.Conn) Frame {
     mut payload := ""
     if n > 0 { payload = read_exact_secure(tc, n) or >> }
     if masked { payload = apply_mask(payload, m0, m1, m2, m3) }
-    if opcode == opcode_ping { c.send_pong_secure(tc, payload) or (err) { << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload} } }
+    if opcode == OPCODE_PING { c.send_pong_secure(tc, payload) or (err) { << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload} } }
     << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload}
 }
 
 pub fn (c WsClient) read_text_secure(tc &mut transport.Conn) string {
     while true {
         f := c.read_frame_secure(tc) or >>
-        if f.opcode == opcode_text { << f.payload }
-        if f.opcode == opcode_close { >> errors.new("wss connection closed by peer") }
+        if f.opcode == OPCODE_TEXT { << f.payload }
+        if f.opcode == OPCODE_CLOSE { >> errors.new("wss connection closed by peer") }
     }
     << ""
 }
 
 pub fn (c WsClient) close_secure(tc &mut transport.Conn) {
-    write_secure(tc, build_frame(opcode_close, "", true, true)) or (err) { << }
+    write_secure(tc, build_frame(OPCODE_CLOSE, "", true, true)) or (err) { << }
     tc.close()
 }
 
@@ -263,28 +263,28 @@ pub fn (c WsClient) connect() int {
 }
 
 pub fn (c WsClient) send_text(fd int, text string) bool {
-    f := build_frame(opcode_text, text, true, true)
+    f := build_frame(OPCODE_TEXT, text, true, true)
     << write_all(fd, f)
 }
 
 pub fn (c WsClient) send_binary(fd int, data string) bool {
-    f := build_frame(opcode_binary, data, true, true)
+    f := build_frame(OPCODE_BINARY, data, true, true)
     << write_all(fd, f)
 }
 
 pub fn (c WsClient) send_ping(fd int, payload string) bool {
-    f := build_frame(opcode_ping, payload, true, true)
+    f := build_frame(OPCODE_PING, payload, true, true)
     << write_all(fd, f)
 }
 
 pub fn (c WsClient) send_pong(fd int, payload string) bool {
-    f := build_frame(opcode_pong, payload, true, true)
+    f := build_frame(OPCODE_PONG, payload, true, true)
     << write_all(fd, f)
 }
 
 pub fn (c WsClient) close_conn(fd int) {
     if fd >= 0 {
-        f := build_frame(opcode_close, "", true, true)
+        f := build_frame(OPCODE_CLOSE, "", true, true)
         write_all(fd, f) or (e) {
             <<
         }
@@ -343,7 +343,7 @@ pub fn (c WsClient) read_frame(fd int) Frame {
     }
 
     // Auto-respond to Ping frames with Pong
-    if opcode == opcode_ping {
+    if opcode == OPCODE_PING {
         c.send_pong(fd, payload) or (err) {
             << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload}
         }
@@ -360,10 +360,10 @@ pub fn (c WsClient) read_frame(fd int) Frame {
 pub fn (c WsClient) read_text(fd int) string {
     while true {
         f := c.read_frame(fd) or >>
-        if f.opcode == opcode_text {
+        if f.opcode == OPCODE_TEXT {
             << f.payload
         }
-        if f.opcode == opcode_close {
+        if f.opcode == OPCODE_CLOSE {
             >> errors.new("ws connection closed by peer")
         }
     }

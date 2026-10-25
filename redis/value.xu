@@ -2,18 +2,18 @@
 
 #errors
 
-pub const type_str = 1
-pub const type_int = 2
-pub const type_arr = 3
-pub const type_nil = 4
-pub const type_err = 5
-pub const type_bool = 6
-pub const type_map = 7
-pub const type_set = 8
-pub const type_push = 9
-pub const type_double = 10
-pub const type_big_number = 11
-pub const type_verbatim = 12
+pub const TYPE_STR = 1
+pub const TYPE_INT = 2
+pub const TYPE_ARR = 3
+pub const TYPE_NIL = 4
+pub const TYPE_ERR = 5
+pub const TYPE_BOOL = 6
+pub const TYPE_MAP = 7
+pub const TYPE_SET = 8
+pub const TYPE_PUSH = 9
+pub const TYPE_DOUBLE = 10
+pub const TYPE_BIG_NUMBER = 11
+pub const TYPE_VERBATIM = 12
 
 pub struct Value {
     pub typ int
@@ -26,27 +26,27 @@ pub struct Value {
 }
 
 pub fn nil_value() Value {
-    << Value{typ: type_nil, str_val: "", int_val: 0, arr_val: []string{}, is_null: true, raw: "_\r\n"}
+    << Value{typ: TYPE_NIL, str_val: "", int_val: 0, arr_val: []string{}, is_null: true, raw: "_\r\n"}
 }
 
 pub fn str_value(s string) Value {
     raw := "$$" + str(s.len) + "\r\n" + s + "\r\n"
-    << Value{typ: type_str, str_val: s, int_val: 0, arr_val: []string{}, is_null: false, raw: raw}
+    << Value{typ: TYPE_STR, str_val: s, int_val: 0, arr_val: []string{}, is_null: false, raw: raw}
 }
 
 pub fn int_value(n int) Value {
-    << Value{typ: type_int, str_val: "", int_val: n, arr_val: []string{}, is_null: false, raw: ":" + str(n) + "\r\n"}
+    << Value{typ: TYPE_INT, str_val: "", int_val: n, arr_val: []string{}, is_null: false, raw: ":" + str(n) + "\r\n"}
 }
 
 pub fn arr_value(arr []string) Value {
     mut raw := "*" + str(arr.len) + "\r\n"
     for i in 0:arr.len { raw = raw + "$$" + str(arr[i].len) + "\r\n" + arr[i] + "\r\n" }
-    << Value{typ: type_arr, str_val: "", int_val: 0, arr_val: arr, is_null: false, raw: raw}
+    << Value{typ: TYPE_ARR, str_val: "", int_val: 0, arr_val: arr, is_null: false, raw: raw}
 }
 
 pub fn err_value(msg string) Value {
     raw := "!" + str(msg.len) + "\r\n" + msg + "\r\n"
-    << Value{typ: type_err, str_val: msg, int_val: 0, arr_val: []string{}, is_null: false, raw: raw}
+    << Value{typ: TYPE_ERR, str_val: msg, int_val: 0, arr_val: []string{}, is_null: false, raw: raw}
 }
 
 pub fn bool_value(b bool) Value {
@@ -56,36 +56,36 @@ pub fn bool_value(b bool) Value {
         n = 1
         raw = "#t\r\n"
     }
-    << Value{typ: type_bool, str_val: "", int_val: n, arr_val: []string{}, is_null: false, raw: raw}
+    << Value{typ: TYPE_BOOL, str_val: "", int_val: n, arr_val: []string{}, is_null: false, raw: raw}
 }
 
 pub fn (v &Value) is_nil() bool {
-    << v.is_null || v.typ == type_nil
+    << v.is_null || v.typ == TYPE_NIL
 }
 
 pub fn (v &Value) is_err() bool {
-    << v.typ == type_err
+    << v.typ == TYPE_ERR
 }
 
 pub fn (v &Value) as_string() string {
     if v.is_null {
         >> errors.new("redis: value is nil")
     }
-    if v.typ == type_err {
+    if v.typ == TYPE_ERR {
         >> errors.new(v.str_val)
     }
-    if v.typ != type_str && v.typ != type_verbatim { >> errors.new("redis: not a string") }
+    if v.typ != TYPE_STR && v.typ != TYPE_VERBATIM { >> errors.new("redis: not a string") }
     << v.str_val + ""
 }
 
 pub fn (v &Value) as_string_or(def string) string {
-    if v.is_null || v.typ == type_nil {
+    if v.is_null || v.typ == TYPE_NIL {
         << def
     }
-    if v.typ == type_err {
+    if v.typ == TYPE_ERR {
         >> errors.new(v.str_val)
     }
-    if v.typ != type_str && v.typ != type_verbatim { >> errors.new("redis: not a string") }
+    if v.typ != TYPE_STR && v.typ != TYPE_VERBATIM { >> errors.new("redis: not a string") }
     << v.str_val + ""
 }
 
@@ -93,10 +93,10 @@ pub fn (v &Value) as_int() int {
     if v.is_null {
         >> errors.new("redis: value is nil")
     }
-    if v.typ == type_err {
+    if v.typ == TYPE_ERR {
         >> errors.new(v.str_val)
     }
-    if v.typ != type_int { >> errors.new("redis: not an integer") }
+    if v.typ != TYPE_INT { >> errors.new("redis: not an integer") }
     << v.int_val
 }
 
@@ -104,29 +104,29 @@ pub fn (v &Value) as_bool() bool {
     if v.is_null {
         >> errors.new("redis: value is nil")
     }
-    if v.typ == type_err { >> errors.new(v.str_val) }
-    if v.typ != type_bool && v.typ != type_int { >> errors.new("redis: not a bool") }
+    if v.typ == TYPE_ERR { >> errors.new(v.str_val) }
+    if v.typ != TYPE_BOOL && v.typ != TYPE_INT { >> errors.new("redis: not a bool") }
     << v.int_val != 0
 }
 
 // Map elements are alternating keys and values; set/push/array elements keep
 // their own types. Null, error, nested aggregates and empty strings differ.
 pub fn (v &Value) elements() []Value {
-    if v.typ != type_arr && v.typ != type_map && v.typ != type_set && v.typ != type_push {
+    if v.typ != TYPE_ARR && v.typ != TYPE_MAP && v.typ != TYPE_SET && v.typ != TYPE_PUSH {
         >> errors.new("redis: not an aggregate")
     }
     mut c := Client{fd: -1, addr: "", buf: v.raw + ""}
     line := c.read_line() or >>
     count := parse_int(line[1:line.len]) or >>
     mut total := count
-    if v.typ == type_map { total = count * 2 }
+    if v.typ == TYPE_MAP { total = count * 2 }
     mut out := []Value{}
     for i in 0:total { out.push(c.read_value() or >>) }
     << out
 }
 
 pub fn (v &Value) as_strings() []string {
-    if v.typ != type_arr && v.typ != type_set { >> errors.new("redis: not a string array") }
+    if v.typ != TYPE_ARR && v.typ != TYPE_SET { >> errors.new("redis: not a string array") }
     values := v.elements() or >>
     mut out := []string{}
     for i in 0:values.len { out.push(values[i].as_string() or >>) }
