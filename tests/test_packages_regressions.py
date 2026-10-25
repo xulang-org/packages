@@ -996,7 +996,7 @@ fn main() int {
     mut c := redis.Client{fd: -1, addr: "", buf: "%1\\r\\n+k\\r\\n*4\\r\\n:7\\r\\n_\\r\\n$$0\\r\\n\\r\\n*1\\r\\n#t\\r\\n"}
     v := c.read_value() or (err) { println(err.msg())
         << 1 }
-    if v.typ != redis.type_map { << 2 }
+    if v.typ != redis.TYPE_MAP { << 2 }
     entries := v.elements() or (err) { << 3 }
     if entries.len != 2 { << 4 }
     key := entries[0].as_string() or (err) { << 5 }
