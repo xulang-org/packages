@@ -4,18 +4,18 @@
 #strings
 
 // AMQP 0-9-1 Protocol Constants
-pub const frame_method = 1
-pub const frame_header = 2
-pub const frame_body = 3
-pub const frame_heartbeat = 8
-pub const frame_end = 206 // 0xCE
+pub const FRAME_METHOD = 1
+pub const FRAME_HEADER = 2
+pub const FRAME_BODY = 3
+pub const FRAME_HEARTBEAT = 8
+pub const FRAME_END = 206 // 0xCE
 
 // Class IDs
-pub const class_connection = 10
-pub const class_channel = 20
-pub const class_exchange = 40
-pub const class_queue = 50
-pub const class_basic = 60
+pub const CLASS_CONNECTION = 10
+pub const CLASS_CHANNEL = 20
+pub const CLASS_EXCHANGE = 40
+pub const CLASS_QUEUE = 50
+pub const CLASS_BASIC = 60
 
 // Frame structure
 pub struct Frame {
@@ -128,7 +128,7 @@ pub fn build_frame(frame_type int, channel int, payload string) string {
     f = f + encode_i16(channel)
     f = f + encode_i32(payload.len)
     f = f + payload
-    f = f + encode_i8(frame_end)
+    f = f + encode_i8(FRAME_END)
     << f
 }
 

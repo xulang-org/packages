@@ -83,7 +83,7 @@ pub fn (c DnsClient) connect() int {
 
 // Queries A-records over TCP DNS (RFC 1035 section 4.2.2)
 pub fn (c DnsClient) resolve_a_on_fd(fd int, domain string) []string {
-    pkt := build_query_packet(0x1a2b, domain, type_a)
+    pkt := build_query_packet(0x1a2b, domain, TYPE_A)
     // Over TCP, DNS queries are prefixed with a 2-byte length
     l_hi := (pkt.len >> 8) & 255
     l_lo := pkt.len & 255

@@ -69,3 +69,7 @@ fn main() {
 ```
 
 Xu 外部导入需显式别名，别名不改变完整路径身份。Git 来源不包含忽略的 SQLite 原生构建产物；本机使用 SQLite 先执行 make native。远程 SQLite 需要包含原生资源的模块归档，该发行流程尚未发布。
+
+### Xu 0.10.3 constant migration
+
+The module now targets Xu 0.10.3. Constants use `UPPER_SNAKE_CASE`, including exported driver constants such as `redis.TYPE_STR` and `transport.DEFAULT_TIMEOUT_NS`. Update references to the former lowercase constant names. Because those exported names change, the module version advances from 0.2.0 to 1.0.0; this module version is independent of the Xu toolchain's 0.10.3 release.

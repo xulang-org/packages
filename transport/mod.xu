@@ -12,9 +12,9 @@
 // must pass Conn values around instead of retaining only fd; an fd alone
 // cannot represent a live TLS session.
 
-pub const default_timeout_ns = 30000000000
-pub const max_header_bytes = 1048576
-pub const max_message_bytes = 10485760
+pub const DEFAULT_TIMEOUT_NS = 30000000000
+pub const MAX_HEADER_BYTES = 1048576
+pub const MAX_MESSAGE_BYTES = 10485760
 
 pub struct Endpoint {
     pub scheme string
@@ -100,7 +100,7 @@ pub fn secure_endpoint(ep Endpoint) bool { << ep.secure }
 
 pub fn dial(ep Endpoint, cfg tls.Config, timeout_ns int) Conn {
     mut wait := timeout_ns
-    if wait <= 0 { wait = default_timeout_ns }
+    if wait <= 0 { wait = DEFAULT_TIMEOUT_NS }
     port_text := str(ep.port)
     addr := net.join_host_port(&ep.host, &port_text)
     if ep.secure {
@@ -187,7 +187,7 @@ pub fn (c &mut Conn) close() int {
 // drivers while their legacy plaintext fd pools are being migrated to Conn
 // pools; the TLS handshake and certificate verification still happen here.
 pub fn request_raw(ep Endpoint, cfg tls.Config, request string, method string) http.Response {
-    mut c := dial(ep, cfg, default_timeout_ns) or >>
+    mut c := dial(ep, cfg, DEFAULT_TIMEOUT_NS) or >>
     c.write_all(request) or (err) {
         c.close()
         >> err
@@ -224,7 +224,7 @@ fn read_more(c &mut Conn) int {
     chunk := raw_read(c, 4096) or >>
     if chunk.len == 0 { << 0 }
     c.buf = c.buf + chunk
-    if c.buf.len > max_message_bytes { >> errors.new("transport: HTTP response too large") }
+    if c.buf.len > MAX_MESSAGE_BYTES { >> errors.new("transport: HTTP response too large") }
     << chunk.len
 }
 
@@ -234,7 +234,7 @@ fn decimal(s string) int {
     for i in 0:s.len {
         d := (s[i] & 255) - 48
         if d < 0 || d > 9 { >> errors.new("transport: invalid Content-Length") }
-        if n > (max_message_bytes - d) / 10 { >> errors.new("transport: Content-Length too large") }
+        if n > (MAX_MESSAGE_BYTES - d) / 10 { >> errors.new("transport: Content-Length too large") }
         n = n * 10 + d
     }
     << n
@@ -273,7 +273,7 @@ fn take_chunked(c &mut Conn, start int) string {
             c.buf = c.buf[pos:c.buf.len]
             << out
         }
-        if out.len + size > max_message_bytes { >> errors.new("transport: chunked body too large") }
+        if out.len + size > MAX_MESSAGE_BYTES { >> errors.new("transport: chunked body too large") }
         need := pos + size + 2
         while c.buf.len < need {
             n := read_more(c) or >>
@@ -296,7 +296,7 @@ fn parse_hex(s string) int {
         else if c >= 65 && c <= 70 { d = c - 55 }
         else if c >= 97 && c <= 102 { d = c - 87 }
         else { >> errors.new("transport: invalid chunk size") }
-        if n > (max_message_bytes - d) / 16 { >> errors.new("transport: chunk size too large") }
+        if n > (MAX_MESSAGE_BYTES - d) / 16 { >> errors.new("transport: chunk size too large") }
         n = n * 16 + d
     }
     << n
@@ -309,7 +309,7 @@ pub fn read_response(c &mut Conn, method string) http.Response {
     while interim < 16 {
         mut end := find_header_end(&c.buf)
         while end < 0 {
-            if c.buf.len > max_header_bytes { >> errors.new("transport: HTTP headers too large") }
+            if c.buf.len > MAX_HEADER_BYTES { >> errors.new("transport: HTTP headers too large") }
             n := read_more(c) or >>
             if n == 0 { >> errors.new("transport: incomplete HTTP headers") }
             end = find_header_end(&c.buf)

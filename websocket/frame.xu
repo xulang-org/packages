@@ -3,12 +3,12 @@
 #strings
 #errors
 
-pub const opcode_continuation = 0
-pub const opcode_text = 1
-pub const opcode_binary = 2
-pub const opcode_close = 8
-pub const opcode_ping = 9
-pub const opcode_pong = 10
+pub const OPCODE_CONTINUATION = 0
+pub const OPCODE_TEXT = 1
+pub const OPCODE_BINARY = 2
+pub const OPCODE_CLOSE = 8
+pub const OPCODE_PING = 9
+pub const OPCODE_PONG = 10
 
 pub struct Frame {
     pub fin bool

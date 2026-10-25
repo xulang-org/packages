@@ -3,12 +3,12 @@
 #strings
 #errors
 
-pub const type_a = 1
-pub const type_ns = 2
-pub const type_cname = 5
-pub const type_soa = 6
-pub const type_txt = 16
-pub const class_in = 1
+pub const TYPE_A = 1
+pub const TYPE_NS = 2
+pub const TYPE_CNAME = 5
+pub const TYPE_SOA = 6
+pub const TYPE_TXT = 16
+pub const CLASS_IN = 1
 
 // Encodes "www.example.com" -> "\x03www\x07example\x03com\x00"
 pub fn encode_domain(domain string) string {
@@ -49,8 +49,8 @@ pub fn build_query_packet(tx_id int, domain string, qtype int) string {
     qname := encode_domain(domain)
     qtype_hi := (qtype >> 8) & 255
     qtype_lo := qtype & 255
-    qclass_hi := (class_in >> 8) & 255
-    qclass_lo := class_in & 255
+    qclass_hi := (CLASS_IN >> 8) & 255
+    qclass_lo := CLASS_IN & 255
 
     q := qname + string_from_byte(qtype_hi) + string_from_byte(qtype_lo) + string_from_byte(qclass_hi) + string_from_byte(qclass_lo)
     << hdr + q
@@ -113,7 +113,7 @@ pub fn parse_a_records(pkt string) []string {
         rdlength := ((pkt[p + 8] & 255) << 8) | (pkt[p + 9] & 255)
         p = p + 10
 
-        if rtype == type_a && rdlength == 4 && p + 4 <= pkt.len {
+        if rtype == TYPE_A && rdlength == 4 && p + 4 <= pkt.len {
             ip0 := pkt[p] & 255
             ip1 := pkt[p + 1] & 255
             ip2 := pkt[p + 2] & 255

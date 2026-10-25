@@ -127,13 +127,13 @@ pub fn (c Client) connect() int {
         >> err
     }
 
-    if resp.opcode == opcode_error {
+    if resp.opcode == OPCODE_ERROR {
         safe_close(fd)
         >> errors.new("cassandra startup error: opcode 0")
     }
 
     // Opcode READY (2) indicates success
-    if resp.opcode != opcode_ready {
+    if resp.opcode != OPCODE_READY {
         // Some nodes might send AUTHENTICATE (3)
         // For standard local tests without auth, it should be READY
     }
@@ -150,7 +150,7 @@ pub fn (c Client) connect() int {
             safe_close(fd)
             >> err
         }
-        if q_resp.opcode == opcode_error {
+        if q_resp.opcode == OPCODE_ERROR {
             safe_close(fd)
             >> errors.new("cassandra USE keyspace failed")
         }
@@ -164,7 +164,7 @@ pub fn (c Client) execute_on_fd(fd int, cql string) string {
     write_all(fd, query) or >>
 
     resp := c.read_frame(fd) or >>
-    if resp.opcode == opcode_error {
+    if resp.opcode == OPCODE_ERROR {
         // Decode error code & message
         if resp.body.len >= 6 {
             err_code := decode_u32(resp.body[0] & 255, resp.body[1] & 255, resp.body[2] & 255, resp.body[3] & 255)
@@ -178,16 +178,16 @@ pub fn (c Client) execute_on_fd(fd int, cql string) string {
         >> errors.new("cql error")
     }
 
-    if resp.opcode == opcode_result {
+    if resp.opcode == OPCODE_RESULT {
         if resp.body.len >= 4 {
             kind := decode_u32(resp.body[0] & 255, resp.body[1] & 255, resp.body[2] & 255, resp.body[3] & 255)
-            if kind == result_kind_void {
+            if kind == RESULT_KIND_VOID {
                 << "VOID"
-            } else if kind == result_kind_schema_change {
+            } else if kind == RESULT_KIND_SCHEMA_CHANGE {
                 << "SCHEMA_CHANGE"
-            } else if kind == result_kind_set_keyspace {
+            } else if kind == RESULT_KIND_SET_KEYSPACE {
                 << "SET_KEYSPACE"
-            } else if kind == result_kind_rows {
+            } else if kind == RESULT_KIND_ROWS {
                 // Rows result
                 if resp.body.len >= 12 {
                     // Extract metadata

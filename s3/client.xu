@@ -95,7 +95,7 @@ pub fn (c &mut Client) request(method string, path string, body string, content_
     if c.secure {
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
-        mut tc := transport.dial(ep, cfg, transport.default_timeout_ns) or (err) {
+        mut tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or (err) {
             >> errors.new("s3: TLS dial failed: " + err.msg())
         }
         mut reusable := false

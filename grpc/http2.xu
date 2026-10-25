@@ -3,26 +3,26 @@
 #strings
 #errors
 
-pub const h2_client_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+pub const H2_CLIENT_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
 // HTTP/2 Frame Types
-pub const frame_data = 0
-pub const frame_headers = 1
-pub const frame_priority = 2
-pub const frame_rst_stream = 3
-pub const frame_settings = 4
-pub const frame_push_promise = 5
-pub const frame_ping = 6
-pub const frame_goaway = 7
-pub const frame_window_update = 8
-pub const frame_continuation = 9
+pub const FRAME_DATA = 0
+pub const FRAME_HEADERS = 1
+pub const FRAME_PRIORITY = 2
+pub const FRAME_RST_STREAM = 3
+pub const FRAME_SETTINGS = 4
+pub const FRAME_PUSH_PROMISE = 5
+pub const FRAME_PING = 6
+pub const FRAME_GOAWAY = 7
+pub const FRAME_WINDOW_UPDATE = 8
+pub const FRAME_CONTINUATION = 9
 
 // HTTP/2 Flags
-pub const flag_ack = 1
-pub const flag_end_stream = 1
-pub const flag_end_headers = 4
-pub const flag_padded = 8
-pub const flag_priority = 32
+pub const FLAG_ACK = 1
+pub const FLAG_END_STREAM = 1
+pub const FLAG_END_HEADERS = 4
+pub const FLAG_PADDED = 8
+pub const FLAG_PRIORITY = 32
 
 pub struct H2Frame {
     pub length int
@@ -48,7 +48,7 @@ pub fn encode_h2_header(len int, frame_type int, flags int, stream_id int) strin
 pub fn build_settings_frame(ack bool) string {
     mut flags := 0
     if ack {
-        flags = flag_ack
+        flags = FLAG_ACK
     }
     mut body := ""
     if !ack {
@@ -57,16 +57,16 @@ pub fn build_settings_frame(ack bool) string {
         body = string_from_byte(0) + string_from_byte(1) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0)
         body = body + string_from_byte(0) + string_from_byte(2) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0) + string_from_byte(0)
     }
-    hdr := encode_h2_header(body.len, frame_settings, flags, 0)
+    hdr := encode_h2_header(body.len, FRAME_SETTINGS, flags, 0)
     << hdr + body
 }
 
 pub fn build_data_frame(stream_id int, data string, end_stream bool) string {
     mut flags := 0
     if end_stream {
-        flags = flag_end_stream
+        flags = FLAG_END_STREAM
     }
-    hdr := encode_h2_header(data.len, frame_data, flags, stream_id)
+    hdr := encode_h2_header(data.len, FRAME_DATA, flags, stream_id)
     << hdr + data
 }
 
@@ -121,10 +121,10 @@ pub fn build_grpc_headers_for_host_scheme(path string, authority string, scheme 
 
 pub fn build_headers_frame(stream_id int, path string, end_stream bool) string {
     block := build_grpc_hpack_headers(path)
-    mut flags := flag_end_headers
+    mut flags := FLAG_END_HEADERS
     if end_stream {
-        flags = flags | flag_end_stream
+        flags = flags | FLAG_END_STREAM
     }
-    hdr := encode_h2_header(block.len, frame_headers, flags, stream_id)
+    hdr := encode_h2_header(block.len, FRAME_HEADERS, flags, stream_id)
     << hdr + block
 }
