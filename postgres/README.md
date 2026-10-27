@@ -75,4 +75,6 @@ fn main() int {
 
 数据库协议、认证、DSN 和 SQL 驱动实现统一位于本模块。通用连接池与事务管理由 `#database/sql` 提供，驱动契约由 `#database/sql/driver` 提供。标准库不再维护另一份 `postgres` 驱动。
 
-Xu 1.0.0 移除了 `#database/sql/postgres`。迁移时，在项目 `xu.xun` 声明上面的依赖，并将导入改为 `#github.com/xulang-org/packages/postgres`；`sql.open(postgres.driver(), dsn)` 的调用方式保持不变。
+从旧标准库路径 `#database/sql/postgres` 迁移时，在项目 `xu.xun` 声明上面的依赖，并将导入改为 `#github.com/xulang-org/packages/postgres`；`sql.open(postgres.driver(), dsn)` 的调用方式保持不变。
+
+驱动使用根 packages 模块的版本，与 Xu 产品版本独立。

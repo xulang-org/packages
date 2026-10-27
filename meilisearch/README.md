@@ -32,7 +32,7 @@ p.close()
 
 `search` 返回真实 title 与完整命中 JSON，total_hits 使用 totalHits 或 estimatedTotalHits，缺失为 -1。当前 SearchHit.id 为 int，字符串 ID 明确报错；title 缺失/null 为 ""。查询文本使用标准 JSON 转义，HTTP 非 2xx 明确报错。
 
-HTTP 响应使用共享 framing 解析，支持 chunked，拒绝截断与歧义长度；仅支持串行请求，当前报文总量限制约 10 MiB。连接池业务方法实际借还连接，服务端要求关闭或无长度正文时丢弃连接。回归入口：`make packages-test`。
+HTTP 响应使用共享 framing 解析，支持 chunked，拒绝截断与歧义长度；仅支持串行请求，当前报文总量限制约 10 MiB。连接池业务方法实际借还连接，服务端要求关闭或无长度正文时丢弃连接。在仓库根运行 `make test` 验证。
 
 ## 连接池 1.0.0 迁移与生命周期
 

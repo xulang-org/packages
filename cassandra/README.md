@@ -4,10 +4,10 @@ Xu 语言官方原生 Apache Cassandra 与 ScyllaDB 宽列分布式数据库驱�
 
 ## 特性
 
-- **原生 CQL 二进制协议 (v4)**：完整支持 STARTUP、QUERY、RESULT、ERROR 原生二进制帧打包与解析。
-- **DDL 与 DML 全支持**：支持 Keyspace 创建、表定义、数据插入 (INSERT)、查询 (SELECT)、更新与删除。
+- **原生 CQL 二进制协议 (v4)**：实现 STARTUP、QUERY、RESULT、ERROR 等帧的编码与解析。
+- **CQL 执行**：通过 `execute` 提交语句；支持的语法和操作由服务端决定。
 - **原生连接池与并发借还**：基于 channel 队列的高性能连接复用，支持多连接借还与生命周期管理。
-- **纯 Xu 原生实现**：无需任何 C/C++ 动态库或外部运行时依赖，零开销。
+- **纯 Xu 原生实现**：协议逻辑由 Xu 实现，无需 Cassandra C/C++ 驱动。
 
 ## 快速使用
 

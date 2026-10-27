@@ -38,7 +38,7 @@ p.close()
 
 `search` 按 JSON 层级解析响应，要求根 `code` 为 0，返回真实的 `id`、`distance`、`text`。ID 当前必须为整数；缺失 distance 或错误类型会报错，text 缺失/null 为 ""。HTTP 非 2xx 明确报错。
 
-HTTP 响应使用共享 framing 解析，支持 chunked，拒绝截断与歧义长度；仅支持串行请求，当前报文总量限制约 10 MiB。连接池业务方法实际借还连接，服务端要求关闭或无长度正文时丢弃连接。回归入口：`make packages-test`。
+HTTP 响应使用共享 framing 解析，支持 chunked，拒绝截断与歧义长度；仅支持串行请求，当前报文总量限制约 10 MiB。连接池业务方法实际借还连接，服务端要求关闭或无长度正文时丢弃连接。在仓库根运行 `make test` 验证。
 
 ## 连接池 1.0.0 迁移与生命周期
 
