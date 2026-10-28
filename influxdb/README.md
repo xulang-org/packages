@@ -6,7 +6,7 @@
 
 - **Line Protocol 支持**：提供 `Point` 结构体，支持流畅追加 Measurement、Tags、Fields（string/int/float/bool）与时间戳，并支持原生批量 Line 协议字符串写入。
 - **Flux 查询引擎**：支持向 InfluxDB 发送 Flux 查询脚本并获取 Annotated CSV 结果。
-- **连接池支持**：基于标量套接字通道提供零竞态长连接复用池 `open_pool_client` / `new_pool`。
+- **连接池支持**：通过共享状态通道管理连接借还与关闭，提供连接复用池 `open_pool_client` / `new_pool`。
 - **服务健康探测**：内置 `health()` 与 `ping()` API，随时探活节点健康状况。
 
 ## 快速上手

@@ -39,7 +39,7 @@ fn main() {
 - 请求消息最多 65,530 字节，依赖初始请求窗口至少 65,535；更小窗口明确拒绝。响应消息最多 16 MiB、帧最多 16 KiB、头部最多 64 KiB。
 - 连接池的高层调用复用与完整 HTTP/2 会话管理仍在 packages 审计待办中，当前回归覆盖的是直接 unary 调用。
 
-在仓库根执行 `make packages-test` 可验证非零状态、DATA 分帧、Huffman trailers、长路径、压缩与截断拒绝。
+在仓库根执行 `make test` 可验证非零状态、DATA 分帧、Huffman trailers、长路径、压缩与截断拒绝。
 
 ## TLS
 

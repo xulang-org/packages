@@ -1,11 +1,11 @@
 # packages/smtp
 
-Xu 语言原生 SMTP 邮件传输协议客户端驱动，严格遵循 RFC 5321 规范。
+Xu 语言原生 SMTP 客户端，提供下列握手、认证和邮件发送操作。
 
 ## 特性
 
 - **标准握手与问候**：支持 220 欢迎响应解析与 EHLO 多行响应（`-` 连字符多行解析）；
-- **身份认证**：支持 `AUTH LOGIN` 与 Base64 凭据安全认证；
+- **身份认证**：支持 `AUTH LOGIN`；Base64 仅为编码，传输保密需要 TLS，见下文低层 TLS 接口；
 - **邮件事务与信封**：支持 `MAIL FROM`、`RCPT TO`、`DATA` 传输与 MIME 头部封装（From, To, Subject, Content-Type）；
 - **高并发连接池**：内置 `SmtpPool` 线程安全借还复用与优雅关闭。
 

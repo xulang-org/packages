@@ -10,7 +10,7 @@ xulanguage/
   packages/    本仓库
   examples/    示例仓库
   bench/       基准仓库
-  xulanguage/  站点仓库
+  xulang-org/  站点仓库
 ```
 
 位置可由 `XU_ROOT` 指定。主仓库使用 `XU_PACKAGES_ROOT` 定位本仓库；核心构建不要求扩展模块存在。
@@ -20,24 +20,26 @@ xulanguage/
 ```xun
 module: my_app
 version: !ver 0.1.0
-xu: !ver 0.8.2
+xu: !ver 0.10.3
 require:
   "github.com/xulang-org/packages": file:../packages
 ```
 
-`file:` 相对于消费项目。导入路径使用 `/` 分隔，例如 `#database/sql/driver`；`#github.com/xulang-org/packages/mysql`、`#github.com/xulang-org/packages/postgres` 是该模块中的包；调用别名仍为 mysql、postgres。调用 `sql.open(mysql.driver(), dsn)` 或 `sql.open(postgres.driver(), dsn)` 使用通用 `database/sql` API。
+`file:` 相对于消费项目。示例中的 `xu:` 对应本仓库根 `xu.xun` 选定的编译器版本，与模块的 `version:` 独立。导入路径使用 `/` 分隔，例如 `#database/sql/driver`；`#github.com/xulang-org/packages/mysql`、`#github.com/xulang-org/packages/postgres` 是该模块中的包；调用别名仍为 mysql、postgres。调用 `sql.open(mysql.driver(), dsn)` 或 `sql.open(postgres.driver(), dsn)` 使用通用 `database/sql` API。
 
 ## 验证与原生资源
 
+在本仓库根执行。`XU_ROOT` 指向包含 `scripts/xunative.py` 的编译器源码 checkout；`XU` 指向可执行的产品编译器，可来自已安装 SDK：
+
 ```bash
-make test
-XU_ROOT=/path/to/xu make test
-XU=/path/to/xu/bin/xu make test
-make native
+XU_ROOT=/path/to/xu make native
+XU_ROOT=/path/to/xu XU=/path/to/product-sdk/bin/xu make test
 python3 scripts/module_versions.py --check
 ```
 
-测试使用产品编译器和本机协议服务，不需要外部数据库或凭据。SQLite 的 `.xulib` 是忽略的构建产物；首次使用或清洁检出后先运行 `make native`，源码、元数据和下载摘要保存在 `sqlite/native`、`sqlite/vendor`。默认生成两个 macOS 原生切片；其他目标需显式指定工具链与 `--target`，尚未完成全平台验证。
+若环境中未设置 `XU_ROOT`，默认使用相邻 `../xu`；`XU` 默认是该目录下的 `bin/xu`。测试使用产品编译器和本机协议服务，不需要外部数据库或凭据。SQLite 的 `.xulib` 是忽略的构建产物；首次使用或清洁检出后先运行 `make native`，源码、元数据和下载摘要保存在 `sqlite/native`、`sqlite/vendor`。构建默认查找 Clang，并需要目标 SDK；默认生成两个 macOS 原生切片，当前一步原生链接及 SQLite 运行测试限于这两个目标。其他目标需通过 `python3 sqlite/native/build.py --target <target> --cc <compiler>` 显式指定工具链并采用外部链接流程，尚未完成全平台验证。
+
+TLS 回归当前固定调用相邻 `../xu/bin/xu`，不读取 `XU` 或 `XU_ROOT`；运行完整测试前，该路径也须有可用的产品编译器。
 
 SQL 驱动接口、连接池和事务管理位于标准库，驱动实现位于本仓库的 mysql、postgres、sqlite 模块。其余数据库、消息、HTTP 服务模块的 API 和限制见各自 README。
 
@@ -55,7 +57,7 @@ require:
   "github.com/xulang-org/packages": git:https://github.com/xulang-org/packages.git@<commit>
 ```
 
-`<commit>` 替换为实际审查过的 Git 提交。当前编译器使用显式 Git 定位符与内容锁，尚不自动从裸版本发现仓库或执行 MVS。无需在定位符中拼接 mysql 子目录；包路径负责选择子目录。仓库尚未推送，本机验证使用相同结构的临时 Git 来源。
+`<commit>` 替换为实际审查过的 Git 提交。当前 Xu 支持 GitHub 模块的精确语义版本发现、MVS 依赖图解析，以及通过 `xu.lock`、缓存和 vendor 重放依赖；显式 Git 定位符仍可用于固定提交。GitHub 直接版本发现要求存在相应标签，且版本与模块清单匹配；根 `xu.xun` 中的模块版本本身不代表已发布同名标签。其他主机的版本来源需配置 `XUPROXY` 或使用显式 Git 定位符；公共代理与校验服务的可用性需单独验证。无需在定位符中拼接 mysql 子目录；包路径负责选择子目录。
 
 ```xu
 @main
@@ -68,8 +70,12 @@ fn main() {
 }
 ```
 
-Xu 外部导入需显式别名，别名不改变完整路径身份。Git 来源不包含忽略的 SQLite 原生构建产物；本机使用 SQLite 先执行 make native。远程 SQLite 需要包含原生资源的模块归档，该发行流程尚未发布。
+Xu 外部导入需显式别名，别名不改变完整路径身份。Git 来源不包含忽略的 SQLite 原生构建产物；本机使用 SQLite 先在本仓库根执行 `make native`。需要 SQLite 时，使用已构建原生资源的本地 `file:` 依赖，或确认所选 SDK/模块归档包含匹配目标的原生资源。
 
-### Xu 0.10.3 constant migration
+### Constant naming migration
 
-The module now targets Xu 0.10.3. Constants use `UPPER_SNAKE_CASE`, including exported driver constants such as `redis.TYPE_STR` and `transport.DEFAULT_TIMEOUT_NS`. Update references to the former lowercase constant names. Because those exported names change, the module version advances from 0.2.0 to 1.0.0; this module version is independent of the Xu toolchain's 0.10.3 release.
+Constants use `UPPER_SNAKE_CASE`, including exported driver constants such as `redis.TYPE_STR` and `transport.DEFAULT_TIMEOUT_NS`. Update references to the former lowercase constant names. This breaking change moved the root packages module from 0.2.0 to 1.0.0. The current module version and selected Xu compiler release are recorded separately in the root `xu.xun`; internal packages do not have independent versions.
+
+## 许可证
+
+本仓库自有代码和文档采用 [MIT License](LICENSE)。第三方源码保留各自声明；例如 SQLite 的来源与公有领域说明见 [sqlite/vendor/README.md](sqlite/vendor/README.md)。

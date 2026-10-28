@@ -4,11 +4,11 @@
 
 ## 运行依赖与迁移
 
-`2.0.0` 通过 Xu 的 `xu-c-1` 原生模块直接封装官方 SQLite C API，静态链接 SQLite 3.53.4。运行时不需要 Python、sqlite3 CLI 或数据库子进程。包内提供 macOS arm64/x64 两个原生切片；当前 Xu 一步原生链接支持这两个目标，其他平台需要目标工具链和外部链接流程，尚未验证。
+本包通过 Xu 的 `xu-c-1` 原生模块直接封装官方 SQLite C API，静态链接的 SQLite 源码身份见 [vendor/source.json](vendor/source.json)。运行时不需要 Python、sqlite3 CLI 或数据库子进程。清洁检出不包含 `sqlite.xulib`，首次使用前须在本仓库根执行 `make native`，并通过 `XU_ROOT` 指向含 `scripts/xunative.py` 的 Xu 编译器仓库。默认查找 Clang，构建 macOS arm64/x64 两个原生切片，需要相应目标 SDK；当前 Xu 一步原生链接支持这两个目标，其他平台需要目标工具链和外部链接流程，尚未验证。
 
 原生资源通过内部整数句柄管理，文本和二进制结果先复制再交给 Xu。必须调用 `close` 释放数据库；它可重复调用。数据库打不开时，`ping`、`exec`、`query` 返回错误，连接无效。
 
-从 1.0.0 迁移仍使用相同的 `database/sql/driver` 方法。内部会话结构和部署依赖发生变化，因此模块升级为 2.0.0。重新生成原生库：`python3 sqlite/native/build.py`；Python 仅用于现有原生打包工具，应用执行 SQL 不调用 Python。源码和下载校验值在 `vendor/source.json`。
+本包属于根模块 `github.com/xulang-org/packages`，不独立发布模块版本；当前模块版本以根 `xu.xun` 为准。从旧的子进程实现迁移时，仍使用 `database/sql/driver` 方法，但会话结构和部署依赖已改变。重新生成原生库：在仓库根运行 `make native`；Python 仅用于原生构建与打包，应用执行 SQL 不调用 Python。构建细节见 [原生桥接说明](native/README.md)。
 
 `SqliteTx` 新增事务标识与错误状态。应用通过 `begin`/`begin_tx` 获得事务，不应手工构造事务结构。
 
@@ -58,4 +58,4 @@ fn main() int {
 - 单个输入/结果缓冲区和编码后的结果快照限制为 16 MiB。一次调用只允许一条 SQL 语句，可附加空语句和注释；拒绝内嵌 NUL 的 SQL/路径，文本参数可含 NUL。结果是内存快照。
 - 原生桥接当前通过一个资源锁串行执行 SQLite C API，保证关闭与访问安全；独立连接暂不能并行执行 C API。SQLite 文件锁的忙等待设为 5 秒；桥接资源锁的等待暂时没有超时。Context 方法当前不提供中途取消正在执行的 SQLite 操作。
 
-在仓库根运行 `make packages-test` 验证行为，无需外部数据库服务。
+在仓库根先运行 `make native` 准备原生资源，再运行 `make test` 验证行为，无需外部数据库服务。SQLite 原生测试仍受上述目标与工具链限制。

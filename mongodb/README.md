@@ -55,7 +55,7 @@ fn main() {
 
 目前仅处理未压缩、flags=0、单个 kind=0 文档的 OP_MSG；其他 flags/sections 明确拒绝。`find_first_string` 从 `cursor.firstBatch[0]` 读取字符串字段。报文最大 16 MiB；认证与拓扑发现仍由服务端负责；TLS 连接可通过 `tls_connect(endpoint, 27017)` 建立，并复用同一 BSON 帧接口。
 
-回归入口：`make packages-test`。
+在仓库根运行 `make test` 验证。
 
 
 ## TLS

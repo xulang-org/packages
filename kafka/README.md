@@ -9,7 +9,7 @@
 - **生产与消费**：支持单分区/多分区消息发布（`produce`、`produce_key_value`）以及偏移量消息拉取（`fetch`）。
 - **探活与元数据**：内置 `ping()`（基于 ApiVersions 协议）与 `metadata(topic)` 探活及 Topic 自动发现。
 - **连接池支持**：基于标量套接字通道的轻量级连接池（`open_pool_client` / `new_pool`）。
-- **多版本兼任**：全面支持 Kafka 2.x/3.x/4.x，支持现代 KRaft 无 Zookeeper 架构。
+- **兼容性边界**：实现上述操作的固定版本协议报文；部署前须核对 broker 接受的 API 版本。本仓库回归不代表对 Kafka 各版本或部署模式的完整验证。
 
 ## 快速上手
 

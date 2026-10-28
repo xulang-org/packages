@@ -72,7 +72,7 @@ fn main() int {
 
 当前支持 RESP3 的 map、set、push、bool、double、big number、verbatim 和 blob error；attributes、流式字符串与未知长度聚合明确拒绝。double/big number 保留数值文本。深度最多 64 层、聚合最多 100,000 项、单条响应最多 16 MiB。收到 push 不会自动派发订阅消息。
 
-协议回归入口：`make packages-test`。连接池生命周期仍见仓库的 packages 审计待办。
+协议回归入口：在仓库根运行 `make test`。连接池生命周期仍见仓库的 packages 审计待办。
 
 
 ## TLS
