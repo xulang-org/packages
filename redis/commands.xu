@@ -3,39 +3,39 @@
 #errors
 #strconv
 
-pub fn (c &mut Client) ping() string {
+pub fn (c $&Client) ping() string {
     v := c.do(["PING"]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) echo(msg string) string {
+pub fn (c $&Client) echo(msg string) string {
     v := c.do(["ECHO", msg]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) get(key string) string {
+pub fn (c $&Client) get(key string) string {
     v := c.do(["GET", key]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) set(key string, val string) string {
+pub fn (c $&Client) set(key string, val string) string {
     v := c.do(["SET", key, val]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) set_ex(key string, seconds int, val string) string {
+pub fn (c $&Client) set_ex(key string, seconds int, val string) string {
     v := c.do(["SETEX", key, str(seconds), val]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) del(key string) int {
+pub fn (c $&Client) del(key string) int {
     v := c.do(["DEL", key]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) del_many(keys []string) int {
-    mut args := ["DEL"]
-    mut i := 0
+pub fn (c $&Client) del_many(keys []string) int {
+    $args := ["DEL"]
+    $i := 0
     while i < keys.len {
         args.push(keys[i])
         i = i + 1
@@ -44,151 +44,151 @@ pub fn (c &mut Client) del_many(keys []string) int {
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) exists(key string) bool {
+pub fn (c $&Client) exists(key string) bool {
     v := c.do(["EXISTS", key]) or >>
     n := v.as_int() or >>
     << n > 0
 }
 
-pub fn (c &mut Client) incr(key string) int {
+pub fn (c $&Client) incr(key string) int {
     v := c.do(["INCR", key]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) decr(key string) int {
+pub fn (c $&Client) decr(key string) int {
     v := c.do(["DECR", key]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) incr_by(key string, delta int) int {
+pub fn (c $&Client) incr_by(key string, delta int) int {
     v := c.do(["INCRBY", key, str(delta)]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) decr_by(key string, delta int) int {
+pub fn (c $&Client) decr_by(key string, delta int) int {
     v := c.do(["DECRBY", key, str(delta)]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) expire(key string, seconds int) bool {
+pub fn (c $&Client) expire(key string, seconds int) bool {
     v := c.do(["EXPIRE", key, str(seconds)]) or >>
     n := v.as_int() or >>
     << n == 1
 }
 
-pub fn (c &mut Client) ttl(key string) int {
+pub fn (c $&Client) ttl(key string) int {
     v := c.do(["TTL", key]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) keys(pattern string) []string {
+pub fn (c $&Client) keys(pattern string) []string {
     v := c.do(["KEYS", pattern]) or >>
     << v.as_strings() or >>
 }
 
 // ---- Hash operations ----
 
-pub fn (c &mut Client) hget(key string, field string) string {
+pub fn (c $&Client) hget(key string, field string) string {
     v := c.do(["HGET", key, field]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) hset(key string, field string, val string) int {
+pub fn (c $&Client) hset(key string, field string, val string) int {
     v := c.do(["HSET", key, field, val]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) hdel(key string, field string) int {
+pub fn (c $&Client) hdel(key string, field string) int {
     v := c.do(["HDEL", key, field]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) hexists(key string, field string) bool {
+pub fn (c $&Client) hexists(key string, field string) bool {
     v := c.do(["HEXISTS", key, field]) or >>
     n := v.as_int() or >>
     << n > 0
 }
 
-pub fn (c &mut Client) hgetall(key string) []string {
+pub fn (c $&Client) hgetall(key string) []string {
     v := c.do(["HGETALL", key]) or >>
     << v.as_strings() or >>
 }
 
-pub fn (c &mut Client) hkeys(key string) []string {
+pub fn (c $&Client) hkeys(key string) []string {
     v := c.do(["HKEYS", key]) or >>
     << v.as_strings() or >>
 }
 
-pub fn (c &mut Client) hlen(key string) int {
+pub fn (c $&Client) hlen(key string) int {
     v := c.do(["HLEN", key]) or >>
     << v.as_int() or >>
 }
 
 // ---- List operations ----
 
-pub fn (c &mut Client) lpush(key string, val string) int {
+pub fn (c $&Client) lpush(key string, val string) int {
     v := c.do(["LPUSH", key, val]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) rpush(key string, val string) int {
+pub fn (c $&Client) rpush(key string, val string) int {
     v := c.do(["RPUSH", key, val]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) lpop(key string) string {
+pub fn (c $&Client) lpop(key string) string {
     v := c.do(["LPOP", key]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) rpop(key string) string {
+pub fn (c $&Client) rpop(key string) string {
     v := c.do(["RPOP", key]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) llen(key string) int {
+pub fn (c $&Client) llen(key string) int {
     v := c.do(["LLEN", key]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) lrange(key string, start int, stop int) []string {
+pub fn (c $&Client) lrange(key string, start int, stop int) []string {
     v := c.do(["LRANGE", key, str(start), str(stop)]) or >>
     << v.as_strings() or >>
 }
 
 // ---- Set operations ----
 
-pub fn (c &mut Client) sadd(key string, member string) int {
+pub fn (c $&Client) sadd(key string, member string) int {
     v := c.do(["SADD", key, member]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) srem(key string, member string) int {
+pub fn (c $&Client) srem(key string, member string) int {
     v := c.do(["SREM", key, member]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) sismember(key string, member string) bool {
+pub fn (c $&Client) sismember(key string, member string) bool {
     v := c.do(["SISMEMBER", key, member]) or >>
     n := v.as_int() or >>
     << n > 0
 }
 
-pub fn (c &mut Client) smembers(key string) []string {
+pub fn (c $&Client) smembers(key string) []string {
     v := c.do(["SMEMBERS", key]) or >>
     << v.as_strings() or >>
 }
 
-pub fn (c &mut Client) scard(key string) int {
+pub fn (c $&Client) scard(key string) int {
     v := c.do(["SCARD", key]) or >>
     << v.as_int() or >>
 }
 
 // ---- Batch operations ----
 
-pub fn (c &mut Client) mget(keys []string) []string {
-    mut args := ["MGET"]
-    mut i := 0
+pub fn (c $&Client) mget(keys []string) []string {
+    $args := ["MGET"]
+    $i := 0
     while i < keys.len {
         args.push(keys[i])
         i = i + 1
@@ -197,9 +197,9 @@ pub fn (c &mut Client) mget(keys []string) []string {
     << v.as_strings() or >>
 }
 
-pub fn (c &mut Client) mset(pairs []string) string {
-    mut args := ["MSET"]
-    mut i := 0
+pub fn (c $&Client) mset(pairs []string) string {
+    $args := ["MSET"]
+    $i := 0
     while i < pairs.len {
         args.push(pairs[i])
         i = i + 1
@@ -210,7 +210,7 @@ pub fn (c &mut Client) mset(pairs []string) string {
 
 // ---- Sorted Set (ZSet) operations ----
 
-pub fn (c &mut Client) zadd(key string, score f64, member string) int {
+pub fn (c $&Client) zadd(key string, score f64, member string) int {
     fs := strconv.format_float(score, 103, -1) or (err) {
         << 0
     }
@@ -218,27 +218,27 @@ pub fn (c &mut Client) zadd(key string, score f64, member string) int {
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) zrange(key string, start int, stop int) []string {
+pub fn (c $&Client) zrange(key string, start int, stop int) []string {
     v := c.do(["ZRANGE", key, str(start), str(stop)]) or >>
     << v.as_strings() or >>
 }
 
-pub fn (c &mut Client) zrevrange(key string, start int, stop int) []string {
+pub fn (c $&Client) zrevrange(key string, start int, stop int) []string {
     v := c.do(["ZREVRANGE", key, str(start), str(stop)]) or >>
     << v.as_strings() or >>
 }
 
-pub fn (c &mut Client) zscore(key string, member string) string {
+pub fn (c $&Client) zscore(key string, member string) string {
     v := c.do(["ZSCORE", key, member]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) zrem(key string, member string) int {
+pub fn (c $&Client) zrem(key string, member string) int {
     v := c.do(["ZREM", key, member]) or >>
     << v.as_int() or >>
 }
 
-pub fn (c &mut Client) zcard(key string) int {
+pub fn (c $&Client) zcard(key string) int {
     v := c.do(["ZCARD", key]) or >>
     << v.as_int() or >>
 }

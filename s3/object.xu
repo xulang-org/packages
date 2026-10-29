@@ -2,18 +2,18 @@
 
 #errors
 
-pub fn (c &mut Client) put_object(bucket string, key string, data string, content_type string) int {
-    mut reusable := false
-    << c.put_object_at(-1, bucket, key, data, content_type, mut &reusable) or >>
+pub fn (c $&Client) put_object(bucket string, key string, data string, content_type string) int {
+    $reusable := false
+    << c.put_object_at(-1, bucket, key, data, content_type, $&reusable) or >>
 }
 
-fn (c &mut Client) put_object_at(fd int, bucket string, key string, data string, content_type string, reusable &mut bool) int {
-    mut k := key
+fn (c $&Client) put_object_at(fd int, bucket string, key string, data string, content_type string, reusable $&bool) int {
+    $k := key
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
     path := "/" + bucket + "/" + k
-    mut ct := content_type
+    $ct := content_type
     if ct.len == 0 {
         ct = "application/octet-stream"
     }
@@ -24,13 +24,13 @@ fn (c &mut Client) put_object_at(fd int, bucket string, key string, data string,
     << 0
 }
 
-pub fn (c &mut Client) get_object(bucket string, key string) string {
-    mut reusable := false
-    << c.get_object_at(-1, bucket, key, mut &reusable) or >>
+pub fn (c $&Client) get_object(bucket string, key string) string {
+    $reusable := false
+    << c.get_object_at(-1, bucket, key, $&reusable) or >>
 }
 
-fn (c &mut Client) get_object_at(fd int, bucket string, key string, reusable &mut bool) string {
-    mut k := key
+fn (c $&Client) get_object_at(fd int, bucket string, key string, reusable $&bool) string {
+    $k := key
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
@@ -42,13 +42,13 @@ fn (c &mut Client) get_object_at(fd int, bucket string, key string, reusable &mu
     << resp.body
 }
 
-pub fn (c &mut Client) remove_object(bucket string, key string) int {
-    mut reusable := false
-    << c.remove_object_at(-1, bucket, key, mut &reusable) or >>
+pub fn (c $&Client) remove_object(bucket string, key string) int {
+    $reusable := false
+    << c.remove_object_at(-1, bucket, key, $&reusable) or >>
 }
 
-fn (c &mut Client) remove_object_at(fd int, bucket string, key string, reusable &mut bool) int {
-    mut k := key
+fn (c $&Client) remove_object_at(fd int, bucket string, key string, reusable $&bool) int {
+    $k := key
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
@@ -60,13 +60,13 @@ fn (c &mut Client) remove_object_at(fd int, bucket string, key string, reusable 
     << 0
 }
 
-pub fn (c &mut Client) object_exists(bucket string, key string) bool {
-    mut reusable := false
-    << c.object_exists_at(-1, bucket, key, mut &reusable)
+pub fn (c $&Client) object_exists(bucket string, key string) bool {
+    $reusable := false
+    << c.object_exists_at(-1, bucket, key, $&reusable)
 }
 
-fn (c &mut Client) object_exists_at(fd int, bucket string, key string, reusable &mut bool) bool {
-    mut k := key
+fn (c $&Client) object_exists_at(fd int, bucket string, key string, reusable $&bool) bool {
+    $k := key
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }

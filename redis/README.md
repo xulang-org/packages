@@ -31,7 +31,7 @@ redis #github.com/xulang-org/packages/redis
 
 fn main() int {
     // 1. 直连或通过 URL 连接
-    mut client := redis.open_url("redis://127.0.0.1:6379/0") or >>
+    $client := redis.open_url("redis://127.0.0.1:6379/0") or >>
     
     // 2. 基础 Key-Value
     client.set("greeting", "Hello Xu") or >>
@@ -48,14 +48,14 @@ fn main() int {
     leaders := client.zrange("leaderboard", 0, -1) or >>
 
     // 5. 流水线 (Pipeline)
-    mut pipe := client.pipeline()
+    $pipe := client.pipeline()
     pipe.set("p1", "v1")
     pipe.incr("p_cnt")
-    results := client.exec_pipeline(mut &pipe) or >>
+    results := client.exec_pipeline($&pipe) or >>
 
     // 6. 连接池
     pool := redis.new_pool_url("redis://127.0.0.1:6379/0", 10)
-    mut conn := pool.get() or >>
+    $conn := pool.get() or >>
     pong := conn.ping() or >>
     pool.put(conn)
 

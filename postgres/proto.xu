@@ -55,7 +55,7 @@ fn be_i32_at(s &string, off int) int {
 
 fn read_exact(fd int, n int) ReadResult {
     if n < 0 || n > 16777216 { << ReadResult{data: "", err: "postgres: invalid packet length"} }
-    mut out := ""
+    $out := ""
     while out.len < n {
         need := n - out.len
         part := net.conn_read(fd, need) or (err) { << ReadResult{data: "", err: err.msg()} }
@@ -66,7 +66,7 @@ fn read_exact(fd int, n int) ReadResult {
 }
 
 fn write_all(fd int, data string) string {
-    mut off := 0
+    $off := 0
     while off < data.len {
         part := data[off:data.len] + ""
         n := net.conn_write(fd, &part) or (err) { << err.msg() }
@@ -93,8 +93,8 @@ fn recv_packet(fd int) Packet {
 
 fn cstring(body &string, off int) ReadResult {
     if off < 0 || off > body.len { << ReadResult{data: "", err: "postgres: malformed cstring"} }
-    mut out := ""
-    mut i := off
+    $out := ""
+    $i := off
     while i < body.len {
         if (body[i] & 255) == 0 { << ReadResult{data: out, err: ""} }
         out.push_byte(body[i] & 255)
@@ -104,8 +104,8 @@ fn cstring(body &string, off int) ReadResult {
 }
 
 fn error_text(body string) string {
-    mut i := 0
-    mut msg := "postgres: server error"
+    $i := 0
+    $msg := "postgres: server error"
     while i < body.len {
         tag := body[i] & 255
         i += 1

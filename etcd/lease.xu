@@ -2,12 +2,12 @@
 
 #errors
 
-pub fn (c &mut Client) lease_grant(ttl_seconds int) int {
-    mut reusable := false
-    << c.lease_grant_at(-1, ttl_seconds, mut &reusable) or >>
+pub fn (c $&Client) lease_grant(ttl_seconds int) int {
+    $reusable := false
+    << c.lease_grant_at(-1, ttl_seconds, $&reusable) or >>
 }
 
-fn (c &mut Client) lease_grant_at(fd int, ttl_seconds int, reusable &mut bool) int {
+fn (c $&Client) lease_grant_at(fd int, ttl_seconds int, reusable $&bool) int {
     body := "{\"TTL\":\"" + str(ttl_seconds) + "\",\"ID\":\"0\"}"
     resp := c.request_at(fd, "/v3/lease/grant", body, reusable) or >>
     if resp.status_code != 200 {
@@ -23,12 +23,12 @@ fn (c &mut Client) lease_grant_at(fd int, ttl_seconds int, reusable &mut bool) i
     << id_val
 }
 
-pub fn (c &mut Client) lease_revoke(lease_id int) int {
-    mut reusable := false
-    << c.lease_revoke_at(-1, lease_id, mut &reusable) or >>
+pub fn (c $&Client) lease_revoke(lease_id int) int {
+    $reusable := false
+    << c.lease_revoke_at(-1, lease_id, $&reusable) or >>
 }
 
-fn (c &mut Client) lease_revoke_at(fd int, lease_id int, reusable &mut bool) int {
+fn (c $&Client) lease_revoke_at(fd int, lease_id int, reusable $&bool) int {
     body := "{\"ID\":\"" + str(lease_id) + "\"}"
     resp := c.request_at(fd, "/v3/lease/revoke", body, reusable) or >>
     if resp.status_code != 200 {
@@ -37,12 +37,12 @@ fn (c &mut Client) lease_revoke_at(fd int, lease_id int, reusable &mut bool) int
     << 0
 }
 
-pub fn (c &mut Client) lease_keepalive(lease_id int) int {
-    mut reusable := false
-    << c.lease_keepalive_at(-1, lease_id, mut &reusable) or >>
+pub fn (c $&Client) lease_keepalive(lease_id int) int {
+    $reusable := false
+    << c.lease_keepalive_at(-1, lease_id, $&reusable) or >>
 }
 
-fn (c &mut Client) lease_keepalive_at(fd int, lease_id int, reusable &mut bool) int {
+fn (c $&Client) lease_keepalive_at(fd int, lease_id int, reusable $&bool) int {
     body := "{\"ID\":\"" + str(lease_id) + "\"}"
     resp := c.request_at(fd, "/v3/lease/keepalive", body, reusable) or >>
     if resp.status_code != 200 {

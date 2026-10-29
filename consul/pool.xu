@@ -18,7 +18,7 @@ pub struct Pool {
 
 pub fn new_pool(endpoint string, token string, max_idle int) Pool {
     c := new_client(endpoint + "", token + "")
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -77,30 +77,30 @@ pub fn (p &Pool) discard_conn(fd int) {
 
 pub fn (p &Pool) put_kv(key string, val string) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.put_kv(key, val) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    mut c := p.get()
-    result := c.put_kv_at(fd, key, val, mut &reusable)
+    $reusable := false
+    $c := p.get()
+    result := c.put_kv_at(fd, key, val, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }
 
 pub fn (p &Pool) get_kv(key string) string {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.get_kv(key) or (err) { << "" }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.get_kv_at(fd, key, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.get_kv_at(fd, key, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -110,60 +110,60 @@ pub fn (p &Pool) get_kv(key string) string {
 
 pub fn (p &Pool) delete_kv(key string) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.delete_kv(key) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    mut c := p.get()
-    result := c.delete_kv_at(fd, key, mut &reusable)
+    $reusable := false
+    $c := p.get()
+    result := c.delete_kv_at(fd, key, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }
 
 pub fn (p &Pool) register_service(id string, name string, address string, port int) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.register_service(id, name, address, port) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    mut c := p.get()
-    result := c.register_service_at(fd, id, name, address, port, mut &reusable)
+    $reusable := false
+    $c := p.get()
+    result := c.register_service_at(fd, id, name, address, port, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }
 
 pub fn (p &Pool) deregister_service(id string) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.deregister_service(id) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    mut c := p.get()
-    result := c.deregister_service_at(fd, id, mut &reusable)
+    $reusable := false
+    $c := p.get()
+    result := c.deregister_service_at(fd, id, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }
 
 pub fn (p &Pool) get_service(name string) string {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.get_service(name) or (err) { << "" }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.get_service_at(fd, name, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.get_service_at(fd, name, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -173,15 +173,15 @@ pub fn (p &Pool) get_service(name string) string {
 
 pub fn (p &Pool) ping() bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.ping() or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    mut c := p.get()
-    result := c.ping_at(fd, mut &reusable)
+    $reusable := false
+    $c := p.get()
+    result := c.ping_at(fd, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }

@@ -4,9 +4,9 @@
 #strings
 
 fn split_space_tokens(s &string) []string {
-    mut tokens := []string{}
-    mut cur := ""
-    mut i := 0
+    $tokens := []string{}
+    $cur := ""
+    $i := 0
     while i < s.len {
         c := s[i] & 255
         if c == 32 || c == 9 {
@@ -39,7 +39,7 @@ fn validate_key(key &string) bool {
     if key.len == 0 || key.len > 250 {
         >> errors.new("memcached: invalid key length (must be 1-250 bytes)")
     }
-    mut i := 0
+    $i := 0
     while i < key.len {
         c := key[i] & 255
         if c <= 32 || c == 127 {
@@ -67,7 +67,7 @@ fn check_error_line(line &string) bool {
 
 // ---- Storage Commands ----
 
-fn (c &mut Client) store(cmd string, key string, val string, flags int, exptime int) bool {
+fn (c $&Client) store(cmd string, key string, val string, flags int, exptime int) bool {
     validate_key(&key) or >>
     wire := cmd + " " + key + " " + str(flags) + " " + str(exptime) + " " + str(val.len) + "\r\n" + val + "\r\n"
     c.write_raw(wire) or >>
@@ -76,19 +76,19 @@ fn (c &mut Client) store(cmd string, key string, val string, flags int, exptime 
     << line == "STORED"
 }
 
-pub fn (c &mut Client) set(key string, val string, flags int, exptime int) bool {
+pub fn (c $&Client) set(key string, val string, flags int, exptime int) bool {
     << c.store("set", key, val, flags, exptime) or >>
 }
 
-pub fn (c &mut Client) add(key string, val string, flags int, exptime int) bool {
+pub fn (c $&Client) add(key string, val string, flags int, exptime int) bool {
     << c.store("add", key, val, flags, exptime) or >>
 }
 
-pub fn (c &mut Client) replace(key string, val string, flags int, exptime int) bool {
+pub fn (c $&Client) replace(key string, val string, flags int, exptime int) bool {
     << c.store("replace", key, val, flags, exptime) or >>
 }
 
-pub fn (c &mut Client) append(key string, val string) bool {
+pub fn (c $&Client) append(key string, val string) bool {
     validate_key(&key) or >>
     wire := "append " + key + " 0 0 " + str(val.len) + "\r\n" + val + "\r\n"
     c.write_raw(wire) or >>
@@ -97,7 +97,7 @@ pub fn (c &mut Client) append(key string, val string) bool {
     << line == "STORED"
 }
 
-pub fn (c &mut Client) prepend(key string, val string) bool {
+pub fn (c $&Client) prepend(key string, val string) bool {
     validate_key(&key) or >>
     wire := "prepend " + key + " 0 0 " + str(val.len) + "\r\n" + val + "\r\n"
     c.write_raw(wire) or >>
@@ -108,12 +108,12 @@ pub fn (c &mut Client) prepend(key string, val string) bool {
 
 // ---- Retrieval Commands ----
 
-pub fn (c &mut Client) get(key string) string {
+pub fn (c $&Client) get(key string) string {
     validate_key(&key) or >>
     wire := "get " + key + "\r\n"
     c.write_raw(wire) or >>
-    mut result := ""
-    mut found := false
+    $result := ""
+    $found := false
     while true {
         line := c.read_line() or >>
         check_error_line(&line) or >>
@@ -137,12 +137,12 @@ pub fn (c &mut Client) get(key string) string {
     << result
 }
 
-pub fn (c &mut Client) get_multi(keys []string) []string {
+pub fn (c $&Client) get_multi(keys []string) []string {
     if keys.len == 0 {
         << []string{}
     }
-    mut cmd := "get"
-    mut k := 0
+    $cmd := "get"
+    $k := 0
     while k < keys.len {
         validate_key(&keys[k]) or >>
         cmd = cmd + " " + keys[k]
@@ -151,7 +151,7 @@ pub fn (c &mut Client) get_multi(keys []string) []string {
     cmd = cmd + "\r\n"
     c.write_raw(cmd) or >>
 
-    mut results := []string{}
+    $results := []string{}
     while true {
         line := c.read_line() or >>
         check_error_line(&line) or >>
@@ -171,7 +171,7 @@ pub fn (c &mut Client) get_multi(keys []string) []string {
 
 // ---- Deletion & Arithmetic ----
 
-pub fn (c &mut Client) delete(key string) bool {
+pub fn (c $&Client) delete(key string) bool {
     validate_key(&key) or >>
     wire := "delete " + key + "\r\n"
     c.write_raw(wire) or >>
@@ -180,7 +180,7 @@ pub fn (c &mut Client) delete(key string) bool {
     << line == "DELETED"
 }
 
-pub fn (c &mut Client) incr(key string, delta int) int {
+pub fn (c $&Client) incr(key string, delta int) int {
     validate_key(&key) or >>
     wire := "incr " + key + " " + str(delta) + "\r\n"
     c.write_raw(wire) or >>
@@ -192,7 +192,7 @@ pub fn (c &mut Client) incr(key string, delta int) int {
     << parse_int(line) or >>
 }
 
-pub fn (c &mut Client) decr(key string, delta int) int {
+pub fn (c $&Client) decr(key string, delta int) int {
     validate_key(&key) or >>
     wire := "decr " + key + " " + str(delta) + "\r\n"
     c.write_raw(wire) or >>
@@ -204,7 +204,7 @@ pub fn (c &mut Client) decr(key string, delta int) int {
     << parse_int(line) or >>
 }
 
-pub fn (c &mut Client) touch(key string, exptime int) bool {
+pub fn (c $&Client) touch(key string, exptime int) bool {
     validate_key(&key) or >>
     wire := "touch " + key + " " + str(exptime) + "\r\n"
     c.write_raw(wire) or >>
@@ -215,7 +215,7 @@ pub fn (c &mut Client) touch(key string, exptime int) bool {
 
 // ---- Admin & Stats ----
 
-pub fn (c &mut Client) version() string {
+pub fn (c $&Client) version() string {
     c.write_raw("version\r\n") or >>
     line := c.read_line() or >>
     prefix := "VERSION "
@@ -225,15 +225,15 @@ pub fn (c &mut Client) version() string {
     << line
 }
 
-pub fn (c &mut Client) flush_all() bool {
+pub fn (c $&Client) flush_all() bool {
     c.write_raw("flush_all\r\n") or >>
     line := c.read_line() or >>
     << line == "OK"
 }
 
-pub fn (c &mut Client) stats() []string {
+pub fn (c $&Client) stats() []string {
     c.write_raw("stats\r\n") or >>
-    mut lines := []string{}
+    $lines := []string{}
     while true {
         line := c.read_line() or >>
         if line == "END" {

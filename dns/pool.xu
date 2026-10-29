@@ -12,7 +12,7 @@ pub struct DnsPool {
 
 pub fn open_pool(endpoint string, max_idle int) DnsPool {
     c := new_client(endpoint)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -69,7 +69,7 @@ pub fn (p &DnsPool) resolve_a(domain string) []string {
 }
 
 pub fn (p &DnsPool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

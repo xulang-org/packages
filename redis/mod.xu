@@ -17,14 +17,14 @@ pub fn open(addr string) Client {
 }
 
 pub fn open_auth(addr string, password string) Client {
-    mut c := dial(addr) or >>
+    $c := dial(addr) or >>
     c.auth(password) or >>
     << c
 }
 
 pub fn open_url(raw string) Client {
     opt := parse_url(raw)
-    mut c := dial(opt.addr) or >>
+    $c := dial(opt.addr) or >>
     if opt.password.len > 0 {
         c.auth(opt.password) or >>
     }

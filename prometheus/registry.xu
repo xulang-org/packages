@@ -12,22 +12,22 @@ pub fn new_registry() Registry {
     }
 }
 
-pub fn (r &mut Registry) register_counter(c Counter) {
+pub fn (r $&Registry) register_counter(c Counter) {
     r.counters.push(c)
 }
 
-pub fn (r &mut Registry) register_gauge(g Gauge) {
+pub fn (r $&Registry) register_gauge(g Gauge) {
     r.gauges.push(g)
 }
 
 pub fn (r &Registry) gather() string {
-    mut out := ""
-    mut i := 0
+    $out := ""
+    $i := 0
     while i < r.counters.len {
         out = out + r.counters[i].format()
         i = i + 1
     }
-    mut j := 0
+    $j := 0
     while j < r.gauges.len {
         out = out + r.gauges[j].format()
         j = j + 1

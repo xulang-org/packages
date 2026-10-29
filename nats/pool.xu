@@ -14,7 +14,7 @@ pub struct Pool {
 }
 
 pub fn new_pool(url string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -23,7 +23,7 @@ pub fn new_pool(url string, max_idle int) Pool {
 }
 
 pub fn new_pool_auth(url string, user string, pass string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -47,10 +47,10 @@ pub fn (p &Pool) get() Client {
         else {}
     }
     if p.auth_user.len > 0 {
-        mut c := connect_auth(p.url + "", p.auth_user + "", p.auth_pass + "") or >>
+        $c := connect_auth(p.url + "", p.auth_user + "", p.auth_pass + "") or >>
         << c
     }
-    mut c := connect(p.url + "") or >>
+    $c := connect(p.url + "") or >>
     << c
 }
 
@@ -73,7 +73,7 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) publish(subject string, data string) int {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.publish(subject + "", data + "") or (err) {
         p.put_conn(fd)
@@ -84,7 +84,7 @@ pub fn (p &Pool) publish(subject string, data string) int {
 }
 
 pub fn (p &Pool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

@@ -18,7 +18,7 @@ pub fn tls_connect(endpoint string, default_port int) TlsClient {
 }
 
 pub fn tls_connect_config(endpoint string, default_port int, cfg tls.Config) TlsClient {
-    mut ep := transport.parse_endpoint(endpoint, default_port) or >>
+    $ep := transport.parse_endpoint(endpoint, default_port) or >>
     ep.scheme = "tls"
     ep.secure = true
     host := ep.host + ""
@@ -27,19 +27,19 @@ pub fn tls_connect_config(endpoint string, default_port int, cfg tls.Config) Tls
     << TlsClient{conn: tc, host: host, port: port}
 }
 
-pub fn (c &mut TlsClient) write_all(data string) int {
-    mut tc := mut &c.conn
+pub fn (c $&TlsClient) write_all(data string) int {
+    $tc := $&c.conn
     << tc.write_all(data) or >>
 }
 
-pub fn (c &mut TlsClient) read(max int) string {
-    mut tc := mut &c.conn
+pub fn (c $&TlsClient) read(max int) string {
+    $tc := $&c.conn
     << tc.read(max) or >>
 }
 
-pub fn (c &mut TlsClient) read_exact(need int) string {
+pub fn (c $&TlsClient) read_exact(need int) string {
     if need < 0 || need > transport.MAX_MESSAGE_BYTES { >> errors.new("dns: invalid TLS read length") }
-    mut out := ""
+    $out := ""
     while out.len < need {
         part := c.read(need - out.len) or >>
         if part.len == 0 { >> errors.new("dns: TLS connection closed") }
@@ -48,25 +48,25 @@ pub fn (c &mut TlsClient) read_exact(need int) string {
     << out
 }
 
-pub fn (c &mut TlsClient) close() int {
-    mut tc := mut &c.conn
+pub fn (c $&TlsClient) close() int {
+    $tc := $&c.conn
     << tc.close() or >>
 }
 
-pub fn (c &mut TlsClient) set_deadline(t_ns int) int {
-    mut tc := mut &c.conn
-    mut tls_c := mut &tc.tls_conn
+pub fn (c $&TlsClient) set_deadline(t_ns int) int {
+    $tc := $&c.conn
+    $tls_c := $&tc.tls_conn
     << tls_c.set_deadline(t_ns) or >>
 }
 
-pub fn (c &mut TlsClient) set_read_deadline(t_ns int) int {
-    mut tc := mut &c.conn
-    mut tls_c := mut &tc.tls_conn
+pub fn (c $&TlsClient) set_read_deadline(t_ns int) int {
+    $tc := $&c.conn
+    $tls_c := $&tc.tls_conn
     << tls_c.set_read_deadline(t_ns) or >>
 }
 
-pub fn (c &mut TlsClient) set_write_deadline(t_ns int) int {
-    mut tc := mut &c.conn
-    mut tls_c := mut &tc.tls_conn
+pub fn (c $&TlsClient) set_write_deadline(t_ns int) int {
+    $tc := $&c.conn
+    $tls_c := $&tc.tls_conn
     << tls_c.set_write_deadline(t_ns) or >>
 }

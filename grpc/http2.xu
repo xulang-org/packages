@@ -46,11 +46,11 @@ pub fn encode_h2_header(len int, frame_type int, flags int, stream_id int) strin
 }
 
 pub fn build_settings_frame(ack bool) string {
-    mut flags := 0
+    $flags := 0
     if ack {
         flags = FLAG_ACK
     }
-    mut body := ""
+    $body := ""
     if !ack {
         // HEADER_TABLE_SIZE=0 and ENABLE_PUSH=0. Independent unary calls do
         // not retain HPACK dynamic tables and do not accept pushed streams.
@@ -62,7 +62,7 @@ pub fn build_settings_frame(ack bool) string {
 }
 
 pub fn build_data_frame(stream_id int, data string, end_stream bool) string {
-    mut flags := 0
+    $flags := 0
     if end_stream {
         flags = FLAG_END_STREAM
     }
@@ -72,7 +72,7 @@ pub fn build_data_frame(stream_id int, data string, end_stream bool) string {
 
 fn encode_hpack_literal(name string, val string) string {
     // 0x00: Literal Header Field without Indexing - New Name
-    mut out := string_from_byte(0)
+    $out := string_from_byte(0)
     out = out + encode_hpack_length(name.len) + name
     out = out + encode_hpack_length(val.len) + val
     << out
@@ -80,8 +80,8 @@ fn encode_hpack_literal(name string, val string) string {
 
 fn encode_hpack_length(n int) string {
     if n < 127 { << string_from_byte(n) }
-    mut out := string_from_byte(127)
-    mut rest := n - 127
+    $out := string_from_byte(127)
+    $rest := n - 127
     while rest >= 128 { out.push_byte((rest & 127) | 128)
         rest = rest >> 7 }
     out.push_byte(rest)
@@ -103,7 +103,7 @@ fn build_grpc_headers_for_host(path string, authority string) string {
 }
 
 pub fn build_grpc_headers_for_host_scheme(path string, authority string, scheme string) string {
-    mut block := ""
+    $block := ""
     // 1. :method: POST (static table index 3) -> 0x80 | 3 = 0x83
     block = block + string_from_byte(131)
     // 2. :scheme: http (static table index 6) -> 0x80 | 6 = 0x86
@@ -121,7 +121,7 @@ pub fn build_grpc_headers_for_host_scheme(path string, authority string, scheme 
 
 pub fn build_headers_frame(stream_id int, path string, end_stream bool) string {
     block := build_grpc_hpack_headers(path)
-    mut flags := FLAG_END_HEADERS
+    $flags := FLAG_END_HEADERS
     if end_stream {
         flags = flags | FLAG_END_STREAM
     }

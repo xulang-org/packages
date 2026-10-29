@@ -41,15 +41,15 @@ fn parse_endpoint(raw string) []string {
         ep := transport.parse_endpoint(raw, 2379) or (err) { << ["127.0.0.1", "2379", "true"] }
         << [ep.host, str(ep.port), "true"]
     }
-    mut ep := raw
+    $ep := raw
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 2379
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 2379
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -76,11 +76,11 @@ pub fn new_client(endpoint string) Client {
     << Client{host: host, port: port, secure: ep_parts[2] == "true"}
 }
 
-pub fn (c &mut Client) request(path string, body_json string) Response {
+pub fn (c $&Client) request(path string, body_json string) Response {
     if c.secure {
-        mut p := path
+        $p := path
         if p.len == 0 || (p[0] & 255) != 47 { p = "/" + p }
-        mut req := "POST " + p + " HTTP/1.1\r\n"
+        $req := "POST " + p + " HTTP/1.1\r\n"
         req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
         req = req + "Content-Type: application/json\r\n"
         req = req + "Content-Length: " + str(body_json.len) + "\r\n"
@@ -95,8 +95,8 @@ pub fn (c &mut Client) request(path string, body_json string) Response {
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("etcd: dial failed: " + err.msg())
     }
-    mut reusable := false
-    result := c.request_on_fd(fd, path, body_json, mut &reusable) or (err) {
+    $reusable := false
+    result := c.request_on_fd(fd, path, body_json, $&reusable) or (err) {
         safe_close(fd)
         >> err
     }
@@ -104,7 +104,7 @@ pub fn (c &mut Client) request(path string, body_json string) Response {
     << result
 }
 
-fn (c &mut Client) request_at(fd int, path string, body_json string, reusable &mut bool) Response {
+fn (c $&Client) request_at(fd int, path string, body_json string, reusable $&bool) Response {
     if c.secure {
         *reusable = false
         << c.request(path, body_json) or >>
@@ -113,15 +113,15 @@ fn (c &mut Client) request_at(fd int, path string, body_json string, reusable &m
     << c.request_on_fd(fd, path, body_json, reusable) or >>
 }
 
-fn (c &mut Client) request_on_fd(fd int, path string, body_json string, reusable &mut bool) Response {
+fn (c $&Client) request_on_fd(fd int, path string, body_json string, reusable $&bool) Response {
     *reusable = false
 
-    mut p := path
+    $p := path
     if p.len == 0 || (p[0] & 255) != 47 {
         p = "/" + p
     }
 
-    mut req := "POST " + p + " HTTP/1.1\r\n"
+    $req := "POST " + p + " HTTP/1.1\r\n"
     req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
     req = req + "Content-Type: application/json\r\n"
     req = req + "Content-Length: " + str(body_json.len) + "\r\n"
@@ -130,7 +130,7 @@ fn (c &mut Client) request_on_fd(fd int, path string, body_json string, reusable
         req = req + body_json
     }
 
-    mut off := 0
+    $off := 0
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) or (err) {

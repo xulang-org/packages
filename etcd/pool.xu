@@ -18,7 +18,7 @@ pub struct Pool {
 
 pub fn new_pool(endpoint string, max_idle int) Pool {
     c := new_client(endpoint + "")
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -68,15 +68,15 @@ pub fn (p &Pool) discard_conn(fd int) {
 
 pub fn (p &Pool) put(key string, value string) int {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.put(key, value) or (err) { << 0 }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.put_at(fd, key, value, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.put_at(fd, key, value, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -86,15 +86,15 @@ pub fn (p &Pool) put(key string, value string) int {
 
 pub fn (p &Pool) get_key(key string) string {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.get(key) or (err) { << "" }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.get_at(fd, key, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.get_at(fd, key, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -104,15 +104,15 @@ pub fn (p &Pool) get_key(key string) string {
 
 pub fn (p &Pool) delete(key string) int {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.delete(key) or (err) { << 0 }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.delete_at(fd, key, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.delete_at(fd, key, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -122,15 +122,15 @@ pub fn (p &Pool) delete(key string) int {
 
 pub fn (p &Pool) exists(key string) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.exists(key) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    mut c := p.get()
-    result := c.exists_at(fd, key, mut &reusable)
+    $reusable := false
+    $c := p.get()
+    result := c.exists_at(fd, key, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }

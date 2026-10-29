@@ -30,8 +30,8 @@ pub fn new_point(measurement string) Point {
 }
 
 fn escape_line_tag(s &string) string {
-    mut out := ""
-    mut i := 0
+    $out := ""
+    $i := 0
     while i < s.len {
         c := s[i] & 255
         if c == 32 || c == 44 || c == 61 {
@@ -44,8 +44,8 @@ fn escape_line_tag(s &string) string {
 }
 
 fn escape_string_field(s &string) string {
-    mut out := ""
-    mut i := 0
+    $out := ""
+    $i := 0
     while i < s.len {
         c := s[i] & 255
         if c == 34 || c == 92 {
@@ -57,45 +57,45 @@ fn escape_string_field(s &string) string {
     << out
 }
 
-pub fn (p &mut Point) add_tag(key string, val string) {
+pub fn (p $&Point) add_tag(key string, val string) {
     p.tags.push(Tag{key: escape_line_tag(&key), val: escape_line_tag(&val)})
 }
 
-pub fn (p &mut Point) add_field_string(key string, val string) {
+pub fn (p $&Point) add_field_string(key string, val string) {
     // Strings in Line Protocol must be double quoted and escaped
     p.fields.push(Field{key: escape_line_tag(&key), val: "\"" + escape_string_field(&val) + "\""})
 }
 
-pub fn (p &mut Point) add_field_int(key string, val int) {
+pub fn (p $&Point) add_field_int(key string, val int) {
     // Integers in Line Protocol are followed by 'i'
     p.fields.push(Field{key: key, val: str(val) + "i"})
 }
 
-pub fn (p &mut Point) add_field_float(key string, val string) {
+pub fn (p $&Point) add_field_float(key string, val string) {
     p.fields.push(Field{key: key, val: val})
 }
 
-pub fn (p &mut Point) add_field_bool(key string, val bool) {
-    mut b := "false"
+pub fn (p $&Point) add_field_bool(key string, val bool) {
+    $b := "false"
     if val {
         b = "true"
     }
     p.fields.push(Field{key: key, val: b})
 }
 
-pub fn (p &mut Point) set_timestamp(ts int) {
+pub fn (p $&Point) set_timestamp(ts int) {
     p.timestamp = ts
 }
 
 pub fn (p &Point) to_line() string {
-    mut line := p.measurement
-    mut i := 0
+    $line := p.measurement
+    $i := 0
     while i < p.tags.len {
         line = line + "," + p.tags[i].key + "=" + p.tags[i].val
         i = i + 1
     }
     line = line + " "
-    mut j := 0
+    $j := 0
     while j < p.fields.len {
         if j > 0 {
             line = line + ","
@@ -109,31 +109,31 @@ pub fn (p &Point) to_line() string {
     << line
 }
 
-pub fn (c &mut Client) write_point(point Point) bool {
-    mut reusable := false
-    << c.write_point_at(-1, point, mut &reusable) or >>
+pub fn (c $&Client) write_point(point Point) bool {
+    $reusable := false
+    << c.write_point_at(-1, point, $&reusable) or >>
 }
 
-fn (c &mut Client) write_point_at(fd int, point Point, reusable &mut bool) bool {
+fn (c $&Client) write_point_at(fd int, point Point, reusable $&bool) bool {
     line := point.to_line()
     << c.write_line_at(fd, line, reusable)
 }
 
-pub fn (c &mut Client) write_line(line string) bool {
-    mut reusable := false
-    << c.write_line_at(-1, line, mut &reusable) or >>
+pub fn (c $&Client) write_line(line string) bool {
+    $reusable := false
+    << c.write_line_at(-1, line, $&reusable) or >>
 }
 
-fn (c &mut Client) write_line_at(fd int, line string, reusable &mut bool) bool {
+fn (c $&Client) write_line_at(fd int, line string, reusable $&bool) bool {
     << c.write_raw_at(fd, line, reusable)
 }
 
-pub fn (c &mut Client) write_raw(lines string) bool {
-    mut reusable := false
-    << c.write_raw_at(-1, lines, mut &reusable) or >>
+pub fn (c $&Client) write_raw(lines string) bool {
+    $reusable := false
+    << c.write_raw_at(-1, lines, $&reusable) or >>
 }
 
-fn (c &mut Client) write_raw_at(fd int, lines string, reusable &mut bool) bool {
+fn (c $&Client) write_raw_at(fd int, lines string, reusable $&bool) bool {
     path := "/api/v2/write?org=" + c.org + "&bucket=" + c.bucket + "&precision=ns"
     resp := c.request_at(fd, "POST", path, lines, "text/plain; charset=utf-8", "application/json", reusable) or (err) {
         >> err

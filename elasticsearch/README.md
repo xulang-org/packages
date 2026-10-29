@@ -28,7 +28,7 @@ require:
 elasticsearch #github.com/xulang-org/packages/elasticsearch
 
 fn main() int {
-    mut es := elasticsearch.open("http://127.0.0.1:9200")
+    $es := elasticsearch.open("http://127.0.0.1:9200")
     
     // 1. 集群健康探测
     if !es.ping() {

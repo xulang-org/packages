@@ -12,7 +12,7 @@ pub struct Pool {
 }
 
 pub fn new_pool(addr string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -32,11 +32,11 @@ pub fn (p &Pool) get() Client {
             }
         }
         else {
-            mut c := connect(p.addr + "") or >>
+            $c := connect(p.addr + "") or >>
             << c
         }
     }
-    mut c := connect(p.addr + "") or >>
+    $c := connect(p.addr + "") or >>
     << c
 }
 
@@ -59,7 +59,7 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) hello() bool {
-    mut c := p.get() or (err) {
+    $c := p.get() or (err) {
         << false
     }
     fd := c.fd
@@ -69,7 +69,7 @@ pub fn (p &Pool) hello() bool {
 }
 
 pub fn (p &Pool) insert_one(db_name string, col_name string, doc_bytes string) int {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.insert_one(db_name, col_name, doc_bytes) or (err) {
         p.put_conn(fd)
@@ -80,7 +80,7 @@ pub fn (p &Pool) insert_one(db_name string, col_name string, doc_bytes string) i
 }
 
 pub fn (p &Pool) find_first_string(db_name string, col_name string, target_field string) string {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.find_first_string(db_name, col_name, target_field) or (err) {
         p.put_conn(fd)
@@ -91,7 +91,7 @@ pub fn (p &Pool) find_first_string(db_name string, col_name string, target_field
 }
 
 pub fn (p &Pool) drop_collection(db_name string, col_name string) bool {
-    mut c := p.get() or (err) {
+    $c := p.get() or (err) {
         << false
     }
     fd := c.fd
@@ -101,7 +101,7 @@ pub fn (p &Pool) drop_collection(db_name string, col_name string) bool {
 }
 
 pub fn (p &Pool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

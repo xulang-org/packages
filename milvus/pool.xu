@@ -13,7 +13,7 @@ pub struct MilvusPool {
 
 pub fn open_pool(endpoint string, max_idle int) MilvusPool {
     c := new_client(endpoint)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -70,8 +70,8 @@ pub fn (p &MilvusPool) create_collection(cfg CollectionConfig) bool {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.create_collection_at(fd, cfg, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.create_collection_at(fd, cfg, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -87,8 +87,8 @@ pub fn (p &MilvusPool) drop_collection(name string) bool {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.drop_collection_at(fd, name, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.drop_collection_at(fd, name, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -104,8 +104,8 @@ pub fn (p &MilvusPool) insert(collection string, entities []VectorEntity) bool {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.insert_at(fd, collection, entities, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.insert_at(fd, collection, entities, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -116,8 +116,8 @@ pub fn (p &MilvusPool) insert(collection string, entities []VectorEntity) bool {
 pub fn (p &MilvusPool) search(collection string, query_vec []string, limit int) SearchResult {
     fd := p.get_conn()
     if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.search_at(fd, collection, query_vec, limit, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.search_at(fd, collection, query_vec, limit, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }

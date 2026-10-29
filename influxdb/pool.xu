@@ -20,7 +20,7 @@ pub struct Pool {
 
 pub fn new_pool(endpoint string, token string, org string, bucket string, max_idle int) Pool {
     c := new_client(endpoint, token, org, bucket)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -83,15 +83,15 @@ pub fn (p &Pool) discard_conn(fd int) {
 
 pub fn (p &Pool) write_point(point Point) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.write_point(point) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.write_point_at(fd, point, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.write_point_at(fd, point, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -101,15 +101,15 @@ pub fn (p &Pool) write_point(point Point) bool {
 
 pub fn (p &Pool) write_line(line string) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.write_line(line) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.write_line_at(fd, line, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.write_line_at(fd, line, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -119,15 +119,15 @@ pub fn (p &Pool) write_line(line string) bool {
 
 pub fn (p &Pool) write_raw(lines string) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.write_raw(lines) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.write_raw_at(fd, lines, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.write_raw_at(fd, lines, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -137,15 +137,15 @@ pub fn (p &Pool) write_raw(lines string) bool {
 
 pub fn (p &Pool) query_flux(flux string) string {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.query_flux(flux) or (err) { << "" }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.query_flux_at(fd, flux, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.query_flux_at(fd, flux, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -155,15 +155,15 @@ pub fn (p &Pool) query_flux(flux string) string {
 
 pub fn (p &Pool) ping() bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.ping() or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.ping_at(fd, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.ping_at(fd, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }

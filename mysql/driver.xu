@@ -39,7 +39,7 @@ struct MysqlTx {
 }
 
 fn quote_string(s &string) string {
-    mut out := "'"
+    $out := "'"
     for i in 0:s.len {
         c := s[i] & 255
         if c == 0 { out = out + "\\0" }
@@ -82,7 +82,7 @@ fn mysql_arg_val(args &[]driver.NamedValue, i int) string {
     }
     if args[i].value is []u8 {
         bs := args[i].value as []u8
-        mut raw := ""
+        $raw := ""
         for k in 0:bs.len { raw.push_byte(int(bs[k]) & 255) }
         << "X'" + hex.encode_to_string(raw) + "'"
     }
@@ -95,12 +95,12 @@ fn arg_at(args &[]driver.NamedValue, i int) string {
 
 fn interpolate(q string, args &[]driver.NamedValue) string {
     if args.len == 0 { << strings.clone(&q) }
-    mut out := ""
-    mut i := 0
-    mut ai := 0
-    mut quote := 0
-    mut line_comment := false
-    mut block_comment := false
+    $out := ""
+    $i := 0
+    $ai := 0
+    $quote := 0
+    $line_comment := false
+    $block_comment := false
     while i < q.len {
         c := q[i] & 255
         if line_comment {
@@ -176,8 +176,8 @@ fn interpolate(q string, args &[]driver.NamedValue) string {
 }
 
 fn parse_coldef(body string) ColumnDef {
-    mut off := 0
-    mut name := ""
+    $off := 0
+    $name := ""
     for i in 0:6 {
         r := read_len(&body, off)
         if r.err.len > 0 || r.null != 0 || r.next + r.n > body.len { << ColumnDef{name: "", kind: -1} }
@@ -199,7 +199,7 @@ fn mysql_cell(kind int, payload string) string {
     if kind == 1 || kind == 2 || kind == 3 || kind == 8 || kind == 9 || kind == 13 { << "i:" + payload }
     if kind == 4 || kind == 5 || kind == 246 { << "f:" + payload }
     if kind == 249 || kind == 250 || kind == 251 || kind == 252 || kind == 255 {
-        mut bs := []u8{}
+        $bs := []u8{}
         for i in 0:payload.len { bs.push(u8(payload[i] & 255)) }
         << driver.encode_value(bs)
     }
@@ -207,7 +207,7 @@ fn mysql_cell(kind int, payload string) string {
 }
 
 fn parse_ok(body string) QueryResult {
-    mut qr := empty_query()
+    $qr := empty_query()
     if body.len == 0 || (body[0] & 255) != 0 {
         qr.err = "mysql: malformed OK packet"
         << qr
@@ -229,26 +229,26 @@ fn parse_ok(body string) QueryResult {
 
 fn parse_result(fd int, first string) QueryResult {
     if first.len == 0 {
-        mut q := empty_query()
+        $q := empty_query()
         q.err = "mysql: empty response"
         << q
     }
     tag := first[0] & 255
     if tag == 0 { << parse_ok(first) }
     if tag == 255 {
-        mut q := empty_query()
+        $q := empty_query()
         q.err = err_text(first)
         << q
     }
     cnt := read_len(&first, 0)
     if cnt.err.len > 0 || cnt.null != 0 || cnt.n < 0 || cnt.n > 4096 {
-        mut q := empty_query()
+        $q := empty_query()
         q.err = "mysql: malformed result set"
         << q
     }
-    mut qr := empty_query()
+    $qr := empty_query()
     qr.ncols = cnt.n
-    mut kinds := []int{}
+    $kinds := []int{}
     for i in 0:cnt.n {
         p := recv_packet(fd)
         if p.err.len > 0 {
@@ -277,7 +277,7 @@ fn parse_result(fd int, first string) QueryResult {
         qr.err = err_text(eof_payload)
         << qr
     }
-    mut done := false
+    $done := false
     while !done {
         p := recv_packet(fd)
         if p.err.len > 0 {
@@ -292,7 +292,7 @@ fn parse_result(fd int, first string) QueryResult {
             qr.err = err_text(p.payload)
             << qr
         }
-        mut off := 0
+        $off := 0
         for i in 0:cnt.n {
             r := read_len(&p.payload, off)
             if r.err.len > 0 {
@@ -317,7 +317,7 @@ fn parse_result(fd int, first string) QueryResult {
 
 fn query_wire(fd int, q string, args &[]driver.NamedValue) QueryResult {
     sql := interpolate(strings.clone(&q), args)
-    mut qr := empty_query()
+    $qr := empty_query()
     if sql.len == 0 && (q.len > 0 || args.len > 0) {
         qr.err = "mysql: parameter count mismatch"
         << qr
@@ -346,28 +346,28 @@ fn command_ok(fd int, command int) string {
     << "mysql: unexpected command response"
 }
 
-fn parse_result_tls(tc &mut transport.Conn, first string) QueryResult {
+fn parse_result_tls(tc $&transport.Conn, first string) QueryResult {
     if first.len == 0 {
-        mut q := empty_query()
+        $q := empty_query()
         q.err = "mysql: empty response"
         << q
     }
     tag := first[0] & 255
     if tag == 0 { << parse_ok(first) }
     if tag == 255 {
-        mut q := empty_query()
+        $q := empty_query()
         q.err = err_text(first)
         << q
     }
     cnt := read_len(&first, 0)
     if cnt.err.len > 0 || cnt.null != 0 || cnt.n < 0 || cnt.n > 4096 {
-        mut q := empty_query()
+        $q := empty_query()
         q.err = "mysql: malformed result set"
         << q
     }
-    mut qr := empty_query()
+    $qr := empty_query()
     qr.ncols = cnt.n
-    mut kinds := []int{}
+    $kinds := []int{}
     for i in 0:cnt.n {
         p := recv_packet_tls(tc)
         if p.err.len > 0 {
@@ -396,7 +396,7 @@ fn parse_result_tls(tc &mut transport.Conn, first string) QueryResult {
         qr.err = err_text(eof_payload)
         << qr
     }
-    mut done := false
+    $done := false
     while !done {
         p := recv_packet_tls(tc)
         if p.err.len > 0 {
@@ -411,7 +411,7 @@ fn parse_result_tls(tc &mut transport.Conn, first string) QueryResult {
             qr.err = err_text(p.payload)
             << qr
         }
-        mut off := 0
+        $off := 0
         for i in 0:cnt.n {
             r := read_len(&p.payload, off)
             if r.err.len > 0 {
@@ -434,9 +434,9 @@ fn parse_result_tls(tc &mut transport.Conn, first string) QueryResult {
     << qr
 }
 
-fn query_wire_tls(tc &mut transport.Conn, q string, args &[]driver.NamedValue) QueryResult {
+fn query_wire_tls(tc $&transport.Conn, q string, args &[]driver.NamedValue) QueryResult {
     sql := interpolate(strings.clone(&q), args)
-    mut qr := empty_query()
+    $qr := empty_query()
     if sql.len == 0 && (q.len > 0 || args.len > 0) {
         qr.err = "mysql: parameter count mismatch"
         << qr
@@ -454,7 +454,7 @@ fn query_wire_tls(tc &mut transport.Conn, q string, args &[]driver.NamedValue) Q
     << parse_result_tls(tc, p.payload)
 }
 
-fn command_ok_tls(tc &mut transport.Conn, command int) string {
+fn command_ok_tls(tc $&transport.Conn, command int) string {
     e := send_packet_tls(tc, 0, string_from_byte(command))
     if e.len > 0 { << e }
     p := recv_packet_tls(tc)
@@ -474,20 +474,20 @@ fn closed_tc_chan() chan transport.Conn {
     << ch
 }
 
-fn query_state(s &mut MysqlState, q string, args &[]driver.NamedValue) QueryResult {
+fn query_state(s $&MysqlState, q string, args &[]driver.NamedValue) QueryResult {
     if s.secure != 0 {
-        mut tc := <-s.tc_chan
-        qr := query_wire_tls(mut &tc, q, args)
+        $tc := <-s.tc_chan
+        qr := query_wire_tls($&tc, q, args)
         s.tc_chan <- tc
         << qr
     }
     << query_wire(s.fd, q, args)
 }
 
-fn command_state(s &mut MysqlState, command int) string {
+fn command_state(s $&MysqlState, command int) string {
     if s.secure != 0 {
-        mut tc := <-s.tc_chan
-        e := command_ok_tls(mut &tc, command)
+        $tc := <-s.tc_chan
+        e := command_ok_tls($&tc, command)
         s.tc_chan <- tc
         << e
     }
@@ -499,7 +499,7 @@ fn close_fd(fd int) {
     <<
 }
 
-fn close_tls_quiet(tc &mut transport.Conn) int {
+fn close_tls_quiet(tc $&transport.Conn) int {
     tc.close() or (err) { << 0 }
     << 0
 }
@@ -510,8 +510,8 @@ fn failed_conn(msg string) driver.Conn {
     << driver.Conn(MysqlConn{st: ch})
 }
 
-fn read_greeting(raw &mut net.Conn) Packet {
-    mut hdr := raw.read(4) or (err) { << Packet{payload: "", seq: 0, err: err.msg()} }
+fn read_greeting(raw $&net.Conn) Packet {
+    $hdr := raw.read(4) or (err) { << Packet{payload: "", seq: 0, err: err.msg()} }
     if hdr.len != 4 { << Packet{payload: "", seq: 0, err: "mysql: short greeting header"} }
     n := le24_at(&hdr, 0)
     if n < 0 || n > 16777216 { << Packet{payload: "", seq: 0, err: "mysql: invalid greeting length"} }
@@ -522,7 +522,7 @@ fn read_greeting(raw &mut net.Conn) Packet {
 
 fn server_caps(greeting string) int {
     if greeting.len < 1 { << -1 }
-    mut off := 1
+    $off := 1
     while off < greeting.len && (greeting[off] & 255) != 0 { off += 1 }
     off += 1 + 4 + 8 + 1
     if off + 2 > greeting.len { << -1 }
@@ -538,8 +538,8 @@ fn server_caps(greeting string) int {
 fn new_conn_tls(cfg Config) driver.Conn {
     port_text := str(cfg.port)
     addr := net.join_host_port(&cfg.host, &port_text)
-    mut raw := net.dial_to("tcp", addr) or (err) { << failed_conn(err.msg()) }
-    greeting := read_greeting(mut &raw)
+    $raw := net.dial_to("tcp", addr) or (err) { << failed_conn(err.msg()) }
+    greeting := read_greeting($&raw)
     if greeting.err.len > 0 {
         raw.close() or (e) { << failed_conn(greeting.err) }
         << failed_conn(greeting.err)
@@ -550,22 +550,22 @@ fn new_conn_tls(cfg Config) driver.Conn {
         << failed_conn("mysql: server does not advertise CLIENT_SSL")
     }
     ssl_req := le32(caps | 1 | 8 | 512 | 32768) + le32(16777216) + string_from_byte(45)
-    mut req := ssl_req
+    $req := ssl_req
     for i in 0:23 { req = req + string_from_byte(0) }
     frame := le24(req.len) + string_from_byte(1) + req
     raw.write(&frame) or (err) {
         raw.close() or (e) { << failed_conn(err.msg()) }
         << failed_conn(err.msg())
     }
-    mut tc_cfg := tls.new_config(cfg.host + "")
+    $tc_cfg := tls.new_config(cfg.host + "")
     if cfg.root_cert_file.len > 0 {
         pem := read_file(cfg.root_cert_file) or (err) { << failed_conn(err.msg()) }
-        ncert := x509.append_certificates(mut &tc_cfg.root_cas, &pem) or (err) { << failed_conn(err.msg()) }
+        ncert := x509.append_certificates($&tc_cfg.root_cas, &pem) or (err) { << failed_conn(err.msg()) }
         if ncert <= 0 { << failed_conn("mysql: no certificates in tlsrootcert") }
     }
     tls_raw := tls.client(raw, &tc_cfg) or (err) { << failed_conn(err.msg()) }
-    mut tr := transport.Conn{fd: -1, tls_conn: tls_raw, secure: true, closed: false, eof: false, buf: ""}
-    auth_err := handshake_tls_greeting(mut &tr, &cfg, greeting)
+    $tr := transport.Conn{fd: -1, tls_conn: tls_raw, secure: true, closed: false, eof: false, buf: ""}
+    auth_err := handshake_tls_greeting($&tr, &cfg, greeting)
     tcch := chan transport.Conn{cap: 1}
     tcch <- tr
     ch := chan MysqlState{cap: 1}
@@ -618,13 +618,13 @@ fn fail_exec(msg string) driver.ExecResult { << driver.exec_err(msg) }
 fn fail_rows(msg string) driver.RowsResult { << driver.rows_err(msg) }
 
 fn copy_strings(src &[]string) []string {
-    mut out := []string{}
+    $out := []string{}
     for i in 0:src.len { out.push(src[i]) }
     << out
 }
 
 fn (c MysqlConn) ping() string {
-    mut s := take_st(&c)
+    $s := take_st(&c)
     if s.open_err.len > 0 {
         msg := s.open_err
         put_st(&c, s)
@@ -634,7 +634,7 @@ fn (c MysqlConn) ping() string {
         put_st(&c, s)
         << "sql: connection is closed"
     }
-    e := command_state(mut &s, 14)
+    e := command_state($&s, 14)
     if e.len > 0 {
         s.closed = 1
         put_st(&c, s)
@@ -645,7 +645,7 @@ fn (c MysqlConn) ping() string {
 }
 
 fn (c MysqlConn) close() string {
-    mut s := take_st(&c)
+    $s := take_st(&c)
     if s.closed != 0 {
         put_st(&c, s)
         << ""
@@ -654,8 +654,8 @@ fn (c MysqlConn) close() string {
     s.closed = 1
     s.fd = -1
     if s.secure != 0 {
-        mut tc := <-s.tc_chan
-        close_tls_quiet(mut &tc)
+        $tc := <-s.tc_chan
+        close_tls_quiet($&tc)
         s.tc_chan <- transport.closed_conn()
     } else if fd >= 0 {
         _ := send_packet(fd, 0, string_from_byte(1))
@@ -666,7 +666,7 @@ fn (c MysqlConn) close() string {
 }
 
 fn (c MysqlConn) is_valid() bool {
-    mut s := take_st(&c)
+    $s := take_st(&c)
     ok := s.closed == 0 && s.open_err.len == 0 && s.tx == 0
     put_st(&c, s)
     << ok
@@ -674,13 +674,13 @@ fn (c MysqlConn) is_valid() bool {
 
 fn (c MysqlConn) reset_session(ctx &context.Context) string {
     _ := ctx
-    mut s := take_st(&c)
+    $s := take_st(&c)
     if s.closed != 0 {
         put_st(&c, s)
         << driver.err_bad_conn()
     }
     noargs := []driver.NamedValue{}
-    qr := query_state(mut &s, "ROLLBACK", &noargs)
+    qr := query_state($&s, "ROLLBACK", &noargs)
     if qr.err.len > 0 {
         s.closed = 1
         put_st(&c, s)
@@ -692,7 +692,7 @@ fn (c MysqlConn) reset_session(ctx &context.Context) string {
 }
 
 fn (c MysqlConn) exec(q string, args []driver.NamedValue) driver.ExecResult {
-    mut s := take_st(&c)
+    $s := take_st(&c)
     if s.open_err.len > 0 {
         msg := s.open_err
         put_st(&c, s)
@@ -702,7 +702,7 @@ fn (c MysqlConn) exec(q string, args []driver.NamedValue) driver.ExecResult {
         put_st(&c, s)
         << fail_exec("sql: connection is closed")
     }
-    qr := query_state(mut &s, q, &args)
+    qr := query_state($&s, q, &args)
     if qr.err.len > 0 {
         if strings.contains(&qr.err, "connection") {
             s.closed = 1
@@ -717,7 +717,7 @@ fn (c MysqlConn) exec(q string, args []driver.NamedValue) driver.ExecResult {
 }
 
 fn (c MysqlConn) query(q string, args []driver.NamedValue) driver.RowsResult {
-    mut s := take_st(&c)
+    $s := take_st(&c)
     if s.open_err.len > 0 {
         msg := s.open_err
         put_st(&c, s)
@@ -727,7 +727,7 @@ fn (c MysqlConn) query(q string, args []driver.NamedValue) driver.RowsResult {
         put_st(&c, s)
         << fail_rows("sql: connection is closed")
     }
-    qr := query_state(mut &s, q, &args)
+    qr := query_state($&s, q, &args)
     if qr.err.len > 0 {
         if strings.contains(&qr.err, "connection") {
             s.closed = 1
@@ -752,53 +752,53 @@ fn (c MysqlConn) prepare_context(ctx &context.Context, q string) driver.Stmt {
 
 fn (c MysqlConn) begin() driver.Tx { << c.begin_tx(0, false) }
 fn (c MysqlConn) begin_tx(iso int, ro bool) driver.Tx {
-    mut s := take_st(&c)
+    $s := take_st(&c)
     if s.closed != 0 || s.open_err.len > 0 {
         put_st(&c, s)
         << driver.Tx(MysqlTx{st: c.st})
     }
-    mut q := "START TRANSACTION"
+    $q := "START TRANSACTION"
     if ro { q = "START TRANSACTION READ ONLY" }
     _ := iso
     noargs := []driver.NamedValue{}
-    qr := query_state(mut &s, q, &noargs)
+    qr := query_state($&s, q, &noargs)
     if qr.err.len == 0 { s.tx = 1 }
     put_st(&c, s)
     << driver.Tx(MysqlTx{st: c.st})
 }
 
 fn (t MysqlTx) commit() string {
-    mut c := MysqlConn{st: t.st}
-    mut s := take_st(&c)
+    $c := MysqlConn{st: t.st}
+    $s := take_st(&c)
     if s.closed != 0 {
         put_st(&c, s)
         << "sql: connection is closed"
     }
     noargs := []driver.NamedValue{}
-    qr := query_state(mut &s, "COMMIT", &noargs)
+    qr := query_state($&s, "COMMIT", &noargs)
     s.tx = 0
     put_st(&c, s)
     << qr.err
 }
 
 fn (t MysqlTx) rollback() string {
-    mut c := MysqlConn{st: t.st}
-    mut s := take_st(&c)
+    $c := MysqlConn{st: t.st}
+    $s := take_st(&c)
     if s.closed != 0 {
         put_st(&c, s)
         << "sql: connection is closed"
     }
     noargs := []driver.NamedValue{}
-    qr := query_state(mut &s, "ROLLBACK", &noargs)
+    qr := query_state($&s, "ROLLBACK", &noargs)
     s.tx = 0
     put_st(&c, s)
     << qr.err
 }
 
 fn count_params(q string) int {
-    mut n := 0
-    mut quote := 0
-    mut i := 0
+    $n := 0
+    $quote := 0
+    $i := 0
     while i < q.len {
         c := q[i] & 255
         if quote != 0 {

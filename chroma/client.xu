@@ -46,15 +46,15 @@ pub fn new_client(endpoint string) Client {
         }
         << Client{host: ep.host, port: ep.port, secure: true, tenant: "default_tenant", database: "default_database"}
     }
-    mut ep := endpoint
+    $ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 8000
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 8000
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -82,7 +82,7 @@ pub fn new_client(endpoint string) Client {
 
 pub fn (c Client) request(method string, path string, body string) Response {
     if c.secure {
-        mut req := method + " " + path + " HTTP/1.1\r\n"
+        $req := method + " " + path + " HTTP/1.1\r\n"
         req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
         req = req + "Content-Type: application/json\r\n"
         req = req + "Content-Length: " + str(body.len) + "\r\n"
@@ -95,8 +95,8 @@ pub fn (c Client) request(method string, path string, body string) Response {
     }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) or (err) { >> err }
-    mut reusable := false
-    result := c.request_on_fd(fd, method, path, body, mut &reusable) or (err) {
+    $reusable := false
+    result := c.request_on_fd(fd, method, path, body, $&reusable) or (err) {
         safe_close(fd)
         >> err
     }
@@ -104,8 +104,8 @@ pub fn (c Client) request(method string, path string, body string) Response {
     << result
 }
 
-fn (c Client) request_on_fd(fd int, method string, path string, body string, reusable &mut bool) Response {
-    mut req := method + " " + path + " HTTP/1.1\r\n"
+fn (c Client) request_on_fd(fd int, method string, path string, body string, reusable $&bool) Response {
+    $req := method + " " + path + " HTTP/1.1\r\n"
     req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
     req = req + "Content-Type: application/json\r\n"
     req = req + "Content-Length: " + str(body.len) + "\r\n"
@@ -114,7 +114,7 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
         req = req + body
     }
 
-    mut off := 0
+    $off := 0
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -133,7 +133,7 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
 
 }
 
-fn (c Client) request_at(fd int, method string, path string, body string, reusable &mut bool) Response {
+fn (c Client) request_at(fd int, method string, path string, body string, reusable $&bool) Response {
     if c.secure {
         *reusable = false
         << c.request(method, path, body) or >>
@@ -143,22 +143,22 @@ fn (c Client) request_at(fd int, method string, path string, body string, reusab
 }
 
 pub fn (c Client) heartbeat() bool {
-    mut reusable := false
-    result := c.heartbeat_at(-1, mut &reusable) or (err) { << false }
+    $reusable := false
+    result := c.heartbeat_at(-1, $&reusable) or (err) { << false }
     << result
 }
 
-fn (c Client) heartbeat_at(fd int, reusable &mut bool) bool {
+fn (c Client) heartbeat_at(fd int, reusable $&bool) bool {
     resp := c.request_at(fd, "GET", "/api/v1/heartbeat", "", reusable) or >>
     << resp.status_code == 200
 }
 
 pub fn (c Client) create_collection(name string) string {
-    mut reusable := false
-    << c.create_collection_at(-1, name, mut &reusable) or >>
+    $reusable := false
+    << c.create_collection_at(-1, name, $&reusable) or >>
 }
 
-fn (c Client) create_collection_at(fd int, name string, reusable &mut bool) string {
+fn (c Client) create_collection_at(fd int, name string, reusable $&bool) string {
     body := "{\"name\":\"" + name + "\"}"
     resp := c.request_at(fd, "POST", "/api/v1/collections", body, reusable) or >>
     if resp.status_code != 200 && resp.status_code != 201 {
@@ -166,8 +166,8 @@ fn (c Client) create_collection_at(fd int, name string, reusable &mut bool) stri
     }
     // Extract "id" from {"name":"...","id":"uuid",...}
     needle := "\"id\":\""
-    mut id_pos := -1
-    mut i := 0
+    $id_pos := -1
+    $i := 0
     while i + needle.len <= resp.body.len {
         if resp.body[i:(i + needle.len)] == needle {
             id_pos = i + needle.len
@@ -176,8 +176,8 @@ fn (c Client) create_collection_at(fd int, name string, reusable &mut bool) stri
         i = i + 1
     }
     if id_pos >= 0 {
-        mut end_pos := -1
-        mut j := id_pos
+        $end_pos := -1
+        $j := id_pos
         while j < resp.body.len {
             if (resp.body[j] & 255) == 34 { // quote
                 end_pos = j
@@ -193,13 +193,13 @@ fn (c Client) create_collection_at(fd int, name string, reusable &mut bool) stri
 }
 
 pub fn (c Client) add(col_id string, ids_json string, embeddings_json string, documents_json string) bool {
-    mut reusable := false
-    result := c.add_at(-1, col_id, ids_json, embeddings_json, documents_json, mut &reusable) or (err) { << false }
+    $reusable := false
+    result := c.add_at(-1, col_id, ids_json, embeddings_json, documents_json, $&reusable) or (err) { << false }
     << result
 }
 
-fn (c Client) add_at(fd int, col_id string, ids_json string, embeddings_json string, documents_json string, reusable &mut bool) bool {
-    mut body := "{\"ids\":" + ids_json + ",\"embeddings\":" + embeddings_json
+fn (c Client) add_at(fd int, col_id string, ids_json string, embeddings_json string, documents_json string, reusable $&bool) bool {
+    $body := "{\"ids\":" + ids_json + ",\"embeddings\":" + embeddings_json
     if documents_json.len > 0 {
         body = body + ",\"documents\":" + documents_json
     }
@@ -210,11 +210,11 @@ fn (c Client) add_at(fd int, col_id string, ids_json string, embeddings_json str
 }
 
 pub fn (c Client) query(col_id string, query_embeddings_json string, n_results int) string {
-    mut reusable := false
-    << c.query_at(-1, col_id, query_embeddings_json, n_results, mut &reusable) or >>
+    $reusable := false
+    << c.query_at(-1, col_id, query_embeddings_json, n_results, $&reusable) or >>
 }
 
-fn (c Client) query_at(fd int, col_id string, query_embeddings_json string, n_results int, reusable &mut bool) string {
+fn (c Client) query_at(fd int, col_id string, query_embeddings_json string, n_results int, reusable $&bool) string {
     body := "{\"query_embeddings\":" + query_embeddings_json + ",\"n_results\":" + str(n_results) + "}"
     path := "/api/v1/collections/" + col_id + "/query"
     resp := c.request_at(fd, "POST", path, body, reusable) or >>
@@ -225,12 +225,12 @@ fn (c Client) query_at(fd int, col_id string, query_embeddings_json string, n_re
 }
 
 pub fn (c Client) delete_collection(name string) bool {
-    mut reusable := false
-    result := c.delete_collection_at(-1, name, mut &reusable) or (err) { << false }
+    $reusable := false
+    result := c.delete_collection_at(-1, name, $&reusable) or (err) { << false }
     << result
 }
 
-fn (c Client) delete_collection_at(fd int, name string, reusable &mut bool) bool {
+fn (c Client) delete_collection_at(fd int, name string, reusable $&bool) bool {
     path := "/api/v1/collections/" + name
     resp := c.request_at(fd, "DELETE", path, "", reusable) or >>
     << resp.status_code == 200

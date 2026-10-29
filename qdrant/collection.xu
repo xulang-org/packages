@@ -2,13 +2,13 @@
 
 #errors
 
-pub fn (c &mut Client) create_collection(name string, vector_size int, distance string) bool {
-    mut reusable := false
-    << c.create_collection_at(-1, name, vector_size, distance, mut &reusable)
+pub fn (c $&Client) create_collection(name string, vector_size int, distance string) bool {
+    $reusable := false
+    << c.create_collection_at(-1, name, vector_size, distance, $&reusable)
 }
 
-fn (c &mut Client) create_collection_at(fd int, name string, vector_size int, distance string, reusable &mut bool) bool {
-    mut dist := distance
+fn (c $&Client) create_collection_at(fd int, name string, vector_size int, distance string, reusable $&bool) bool {
+    $dist := distance
     if dist.len == 0 {
         dist = "Cosine"
     }
@@ -19,24 +19,24 @@ fn (c &mut Client) create_collection_at(fd int, name string, vector_size int, di
     << resp.status_code == 200
 }
 
-pub fn (c &mut Client) collection_exists(name string) bool {
-    mut reusable := false
-    << c.collection_exists_at(-1, name, mut &reusable)
+pub fn (c $&Client) collection_exists(name string) bool {
+    $reusable := false
+    << c.collection_exists_at(-1, name, $&reusable)
 }
 
-fn (c &mut Client) collection_exists_at(fd int, name string, reusable &mut bool) bool {
+fn (c $&Client) collection_exists_at(fd int, name string, reusable $&bool) bool {
     resp := c.request_at(fd, "GET", "/collections/" + name, "", reusable) or (err) {
         << false
     }
     << resp.status_code == 200
 }
 
-pub fn (c &mut Client) delete_collection(name string) bool {
-    mut reusable := false
-    << c.delete_collection_at(-1, name, mut &reusable)
+pub fn (c $&Client) delete_collection(name string) bool {
+    $reusable := false
+    << c.delete_collection_at(-1, name, $&reusable)
 }
 
-fn (c &mut Client) delete_collection_at(fd int, name string, reusable &mut bool) bool {
+fn (c $&Client) delete_collection_at(fd int, name string, reusable $&bool) bool {
     resp := c.request_at(fd, "DELETE", "/collections/" + name, "", reusable) or (err) {
         << false
     }

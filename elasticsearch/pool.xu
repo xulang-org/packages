@@ -18,7 +18,7 @@ pub struct Pool {
 
 pub fn new_pool(endpoint string, max_idle int) Pool {
     c := new_client(endpoint + "")
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -69,9 +69,9 @@ pub fn (p &Pool) discard_conn(fd int) {
 pub fn (p &Pool) search(index string, query_dsl string) SearchResult {
     fd := p.get_conn()
     if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.search_at(fd, index, query_dsl, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.search_at(fd, index, query_dsl, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -82,9 +82,9 @@ pub fn (p &Pool) search(index string, query_dsl string) SearchResult {
 pub fn (p &Pool) search_match(index string, field string, query_text string) SearchResult {
     fd := p.get_conn()
     if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.search_match_at(fd, index, field, query_text, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.search_match_at(fd, index, field, query_text, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -94,15 +94,15 @@ pub fn (p &Pool) search_match(index string, field string, query_text string) Sea
 
 pub fn (p &Pool) get_doc(index string, id string) string {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.get_doc(index, id) or (err) { << "" }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.get_doc_at(fd, index, id, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.get_doc_at(fd, index, id, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -112,15 +112,15 @@ pub fn (p &Pool) get_doc(index string, id string) string {
 
 pub fn (p &Pool) index_doc(index string, id string, doc_json string) string {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.index_doc(index, id, doc_json) or (err) { << "" }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.index_doc_at(fd, index, id, doc_json, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.index_doc_at(fd, index, id, doc_json, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -130,15 +130,15 @@ pub fn (p &Pool) index_doc(index string, id string, doc_json string) string {
 
 pub fn (p &Pool) delete_doc(index string, id string) bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.delete_doc(index, id) or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
-    mut reusable := false
-    mut c := p.get()
-    result := c.delete_doc_at(fd, index, id, mut &reusable) or (err) {
+    $reusable := false
+    $c := p.get()
+    result := c.delete_doc_at(fd, index, id, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -148,15 +148,15 @@ pub fn (p &Pool) delete_doc(index string, id string) bool {
 
 pub fn (p &Pool) ping() bool {
     if p.secure {
-        mut c := p.get()
+        $c := p.get()
         result := c.ping() or (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    mut c := p.get()
-    result := c.ping_at(fd, mut &reusable)
+    $reusable := false
+    $c := p.get()
+    result := c.ping_at(fd, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }

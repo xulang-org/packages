@@ -12,7 +12,7 @@ pub struct SmtpPool {
 
 pub fn open_pool(endpoint string, max_idle int) SmtpPool {
     c := new_client(endpoint)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -70,7 +70,7 @@ pub fn (p &SmtpPool) send_mail(msg Message) bool {
 }
 
 pub fn (p &SmtpPool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

@@ -4,12 +4,12 @@
 #strings
 
 pub fn (c Client) publish_config(data_id string, group string, content string) bool {
-    mut reusable := false
-    << c.publish_config_at(-1, data_id, group, content, mut &reusable)
+    $reusable := false
+    << c.publish_config_at(-1, data_id, group, content, $&reusable)
 }
 
-fn (c Client) publish_config_at(fd int, data_id string, group string, content string, reusable &mut bool) bool {
-    mut g := group
+fn (c Client) publish_config_at(fd int, data_id string, group string, content string, reusable $&bool) bool {
+    $g := group
     if g.len == 0 {
         g = "DEFAULT_GROUP"
     }
@@ -22,12 +22,12 @@ fn (c Client) publish_config_at(fd int, data_id string, group string, content st
 }
 
 pub fn (c Client) get_config(data_id string, group string) string {
-    mut reusable := false
-    << c.get_config_at(-1, data_id, group, mut &reusable) or >>
+    $reusable := false
+    << c.get_config_at(-1, data_id, group, $&reusable) or >>
 }
 
-fn (c Client) get_config_at(fd int, data_id string, group string, reusable &mut bool) string {
-    mut g := group
+fn (c Client) get_config_at(fd int, data_id string, group string, reusable $&bool) string {
+    $g := group
     if g.len == 0 {
         g = "DEFAULT_GROUP"
     }
@@ -40,12 +40,12 @@ fn (c Client) get_config_at(fd int, data_id string, group string, reusable &mut 
 }
 
 pub fn (c Client) remove_config(data_id string, group string) bool {
-    mut reusable := false
-    << c.remove_config_at(-1, data_id, group, mut &reusable)
+    $reusable := false
+    << c.remove_config_at(-1, data_id, group, $&reusable)
 }
 
-fn (c Client) remove_config_at(fd int, data_id string, group string, reusable &mut bool) bool {
-    mut g := group
+fn (c Client) remove_config_at(fd int, data_id string, group string, reusable $&bool) bool {
+    $g := group
     if g.len == 0 {
         g = "DEFAULT_GROUP"
     }

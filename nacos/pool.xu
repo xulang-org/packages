@@ -13,7 +13,7 @@ pub struct Pool {
 
 pub fn new_pool(endpoint string, namespace string, max_idle int) Pool {
     cli := new_client(endpoint, namespace)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -70,8 +70,8 @@ pub fn (p &Pool) register_instance(service string, ip string, port int, group st
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    result := p.client.register_instance_at(fd, service, ip, port, group, mut &reusable)
+    $reusable := false
+    result := p.client.register_instance_at(fd, service, ip, port, group, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }
@@ -84,8 +84,8 @@ pub fn (p &Pool) get_instances(service string, group string) string {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.get_instances_at(fd, service, group, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.get_instances_at(fd, service, group, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -101,8 +101,8 @@ pub fn (p &Pool) deregister_instance(service string, ip string, port int, group 
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    result := p.client.deregister_instance_at(fd, service, ip, port, group, mut &reusable)
+    $reusable := false
+    result := p.client.deregister_instance_at(fd, service, ip, port, group, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }
@@ -115,8 +115,8 @@ pub fn (p &Pool) publish_config(data_id string, group string, content string) bo
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    result := p.client.publish_config_at(fd, data_id, group, content, mut &reusable)
+    $reusable := false
+    result := p.client.publish_config_at(fd, data_id, group, content, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }
@@ -129,8 +129,8 @@ pub fn (p &Pool) get_config(data_id string, group string) string {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.get_config_at(fd, data_id, group, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.get_config_at(fd, data_id, group, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -146,8 +146,8 @@ pub fn (p &Pool) remove_config(data_id string, group string) bool {
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    result := p.client.remove_config_at(fd, data_id, group, mut &reusable)
+    $reusable := false
+    result := p.client.remove_config_at(fd, data_id, group, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }

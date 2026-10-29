@@ -21,19 +21,19 @@ pub fn new_pool(endpoint string, max_idle int) Pool {
         ep := transport.parse_endpoint(endpoint, 9091) or (err) {
             << Pool{host: "127.0.0.1", port: 9091, secure: true, state: pool.new_state(), max_idle: max_idle}
         }
-        mut cap_val0 := max_idle
+        $cap_val0 := max_idle
         if cap_val0 <= 0 { cap_val0 = 10 }
         << Pool{host: ep.host, port: ep.port, secure: true, state: pool.new_state(), max_idle: cap_val0}
     }
-    mut ep := endpoint
+    $ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 9091
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 9091
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -51,7 +51,7 @@ pub fn new_pool(endpoint string, max_idle int) Pool {
         }
     }
 
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -105,9 +105,9 @@ pub fn (p &Pool) push_metrics(job string, metrics_text string) bool {
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
+    $reusable := false
     pusher := Pusher{host: strings.clone(&p.host), port: p.port, secure: p.secure, job: job}
-    result := pusher.push_on_fd(fd, metrics_text, mut &reusable)
+    result := pusher.push_on_fd(fd, metrics_text, $&reusable)
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
 }

@@ -14,7 +14,7 @@ AMQP 0-9-1 compliant native protocol driver and high-performance connection pool
 rabbitmq #github.com/xulang-org/packages/rabbitmq
 
 fn main() {
-    mut client := rabbitmq.open("127.0.0.1", 5672, "guest", "guest", "/") or (err) {
+    $client := rabbitmq.open("127.0.0.1", 5672, "guest", "guest", "/") or (err) {
         println("Connect failed: " + err.msg())
         <<
     }

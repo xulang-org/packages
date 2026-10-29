@@ -36,7 +36,7 @@ pub fn compute_auth_header(
     date_stamp string,
     payload_hash string
 ) string {
-    mut uri := path
+    $uri := path
     if uri.len == 0 || (uri[0] & 255) != 47 {
         uri = "/" + uri
     }

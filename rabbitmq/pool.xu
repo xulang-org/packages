@@ -18,27 +18,27 @@ pub struct Pool {
 }
 
 pub fn new_pool(host string, port int, user string, password string, vhost string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
-    mut h := host
+    $h := host
     if h.len == 0 {
         h = "127.0.0.1"
     }
-    mut p := port
+    $p := port
     if p <= 0 {
         p = 5672
     }
-    mut u := user
+    $u := user
     if u.len == 0 {
         u = "guest"
     }
-    mut pwd := password
+    $pwd := password
     if pwd.len == 0 {
         pwd = "guest"
     }
-    mut vh := vhost
+    $vh := vhost
     if vh.len == 0 {
         vh = "/"
     }
@@ -74,16 +74,16 @@ pub fn (p &Pool) get() Client {
             }
         }
         else {
-            mut c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
+            $c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
             << c
         }
     }
-    mut c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
+    $c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
     << c
 }
 
 pub fn (p &Pool) get_conn() int {
-    mut c := p.get() or (err) {
+    $c := p.get() or (err) {
         << -1
     }
     << c.fd
@@ -108,7 +108,7 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) declare_queue(queue_name string, durable bool) int {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.declare_queue(queue_name, durable) or (err) {
         p.put_conn(fd)
@@ -119,7 +119,7 @@ pub fn (p &Pool) declare_queue(queue_name string, durable bool) int {
 }
 
 pub fn (p &Pool) publish(exchange_name string, routing_key string, body string) int {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.publish(exchange_name, routing_key, body) or (err) {
         p.put_conn(fd)
@@ -130,10 +130,10 @@ pub fn (p &Pool) publish(exchange_name string, routing_key string, body string) 
 }
 
 pub fn (p &Pool) get_message(queue_name string, auto_ack bool) string {
-    mut attempts := 0
+    $attempts := 0
     while attempts < 5 {
         attempts = attempts + 1
-        mut c := p.get() or >>
+        $c := p.get() or >>
         fd := c.fd
         res := c.get(queue_name, auto_ack) or (err) {
             p.put_conn(fd)
@@ -151,7 +151,7 @@ pub fn (p &Pool) get_message(queue_name string, auto_ack bool) string {
 }
 
 pub fn (p &Pool) ping() bool {
-    mut c := p.get() or (err) {
+    $c := p.get() or (err) {
         << false
     }
     fd := c.fd
@@ -161,7 +161,7 @@ pub fn (p &Pool) ping() bool {
 }
 
 pub fn (p &Pool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

@@ -50,7 +50,7 @@ pub fn decode_u32(b1 int, b2 int, b3 int, b4 int) int {
 }
 
 pub fn build_frame(opcode int, stream int, body string) string {
-    mut hdr := string_from_byte(PROTO_REQ_V4)
+    $hdr := string_from_byte(PROTO_REQ_V4)
     hdr = hdr + string_from_byte(0) // flags = 0
     hdr = hdr + encode_u16(stream)
     hdr = hdr + string_from_byte(opcode)
@@ -61,7 +61,7 @@ pub fn build_frame(opcode int, stream int, body string) string {
 pub fn build_startup_frame() string {
     // String map: 1 pair
     // "CQL_VERSION" -> "3.0.0"
-    mut body := encode_u16(1) // count = 1
+    $body := encode_u16(1) // count = 1
     key := "CQL_VERSION"
     body = body + encode_u16(key.len) + key
     val := "3.0.0"
@@ -73,7 +73,7 @@ pub fn build_query_frame(cql string, stream int) string {
     // [long string] query: [u32 len] + cql
     // [consistency]: [u16] 1 (ONE)
     // [flags]: [u8] 0
-    mut body := encode_u32(cql.len) + cql
+    $body := encode_u32(cql.len) + cql
     body = body + encode_u16(1) // Consistency ONE
     body = body + string_from_byte(0) // Flags 0
     << build_frame(OPCODE_QUERY, stream, body)

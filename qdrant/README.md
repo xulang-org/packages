@@ -15,7 +15,7 @@ Native client and connection pool for Qdrant Vector Search Engine, designed for 
 qdrant #github.com/xulang-org/packages/qdrant
 
 fn main() int {
-    mut client := qdrant.open("http://127.0.0.1:6333")
+    $client := qdrant.open("http://127.0.0.1:6333")
     
     // Create collection for 4-dimensional embeddings
     if !client.create_collection("products", 4, "Cosine") {

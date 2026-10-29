@@ -4,16 +4,16 @@
 #strings
 
 pub fn (c Client) register_instance(service string, ip string, port int, group string) bool {
-    mut reusable := false
-    << c.register_instance_at(-1, service, ip, port, group, mut &reusable)
+    $reusable := false
+    << c.register_instance_at(-1, service, ip, port, group, $&reusable)
 }
 
-fn (c Client) register_instance_at(fd int, service string, ip string, port int, group string, reusable &mut bool) bool {
-    mut g := group
+fn (c Client) register_instance_at(fd int, service string, ip string, port int, group string, reusable $&bool) bool {
+    $g := group
     if g.len == 0 {
         g = "DEFAULT_GROUP"
     }
-    mut path := "/nacos/v1/ns/instance?serviceName=" + service
+    $path := "/nacos/v1/ns/instance?serviceName=" + service
     path = path + "&ip=" + ip
     path = path + "&port=" + str(port)
     path = path + "&groupName=" + g
@@ -25,12 +25,12 @@ fn (c Client) register_instance_at(fd int, service string, ip string, port int, 
 }
 
 pub fn (c Client) get_instances(service string, group string) string {
-    mut reusable := false
-    << c.get_instances_at(-1, service, group, mut &reusable) or >>
+    $reusable := false
+    << c.get_instances_at(-1, service, group, $&reusable) or >>
 }
 
-fn (c Client) get_instances_at(fd int, service string, group string, reusable &mut bool) string {
-    mut g := group
+fn (c Client) get_instances_at(fd int, service string, group string, reusable $&bool) string {
+    $g := group
     if g.len == 0 {
         g = "DEFAULT_GROUP"
     }
@@ -43,12 +43,12 @@ fn (c Client) get_instances_at(fd int, service string, group string, reusable &m
 }
 
 pub fn (c Client) deregister_instance(service string, ip string, port int, group string) bool {
-    mut reusable := false
-    << c.deregister_instance_at(-1, service, ip, port, group, mut &reusable)
+    $reusable := false
+    << c.deregister_instance_at(-1, service, ip, port, group, $&reusable)
 }
 
-fn (c Client) deregister_instance_at(fd int, service string, ip string, port int, group string, reusable &mut bool) bool {
-    mut g := group
+fn (c Client) deregister_instance_at(fd int, service string, ip string, port int, group string, reusable $&bool) bool {
+    $g := group
     if g.len == 0 {
         g = "DEFAULT_GROUP"
     }

@@ -15,7 +15,7 @@ Xu 语言原生 WebSocket 客户端驱动包，严格遵循 RFC 6455 规范。
 ```xu
 websocket #github.com/xulang-org/packages/websocket
 
-mut p := websocket.pool("ws://127.0.0.1:8080/ws", 5)
+$p := websocket.pool("ws://127.0.0.1:8080/ws", 5)
 
 // 借还连接并发送文本消息
 echoed := p.echo_text("Hello WebSocket!") or panic

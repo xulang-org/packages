@@ -17,7 +17,7 @@
 kafka #github.com/xulang-org/packages/kafka
 
 fn main() {
-    mut client := kafka.open("127.0.0.1:9092") or (err) {
+    $client := kafka.open("127.0.0.1:9092") or (err) {
         println("Connect failed: " + err.msg())
         <<
     }
@@ -55,7 +55,7 @@ fn main() {
     pool := kafka.open_pool_client("127.0.0.1:9092", "my-app", 5)
 
     // 从连接池获取客户端实例
-    mut client := pool.get() or (err) {
+    $client := pool.get() or (err) {
         println("Pool get failed: " + err.msg())
         <<
     }

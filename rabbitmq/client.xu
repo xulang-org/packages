@@ -29,8 +29,8 @@ fn safe_close(fd int) {
     }
 }
 
-pub fn (c &mut Client) write_exact(data string) int {
-    mut off := 0
+pub fn (c $&Client) write_exact(data string) int {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) or (err) {
@@ -44,8 +44,8 @@ pub fn (c &mut Client) write_exact(data string) int {
     << 0
 }
 
-pub fn (c &mut Client) read_exact(n int) string {
-    mut res := ""
+pub fn (c $&Client) read_exact(n int) string {
+    $res := ""
     while res.len < n {
         chunk := net.conn_read(c.fd, n - res.len) or (err) {
             >> errors.new("rabbitmq: read failed: " + err.msg())
@@ -58,19 +58,19 @@ pub fn (c &mut Client) read_exact(n int) string {
     << res
 }
 
-pub fn (c &mut Client) send_frame(frame_type int, channel int, payload string) int {
+pub fn (c $&Client) send_frame(frame_type int, channel int, payload string) int {
     f := build_frame(frame_type, channel, payload)
     << c.write_exact(f)
 }
 
-pub fn (c &mut Client) read_frame() Frame {
+pub fn (c $&Client) read_frame() Frame {
     // Read 7-byte header: type (1B), channel (2B), payload_size (4B)
     hdr := c.read_exact(7) or >>
     frame_type := decode_i8(hdr + "", 0)
     channel := decode_i16(hdr + "", 1)
     size := decode_i32(hdr + "", 3)
 
-    mut payload := ""
+    $payload := ""
     if size > 0 {
         payload = c.read_exact(size) or >>
     }
@@ -85,23 +85,23 @@ pub fn (c &mut Client) read_frame() Frame {
 }
 
 pub fn connect(host string, port int, user string, password string, vhost string) Client {
-    mut h := host
+    $h := host
     if h.len == 0 {
         h = "127.0.0.1"
     }
-    mut p := port
+    $p := port
     if p <= 0 {
         p = 5672
     }
-    mut u := user
+    $u := user
     if u.len == 0 {
         u = "guest"
     }
-    mut pwd := password
+    $pwd := password
     if pwd.len == 0 {
         pwd = "guest"
     }
-    mut vh := vhost
+    $vh := vhost
     if vh.len == 0 {
         vh = "/"
     }
@@ -111,7 +111,7 @@ pub fn connect(host string, port int, user string, password string, vhost string
         >> errors.new("rabbitmq: dial failed: " + err.msg())
     }
 
-    mut client := Client{
+    $client := Client{
         fd: fd,
         host: h,
         port: p,
@@ -122,7 +122,7 @@ pub fn connect(host string, port int, user string, password string, vhost string
     }
 
     // 1. Send Protocol Header: 'A', 'M', 'Q', 'P', 0, 0, 9, 1
-    mut proto_hdr := ""
+    $proto_hdr := ""
     proto_hdr.push_byte(65) // 'A'
     proto_hdr.push_byte(77) // 'M'
     proto_hdr.push_byte(81) // 'Q'
@@ -154,13 +154,13 @@ pub fn connect(host string, port int, user string, password string, vhost string
 
     // 3. Send Connection.Start-Ok (Class 10, Method 11)
     // Response format: \0username\0password
-    mut plain_resp := ""
+    $plain_resp := ""
     plain_resp.push_byte(0)
     plain_resp = plain_resp + client.user + ""
     plain_resp.push_byte(0)
     plain_resp = plain_resp + client.password + ""
 
-    mut start_ok_args := encode_empty_table() // client_properties
+    $start_ok_args := encode_empty_table() // client_properties
     start_ok_args = start_ok_args + encode_shortstr("PLAIN") // mechanism
     start_ok_args = start_ok_args + encode_longstr(plain_resp) // response
     start_ok_args = start_ok_args + encode_shortstr("en_US") // locale
@@ -185,7 +185,7 @@ pub fn connect(host string, port int, user string, password string, vhost string
     heartbeat := decode_i16(f2.payload + "", 10)
 
     // 5. Send Connection.Tune-Ok (Class 10, Method 31)
-    mut tune_ok_args := encode_i16(channel_max)
+    $tune_ok_args := encode_i16(channel_max)
     tune_ok_args = tune_ok_args + encode_i32(frame_max)
     tune_ok_args = tune_ok_args + encode_i16(heartbeat)
     tune_ok_payload := build_method_payload(CLASS_CONNECTION, 31, tune_ok_args)
@@ -195,7 +195,7 @@ pub fn connect(host string, port int, user string, password string, vhost string
     }
 
     // 6. Send Connection.Open (Class 10, Method 40)
-    mut open_args := encode_shortstr(client.vhost + "")
+    $open_args := encode_shortstr(client.vhost + "")
     open_args = open_args + encode_shortstr("") // reserved-1
     open_args = open_args + encode_i8(0) // reserved-2 / flags
     open_payload := build_method_payload(CLASS_CONNECTION, 40, open_args)
@@ -235,12 +235,12 @@ pub fn connect(host string, port int, user string, password string, vhost string
     << client
 }
 
-pub fn (c &mut Client) declare_queue(queue_name string, durable bool) int {
-    mut args := encode_i16(0) // ticket / reserved-1
+pub fn (c $&Client) declare_queue(queue_name string, durable bool) int {
+    $args := encode_i16(0) // ticket / reserved-1
     args = args + encode_shortstr(queue_name)
 
     // bitmask: passive=1, durable=2, exclusive=4, auto_delete=8, nowait=16
-    mut flags := 0
+    $flags := 0
     if durable {
         flags = flags | 2
     }
@@ -269,12 +269,12 @@ pub fn (c &mut Client) declare_queue(queue_name string, durable bool) int {
     << 0
 }
 
-pub fn (c &mut Client) declare_exchange(exchange_name string, exchange_type string, durable bool) int {
-    mut args := encode_i16(0) // ticket / reserved-1
+pub fn (c $&Client) declare_exchange(exchange_name string, exchange_type string, durable bool) int {
+    $args := encode_i16(0) // ticket / reserved-1
     args = args + encode_shortstr(exchange_name)
     args = args + encode_shortstr(exchange_type)
 
-    mut flags := 0
+    $flags := 0
     if durable {
         flags = flags | 2
     }
@@ -291,8 +291,8 @@ pub fn (c &mut Client) declare_exchange(exchange_name string, exchange_type stri
     << 0
 }
 
-pub fn (c &mut Client) bind_queue(queue_name string, exchange_name string, routing_key string) int {
-    mut args := encode_i16(0) // ticket / reserved-1
+pub fn (c $&Client) bind_queue(queue_name string, exchange_name string, routing_key string) int {
+    $args := encode_i16(0) // ticket / reserved-1
     args = args + encode_shortstr(queue_name)
     args = args + encode_shortstr(exchange_name)
     args = args + encode_shortstr(routing_key)
@@ -309,9 +309,9 @@ pub fn (c &mut Client) bind_queue(queue_name string, exchange_name string, routi
     << 0
 }
 
-pub fn (c &mut Client) publish(exchange_name string, routing_key string, message_body string) int {
+pub fn (c $&Client) publish(exchange_name string, routing_key string, message_body string) int {
     // 1. Method Frame: Basic.Publish (Class 60, Method 40)
-    mut pub_args := encode_i16(0) // ticket
+    $pub_args := encode_i16(0) // ticket
     pub_args = pub_args + encode_shortstr(exchange_name)
     pub_args = pub_args + encode_shortstr(routing_key)
     pub_args = pub_args + encode_i8(0) // mandatory=0, immediate=0
@@ -319,7 +319,7 @@ pub fn (c &mut Client) publish(exchange_name string, routing_key string, message
     c.send_frame(FRAME_METHOD, c.channel_id, pub_payload) or >>
 
     // 2. Header Frame: Content Header
-    mut hdr_payload := encode_i16(CLASS_BASIC)
+    $hdr_payload := encode_i16(CLASS_BASIC)
     hdr_payload = hdr_payload + encode_i16(0) // weight = 0
     hdr_payload = hdr_payload + encode_i64(message_body.len) // body size
     hdr_payload = hdr_payload + encode_i16(0) // property flags = 0
@@ -332,11 +332,11 @@ pub fn (c &mut Client) publish(exchange_name string, routing_key string, message
     << 0
 }
 
-pub fn (c &mut Client) get(queue_name string, auto_ack bool) string {
+pub fn (c $&Client) get(queue_name string, auto_ack bool) string {
     // Method Frame: Basic.Get (Class 60, Method 70)
-    mut get_args := encode_i16(0) // ticket
+    $get_args := encode_i16(0) // ticket
     get_args = get_args + encode_shortstr(queue_name)
-    mut ack_flag := 0
+    $ack_flag := 0
     if auto_ack {
         ack_flag = 1
     }
@@ -365,7 +365,7 @@ pub fn (c &mut Client) get(queue_name string, auto_ack bool) string {
     body_size := decode_i64(hdr_frame.payload + "", 4)
 
     // Read Content Body Frame(s)
-    mut total_body := ""
+    $total_body := ""
     while total_body.len < body_size {
         body_frame := c.read_frame() or >>
         if body_frame.frame_type != FRAME_BODY {
@@ -376,17 +376,17 @@ pub fn (c &mut Client) get(queue_name string, auto_ack bool) string {
     << total_body
 }
 
-pub fn (c &mut Client) ping() bool {
+pub fn (c $&Client) ping() bool {
     res := c.declare_queue("xu_ping_queue", true) or (err) {
         << false
     }
     << true
 }
 
-pub fn (c &mut Client) close() {
+pub fn (c $&Client) close() {
     if c.fd >= 0 {
         // Close Channel (Class 20, Method 40)
-        mut ch_close_args := encode_i16(200) // reply-code = 200 (OK)
+        $ch_close_args := encode_i16(200) // reply-code = 200 (OK)
         ch_close_args = ch_close_args + encode_shortstr("Normal shutdown")
         ch_close_args = ch_close_args + encode_i16(0) // class-id
         ch_close_args = ch_close_args + encode_i16(0) // method-id
@@ -405,7 +405,7 @@ pub fn (c &mut Client) close() {
         }
 
         // Close Connection (Class 10, Method 50)
-        mut conn_close_args := encode_i16(200)
+        $conn_close_args := encode_i16(200)
         conn_close_args = conn_close_args + encode_shortstr("Normal shutdown")
         conn_close_args = conn_close_args + encode_i16(0)
         conn_close_args = conn_close_args + encode_i16(0)

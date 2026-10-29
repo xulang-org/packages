@@ -14,14 +14,14 @@ pub struct Pool {
 }
 
 pub fn new_pool(addr string, id_prefix string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
     ch := chan int{cap: cap_val}
     seq_ch := chan int{cap: 1}
     seq_ch <- 1
-    mut prefix := id_prefix
+    $prefix := id_prefix
     if prefix.len == 0 {
         prefix = "xu_mqtt_pool"
     }
@@ -35,7 +35,7 @@ pub fn new_pool(addr string, id_prefix string, max_idle int) Pool {
 }
 
 fn (p &Pool) next_client_id() string {
-    mut id_num := 1
+    $id_num := 1
     select {
         cur := <-p.seq {
             id_num = cur
@@ -63,12 +63,12 @@ pub fn (p &Pool) get() Client {
         }
         else {
             cid := p.next_client_id()
-            mut c := connect(p.addr + "", cid) or >>
+            $c := connect(p.addr + "", cid) or >>
             << c
         }
     }
     cid := p.next_client_id()
-    mut c := connect(p.addr + "", cid) or >>
+    $c := connect(p.addr + "", cid) or >>
     << c
 }
 
@@ -91,7 +91,7 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) publish(topic string, payload string, qos int) int {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.publish(topic + "", payload + "", qos) or (err) {
         p.put_conn(fd)
@@ -102,7 +102,7 @@ pub fn (p &Pool) publish(topic string, payload string, qos int) int {
 }
 
 pub fn (p &Pool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

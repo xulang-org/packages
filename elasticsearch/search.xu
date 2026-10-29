@@ -16,14 +16,14 @@ pub struct SearchResult {
     pub hits []SearchHit
 }
 
-pub fn (c &mut Client) search(index string, query_dsl string) SearchResult {
-    mut reusable := false
-    << c.search_at(-1, index, query_dsl, mut &reusable) or >>
+pub fn (c $&Client) search(index string, query_dsl string) SearchResult {
+    $reusable := false
+    << c.search_at(-1, index, query_dsl, $&reusable) or >>
 }
 
-fn (c &mut Client) search_at(fd int, index string, query_dsl string, reusable &mut bool) SearchResult {
+fn (c $&Client) search_at(fd int, index string, query_dsl string, reusable $&bool) SearchResult {
     path := "/" + index + "/_search"
-    mut body := query_dsl
+    $body := query_dsl
     if body.len == 0 {
         body = "{\"query\":{\"match_all\":{}}}"
     }
@@ -38,9 +38,9 @@ fn (c &mut Client) search_at(fd int, index string, query_dsl string, reusable &m
     if !d.ok() { >> errors.new("elasticsearch: invalid JSON: " + d.error()) }
     envelope := d.get(d.root(), "hits")
     if envelope < 0 || !d.is_dict(envelope) { >> errors.new("elasticsearch: missing hits object") }
-    mut total := d.get(envelope, "total")
+    $total := d.get(envelope, "total")
     if total >= 0 && d.is_dict(total) { total = d.get(total, "value") }
-    mut total_val := -1
+    $total_val := -1
     if total >= 0 {
         if !d.is_number(total) { >> errors.new("elasticsearch: invalid total") }
         text := d.text(total)
@@ -48,7 +48,7 @@ fn (c &mut Client) search_at(fd int, index string, query_dsl string, reusable &m
     }
     nodes := d.get(envelope, "hits")
     if nodes < 0 || !d.is_list(nodes) { >> errors.new("elasticsearch: missing hits array") }
-    mut hits_arr := []SearchHit{}
+    $hits_arr := []SearchHit{}
     for i in 0:d.count(nodes) {
         hit := d.at(nodes, i)
         if !d.is_dict(hit) { >> errors.new("elasticsearch: invalid hit") }
@@ -56,25 +56,25 @@ fn (c &mut Client) search_at(fd int, index string, query_dsl string, reusable &m
         if id < 0 { >> errors.new("elasticsearch: missing hit id") }
         hit_id := d.as_string(id) or >>
         score := d.get(hit, "_score")
-        mut hit_score := "null"
+        $hit_score := "null"
         if score >= 0 && !d.is_null(score) {
             if !d.is_number(score) { >> errors.new("elasticsearch: invalid hit score") }
             hit_score = d.text(score)
         }
         source := d.get(hit, "_source")
-        mut hit_src := ""
+        $hit_src := ""
         if source >= 0 { hit_src = d.encode(source) or >> }
         hits_arr.push(SearchHit{id: hit_id, score: hit_score, source: hit_src})
     }
     << SearchResult{total: total_val, raw_json: raw, hits: hits_arr}
 }
 
-pub fn (c &mut Client) search_match(index string, field string, query_text string) SearchResult {
-    mut reusable := false
-    << c.search_match_at(-1, index, field, query_text, mut &reusable) or >>
+pub fn (c $&Client) search_match(index string, field string, query_text string) SearchResult {
+    $reusable := false
+    << c.search_match_at(-1, index, field, query_text, $&reusable) or >>
 }
 
-fn (c &mut Client) search_match_at(fd int, index string, field string, query_text string, reusable &mut bool) SearchResult {
+fn (c $&Client) search_match_at(fd int, index string, field string, query_text string, reusable $&bool) SearchResult {
     dsl := "{\"query\":{\"match\":{" + json.quote(&field) + ":" + json.quote(&query_text) + "}}}"
     << c.search_at(fd, index, dsl, reusable) or >>
 }

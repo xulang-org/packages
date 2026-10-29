@@ -31,7 +31,7 @@ mysql #github.com/xulang-org/packages/mysql
 
 fn main() int {
     dsn := "root:123456@tcp(127.0.0.1:3306)/my_db"
-    mut db := sql.open(mysql.driver(), dsn)
+    $db := sql.open(mysql.driver(), dsn)
     db.ping() or (err) {
         println("Ping failed: " + err.msg())
         << 1
@@ -42,7 +42,7 @@ fn main() int {
         << 1
     }
 
-    mut rows := db.query("SELECT id, name FROM users WHERE age >= ?", 18) or (err) {
+    $rows := db.query("SELECT id, name FROM users WHERE age >= ?", 18) or (err) {
         println(err.msg())
         << 1
     }

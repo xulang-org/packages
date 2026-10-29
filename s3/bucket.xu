@@ -2,12 +2,12 @@
 
 #errors
 
-pub fn (c &mut Client) make_bucket(bucket string) int {
-    mut reusable := false
-    << c.make_bucket_at(-1, bucket, mut &reusable) or >>
+pub fn (c $&Client) make_bucket(bucket string) int {
+    $reusable := false
+    << c.make_bucket_at(-1, bucket, $&reusable) or >>
 }
 
-fn (c &mut Client) make_bucket_at(fd int, bucket string, reusable &mut bool) int {
+fn (c $&Client) make_bucket_at(fd int, bucket string, reusable $&bool) int {
     resp := c.request_at(fd, "PUT", "/" + bucket, "", "application/xml", reusable) or >>
     if resp.status_code != 200 && resp.status_code != 204 {
         >> errors.new("s3: make_bucket failed with status " + str(resp.status_code) + ": " + resp.body)
@@ -15,24 +15,24 @@ fn (c &mut Client) make_bucket_at(fd int, bucket string, reusable &mut bool) int
     << 0
 }
 
-pub fn (c &mut Client) bucket_exists(bucket string) bool {
-    mut reusable := false
-    << c.bucket_exists_at(-1, bucket, mut &reusable)
+pub fn (c $&Client) bucket_exists(bucket string) bool {
+    $reusable := false
+    << c.bucket_exists_at(-1, bucket, $&reusable)
 }
 
-fn (c &mut Client) bucket_exists_at(fd int, bucket string, reusable &mut bool) bool {
+fn (c $&Client) bucket_exists_at(fd int, bucket string, reusable $&bool) bool {
     resp := c.request_at(fd, "HEAD", "/" + bucket, "", "", reusable) or (err) {
         << false
     }
     << resp.status_code == 200
 }
 
-pub fn (c &mut Client) remove_bucket(bucket string) int {
-    mut reusable := false
-    << c.remove_bucket_at(-1, bucket, mut &reusable) or >>
+pub fn (c $&Client) remove_bucket(bucket string) int {
+    $reusable := false
+    << c.remove_bucket_at(-1, bucket, $&reusable) or >>
 }
 
-fn (c &mut Client) remove_bucket_at(fd int, bucket string, reusable &mut bool) int {
+fn (c $&Client) remove_bucket_at(fd int, bucket string, reusable $&bool) int {
     resp := c.request_at(fd, "DELETE", "/" + bucket, "", "", reusable) or >>
     if resp.status_code != 200 && resp.status_code != 204 {
         >> errors.new("s3: remove_bucket failed with status " + str(resp.status_code) + ": " + resp.body)

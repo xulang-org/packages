@@ -23,12 +23,12 @@ pub fn new_config() Config {
 }
 
 fn unescape_part(s string) string {
-    mut out := ""
-    mut i := 0
+    $out := ""
+    $i := 0
     while i < s.len {
         if (s[i] & 255) == 37 && i + 2 < s.len {
-            mut hi := s[i + 1] & 255
-            mut lo := s[i + 2] & 255
+            $hi := s[i + 1] & 255
+            $lo := s[i + 2] & 255
             if hi >= 97 && hi <= 102 { hi = hi - 87 }
             else if hi >= 65 && hi <= 70 { hi = hi - 55 }
             else if hi >= 48 && hi <= 57 { hi = hi - 48 }
@@ -55,7 +55,7 @@ fn unescape_part(s string) string {
     << out
 }
 
-fn set_option(c &mut Config, key string, value string) {
+fn set_option(c $&Config, key string, value string) {
     k := strings.to_lower(&key)
     v := unescape_part(value)
     if k == "host" { c.host = v }
@@ -73,20 +73,20 @@ fn parse_port_or_default(v string) int {
 }
 
 fn parse_url_dsn(dsn string) Config {
-    mut c := empty_config()
-    mut start := 0
+    $c := empty_config()
+    $start := 0
     if strings.has_prefix(&dsn, "mysql://") { start = 8 }
     else if strings.has_prefix(&dsn, "mariadb://") { start = 10 }
     else { >> errors.new("mysql: unsupported DSN scheme") }
-    mut end := dsn.len
+    $end := dsn.len
     qpos := strings.index_byte(&dsn, 63)
     if qpos >= 0 { end = qpos }
     tail := dsn[start:end]
     slash := strings.index_byte(&tail, 47)
-    mut authority := strings.clone(&tail)
+    $authority := strings.clone(&tail)
     if slash >= 0 { authority = tail[0:slash] }
     at := strings.last_index_byte(&authority, 64)
-    mut hostport := strings.clone(&authority)
+    $hostport := strings.clone(&authority)
     if at >= 0 {
         ui := authority[0:at]
         colon := strings.last_index_byte(&ui, 58)
@@ -119,16 +119,16 @@ fn parse_url_dsn(dsn string) Config {
         for i in 0:pairs.len {
             p := pairs[i]
             eq := strings.index_byte(&p, 61)
-            if eq >= 0 { set_option(mut &c, p[0:eq], p[eq + 1:p.len]) }
+            if eq >= 0 { set_option($&c, p[0:eq], p[eq + 1:p.len]) }
         }
     }
     << c
 }
 
 fn parse_tcp_dsn(dsn string) Config {
-    mut c := empty_config()
+    $c := empty_config()
     at := strings.index_byte(&dsn, 64)
-    mut tail := strings.clone(&dsn)
+    $tail := strings.clone(&dsn)
     if at >= 0 {
         ui := dsn[0:at]
         colon := strings.index_byte(&ui, 58)
@@ -162,7 +162,7 @@ fn parse_tcp_dsn(dsn string) Config {
         for i in 0:pairs.len {
             p := pairs[i]
             eq := strings.index_byte(&p, 61)
-            if eq >= 0 { set_option(mut &c, p[0:eq], p[eq + 1:p.len]) }
+            if eq >= 0 { set_option($&c, p[0:eq], p[eq + 1:p.len]) }
         }
     }
     << c
@@ -170,7 +170,7 @@ fn parse_tcp_dsn(dsn string) Config {
 
 pub fn parse_dsn(dsn string) Config {
     if dsn.len == 0 { >> errors.new("mysql: empty DSN") }
-    mut c := empty_config()
+    $c := empty_config()
     if strings.has_prefix(&dsn, "mysql://") || strings.has_prefix(&dsn, "mariadb://") {
         c = parse_url_dsn(dsn)
     } else {

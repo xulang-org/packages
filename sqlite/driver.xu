@@ -46,7 +46,7 @@ fn put_st(c &SqliteConn, s SqliteState) {
 // ===== driver.Driver / Connector =====
 
 fn (d SqliteDriver) open(name string) driver.Conn {
-    mut p := strings.clone(&name)
+    $p := strings.clone(&name)
     if p.len == 0 {
         p = ":memory:"
     }
@@ -79,38 +79,38 @@ fn state_error(st &SqliteState) string {
 }
 
 fn (c SqliteConn) ping() string {
-    mut st := take_st(&c)
-    mut e := state_error(&st)
-    if e.len == 0 { e = session_command(mut &st, "SELECT 1") }
+    $st := take_st(&c)
+    $e := state_error(&st)
+    if e.len == 0 { e = session_command($&st, "SELECT 1") }
     put_st(&c, st)
     << e
 }
 
 fn (c SqliteConn) exec(query string, args []driver.NamedValue) driver.ExecResult {
-    mut st := take_st(&c)
+    $st := take_st(&c)
     e := state_error(&st)
     if e.len > 0 { put_st(&c, st)
         << driver.exec_err(e) }
-    reply := session_reply_safe(mut &st, query, &args)
+    reply := session_reply_safe($&st, query, &args)
     result := parse_exec_reply(&reply)
     put_st(&c, st)
     << result
 }
 
 fn (c SqliteConn) query(query string, args []driver.NamedValue) driver.RowsResult {
-    mut st := take_st(&c)
+    $st := take_st(&c)
     e := state_error(&st)
     if e.len > 0 { put_st(&c, st)
         << driver.rows_err(e) }
-    reply := session_reply_safe(mut &st, query, &args)
+    reply := session_reply_safe($&st, query, &args)
     result := parse_rows_reply(&reply)
     put_st(&c, st)
     << result
 }
 
 fn (c SqliteConn) close() string {
-    mut st := take_st(&c)
-    e := stop_session(mut &st)
+    $st := take_st(&c)
+    e := stop_session($&st)
     put_st(&c, st)
     << e
 }
@@ -133,23 +133,23 @@ fn (c SqliteConn) begin() driver.Tx {
 }
 
 fn (c SqliteConn) begin_tx(level int, read_only bool) driver.Tx {
-    mut st := take_st(&c)
+    $st := take_st(&c)
     if st.tx != 0 { put_st(&c, st)
         << driver.Tx(SqliteTx{st: c.st, id: -1, err: "sqlite: transaction already active"}) }
     st.tx_seq += 1
     id := st.tx_seq
-    mut e := state_error(&st)
+    $e := state_error(&st)
     if e.len == 0 && level != 0 && level != 6 { e = "sqlite: unsupported isolation level" }
     if e.len == 0 && read_only {
-        e = session_command(mut &st, "PRAGMA query_only=ON")
+        e = session_command($&st, "PRAGMA query_only=ON")
         if e.len == 0 { st.read_only = true }
     }
-    if e.len == 0 { e = session_command(mut &st, "BEGIN") }
+    if e.len == 0 { e = session_command($&st, "BEGIN") }
     if e.len == 0 { st.tx = id
         st.read_only = read_only }
     else {
         if st.read_only {
-            cleanup := session_command(mut &st, "PRAGMA query_only=OFF")
+            cleanup := session_command($&st, "PRAGMA query_only=OFF")
             if cleanup.len == 0 { st.read_only = false }
         }
         st.tx_err = e + ""
@@ -160,17 +160,17 @@ fn (c SqliteConn) begin_tx(level int, read_only bool) driver.Tx {
 
 fn (c SqliteConn) reset_session(ctx &context.Context) string {
     _ := ctx
-    mut st := take_st(&c)
-    mut e := ""
+    $st := take_st(&c)
+    $e := ""
     if st.open_err.len > 0 { e = st.open_err + "" }
     else if st.closed != 0 { e = "sqlite: connection closed" }
     else {
         if st.tx != 0 {
-            e = session_command(mut &st, "ROLLBACK")
+            e = session_command($&st, "ROLLBACK")
             if e.len == 0 { st.tx = 0 }
         }
         if e.len == 0 && st.read_only {
-            e = session_command(mut &st, "PRAGMA query_only=OFF")
+            e = session_command($&st, "PRAGMA query_only=OFF")
             if e.len == 0 { st.read_only = false }
         }
         if e.len == 0 { st.tx_err = "" }
@@ -213,7 +213,7 @@ fn (s SqliteStmt) close() string {
 fn finish_tx(t &SqliteTx, command string) string {
     if t.id < 0 { << t.err + "" }
     conn := SqliteConn{st: t.st}
-    mut st := take_st(&conn)
+    $st := take_st(&conn)
     if t.err.len > 0 {
         if st.tx_seq == t.id { st.tx_err = "" }
         put_st(&conn, st)
@@ -221,11 +221,11 @@ fn finish_tx(t &SqliteTx, command string) string {
     }
     if st.tx != t.id { put_st(&conn, st)
         << "sqlite: transaction already finished" }
-    mut e := state_error(&st)
-    if e.len == 0 { e = session_command(mut &st, command) }
+    $e := state_error(&st)
+    if e.len == 0 { e = session_command($&st, command) }
     if e.len == 0 {
         st.tx = 0
-        if st.read_only { e = session_command(mut &st, "PRAGMA query_only=OFF") }
+        if st.read_only { e = session_command($&st, "PRAGMA query_only=OFF") }
         st.read_only = false
     }
     put_st(&conn, st)

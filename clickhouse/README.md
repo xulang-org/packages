@@ -24,7 +24,7 @@ require:
 clickhouse #github.com/xulang-org/packages/clickhouse
 
 fn main() {
-    mut ch := clickhouse.open("http://127.0.0.1:8123", "default", "", "default")
+    $ch := clickhouse.open("http://127.0.0.1:8123", "default", "", "default")
 
     // 执行 DDL
     ch.exec("CREATE TABLE IF NOT EXISTS demo (id UInt64, val Float64) ENGINE = Memory") or (err) {

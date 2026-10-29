@@ -42,15 +42,15 @@ fn parse_endpoint(raw string) Client {
         ep := transport.parse_endpoint(raw, 6333) or (err) { << Client{host: "127.0.0.1", port: 6333, secure: true, api_key: ""} }
         << Client{host: ep.host, port: ep.port, secure: true, api_key: ""}
     }
-    mut ep := raw
+    $ep := raw
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 6333
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 6333
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -71,16 +71,16 @@ fn parse_endpoint(raw string) Client {
 }
 
 pub fn new_client(endpoint string, api_key string) Client {
-    mut c := parse_endpoint(endpoint)
+    $c := parse_endpoint(endpoint)
     c.api_key = api_key + ""
     << c
 }
 
-pub fn (c &mut Client) request(method string, path string, body string) Response {
+pub fn (c $&Client) request(method string, path string, body string) Response {
     if c.secure {
-        mut p := path
+        $p := path
         if p.len == 0 || (p[0] & 255) != 47 { p = "/" + p }
-        mut req := method + " " + p + " HTTP/1.1\r\n"
+        $req := method + " " + p + " HTTP/1.1\r\n"
         req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
         if c.api_key.len > 0 { req = req + "api-key: " + c.api_key + "\r\n" }
         req = req + "Content-Type: application/json\r\n"
@@ -95,8 +95,8 @@ pub fn (c &mut Client) request(method string, path string, body string) Response
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("qdrant: dial failed: " + err.msg())
     }
-    mut reusable := false
-    result := c.request_on_fd(fd, method, path, body, mut &reusable) or (err) {
+    $reusable := false
+    result := c.request_on_fd(fd, method, path, body, $&reusable) or (err) {
         safe_close(fd)
         >> err
     }
@@ -104,7 +104,7 @@ pub fn (c &mut Client) request(method string, path string, body string) Response
     << result
 }
 
-fn (c &mut Client) request_at(fd int, method string, path string, body string, reusable &mut bool) Response {
+fn (c $&Client) request_at(fd int, method string, path string, body string, reusable $&bool) Response {
     if c.secure {
         *reusable = false
         << c.request(method, path, body) or >>
@@ -113,15 +113,15 @@ fn (c &mut Client) request_at(fd int, method string, path string, body string, r
     << c.request_on_fd(fd, method, path, body, reusable) or >>
 }
 
-fn (c &mut Client) request_on_fd(fd int, method string, path string, body string, reusable &mut bool) Response {
+fn (c $&Client) request_on_fd(fd int, method string, path string, body string, reusable $&bool) Response {
     *reusable = false
 
-    mut p := path
+    $p := path
     if p.len == 0 || (p[0] & 255) != 47 {
         p = "/" + p
     }
 
-    mut req := method + " " + p + " HTTP/1.1\r\n"
+    $req := method + " " + p + " HTTP/1.1\r\n"
     req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
     if c.api_key.len > 0 {
         req = req + "api-key: " + c.api_key + "\r\n"
@@ -133,7 +133,7 @@ fn (c &mut Client) request_on_fd(fd int, method string, path string, body string
         req = req + body
     }
 
-    mut off := 0
+    $off := 0
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -150,12 +150,12 @@ fn (c &mut Client) request_on_fd(fd int, method string, path string, body string
     << Response{status_code: resp.status_code, body: resp.body}
 }
 
-pub fn (c &mut Client) ping() bool {
-    mut reusable := false
-    << c.ping_at(-1, mut &reusable)
+pub fn (c $&Client) ping() bool {
+    $reusable := false
+    << c.ping_at(-1, $&reusable)
 }
 
-fn (c &mut Client) ping_at(fd int, reusable &mut bool) bool {
+fn (c $&Client) ping_at(fd int, reusable $&bool) bool {
     resp := c.request_at(fd, "GET", "/healthz", "", reusable) or (err) {
         << false
     }

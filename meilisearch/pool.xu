@@ -13,7 +13,7 @@ pub struct MeiliPool {
 
 pub fn open_pool(endpoint string, api_key string, max_idle int) MeiliPool {
     c := new_client(endpoint, api_key)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -70,8 +70,8 @@ pub fn (p &MeiliPool) health() bool {
     }
     fd := p.get_conn()
     if fd < 0 { << false }
-    mut reusable := false
-    result := p.client.health_at(fd, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.health_at(fd, $&reusable) or (err) {
         p.discard_conn(fd)
         << false
     }
@@ -87,8 +87,8 @@ pub fn (p &MeiliPool) create_index(uid string, primary_key string) bool {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.create_index_at(fd, uid, primary_key, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.create_index_at(fd, uid, primary_key, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -104,8 +104,8 @@ pub fn (p &MeiliPool) delete_index(uid string) bool {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.delete_index_at(fd, uid, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.delete_index_at(fd, uid, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -121,8 +121,8 @@ pub fn (p &MeiliPool) add_documents(uid string, json_docs string) bool {
     }
     fd := p.get_conn()
     if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.add_documents_at(fd, uid, json_docs, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.add_documents_at(fd, uid, json_docs, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }
@@ -133,8 +133,8 @@ pub fn (p &MeiliPool) add_documents(uid string, json_docs string) bool {
 pub fn (p &MeiliPool) search(uid string, query string, limit int) SearchResult {
     fd := p.get_conn()
     if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
-    mut reusable := false
-    result := p.client.search_at(fd, uid, query, limit, mut &reusable) or (err) {
+    $reusable := false
+    result := p.client.search_at(fd, uid, query, limit, $&reusable) or (err) {
         p.discard_conn(fd)
         >> err
     }

@@ -28,11 +28,11 @@ fn safe_close(fd int) {
 }
 
 pub fn new_client(endpoint string) Client {
-    mut ep := endpoint
-    mut host := "127.0.0.1"
-    mut port := 2181
-    mut colon := -1
-    mut i := 0
+    $ep := endpoint
+    $host := "127.0.0.1"
+    $port := 2181
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -61,12 +61,12 @@ pub fn (c Client) exec_4lw(cmd string) string {
         >> errors.new("zookeeper dial failed: " + err.msg())
     }
 
-    mut cmd_payload := cmd
+    $cmd_payload := cmd
     if cmd_payload.len == 4 {
         cmd_payload = cmd_payload + "\n"
     }
 
-    mut off := 0
+    $off := 0
     while off < cmd_payload.len {
         part := cmd_payload[off:cmd_payload.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -79,7 +79,7 @@ pub fn (c Client) exec_4lw(cmd string) string {
         off = off + n
     }
 
-    mut raw_resp := ""
+    $raw_resp := ""
     while true {
         chunk := net.conn_read(fd, 4096) or (err) {
             <-

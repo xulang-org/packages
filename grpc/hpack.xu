@@ -5,14 +5,14 @@
 fn decode_huffman(raw string) string {
     codes := huffman_codes()
     lengths := huffman_lengths()
-    mut out := ""
-    mut bits := 0
-    mut word := 0
+    $out := ""
+    $bits := 0
+    $word := 0
     for i in 0:raw.len {
         for shift in 0:8 {
             word = (word << 1) | ((raw[i] >> (7 - shift)) & 1)
             bits += 1
-            mut matched := -1
+            $matched := -1
             for symbol in 0:257 {
                 if lengths[symbol] == bits && codes[symbol] == word { matched = symbol
                     <- }
@@ -40,13 +40,13 @@ struct HpackHeaders {
     pub values []string
 }
 
-fn (r &mut HpackReader) integer(prefix int) int {
+fn (r $&HpackReader) integer(prefix int) int {
     if r.i >= r.raw.len { >> errors.new("grpc: truncated HPACK integer") }
     mask := (1 << prefix) - 1
-    mut n := r.raw[r.i] & mask
+    $n := r.raw[r.i] & mask
     r.i += 1
     if n < mask { << n }
-    mut shift := 0
+    $shift := 0
     while r.i < r.raw.len {
         b := r.raw[r.i] & 255
         r.i += 1
@@ -59,7 +59,7 @@ fn (r &mut HpackReader) integer(prefix int) int {
     >> errors.new("grpc: truncated HPACK integer")
 }
 
-fn (r &mut HpackReader) text() string {
+fn (r $&HpackReader) text() string {
     if r.i >= r.raw.len { >> errors.new("grpc: truncated HPACK string") }
     huffman := (r.raw[r.i] & 128) != 0
     n := r.integer(7) or >>
@@ -73,9 +73,9 @@ fn (r &mut HpackReader) text() string {
 fn decode_hpack(raw string) HpackHeaders {
     names := hpack_static_names()
     values := hpack_static_values()
-    mut r := HpackReader{raw: raw, i: 0}
-    mut out := HpackHeaders{names: []string{}, values: []string{}}
-    mut saw_field := false
+    $r := HpackReader{raw: raw, i: 0}
+    $out := HpackHeaders{names: []string{}, values: []string{}}
+    $saw_field := false
     while r.i < r.raw.len {
         b := r.raw[r.i] & 255
         if (b & 224) == 32 {
@@ -84,15 +84,15 @@ fn decode_hpack(raw string) HpackHeaders {
             if size != 0 { >> errors.new("grpc: HPACK exceeds advertised table size") }
             ->
         }
-        mut name := ""
-        mut value := ""
+        $name := ""
+        $value := ""
         if (b & 128) != 0 {
             idx := r.integer(7) or >>
             if idx < 1 || idx > 61 { >> errors.new("grpc: invalid HPACK index") }
             name = names[idx - 1] + ""
             value = values[idx - 1] + ""
         } else {
-            mut prefix := 4
+            $prefix := 4
             if (b & 64) != 0 { prefix = 6 }
             idx := r.integer(prefix) or >>
             if idx == 0 { name = r.text() or >> }

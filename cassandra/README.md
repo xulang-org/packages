@@ -15,7 +15,7 @@ Xu 语言官方原生 Apache Cassandra 与 ScyllaDB 宽列分布式数据库驱�
 cassandra #github.com/xulang-org/packages/cassandra
 
 fn main() {
-    mut p := cassandra.open_pool("127.0.0.1:9042", "", 5)
+    $p := cassandra.open_pool("127.0.0.1:9042", "", 5)
     defer p.close()
 
     // 创建 Keyspace 与表

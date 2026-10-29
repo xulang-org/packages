@@ -14,11 +14,11 @@ pub struct Pool {
 }
 
 pub fn new_pool(broker string, client_id string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
-    mut cid := client_id
+    $cid := client_id
     if cid.len == 0 {
         cid = "xu-kafka-pool"
     }
@@ -48,16 +48,16 @@ pub fn (p &Pool) get() Client {
             }
         }
         else {
-            mut c := connect(p.broker + "", p.client_id + "") or >>
+            $c := connect(p.broker + "", p.client_id + "") or >>
             << c
         }
     }
-    mut c := connect(p.broker + "", p.client_id + "") or >>
+    $c := connect(p.broker + "", p.client_id + "") or >>
     << c
 }
 
 pub fn (p &Pool) ping() bool {
-    mut c := p.get() or (err) {
+    $c := p.get() or (err) {
         << false
     }
     fd := c.fd
@@ -67,7 +67,7 @@ pub fn (p &Pool) ping() bool {
 }
 
 pub fn (p &Pool) produce(topic string, partition int, message string) int {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.produce(topic, partition, message) or (err) {
         p.put_conn(fd)
@@ -78,7 +78,7 @@ pub fn (p &Pool) produce(topic string, partition int, message string) int {
 }
 
 pub fn (p &Pool) produce_key_value(topic string, partition int, key string, val string) int {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.produce_key_value(topic, partition, key, val) or (err) {
         p.put_conn(fd)
@@ -89,7 +89,7 @@ pub fn (p &Pool) produce_key_value(topic string, partition int, key string, val 
 }
 
 pub fn (p &Pool) fetch(topic string, partition int, offset int) []string {
-    mut c := p.get() or >>
+    $c := p.get() or >>
     fd := c.fd
     res := c.fetch(topic, partition, offset) or (err) {
         p.put_conn(fd)
@@ -120,7 +120,7 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

@@ -12,7 +12,7 @@ pub struct WsPool {
 
 pub fn open_pool(endpoint string, max_idle int) WsPool {
     c := new_client(endpoint)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -58,16 +58,16 @@ pub fn (p &WsPool) put_conn(fd int) {
 // Executes an echo round-trip borrowing from pool
 pub fn (p &WsPool) echo_text(text string) string {
     if p.client.secure {
-        mut tc := p.client.connect_secure() or >>
-        result := p.client.send_text_secure(mut &tc, text) or (err) {
-            p.client.close_secure(mut &tc)
+        $tc := p.client.connect_secure() or >>
+        result := p.client.send_text_secure($&tc, text) or (err) {
+            p.client.close_secure($&tc)
             >> err
         }
-        out := p.client.read_text_secure(mut &tc) or (err) {
-            p.client.close_secure(mut &tc)
+        out := p.client.read_text_secure($&tc) or (err) {
+            p.client.close_secure($&tc)
             >> err
         }
-        p.client.close_secure(mut &tc)
+        p.client.close_secure($&tc)
         << out
     }
     fd := p.get_conn()
@@ -87,7 +87,7 @@ pub fn (p &WsPool) echo_text(text string) string {
 }
 
 pub fn (p &WsPool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

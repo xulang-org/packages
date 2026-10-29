@@ -60,7 +60,7 @@ fn le32_at(s &string, off int) int {
 
 fn read_exact(fd int, n int) ReadResult {
     if n < 0 || n > 16777216 { << ReadResult{data: "", err: "mysql: invalid packet length"} }
-    mut out := ""
+    $out := ""
     while out.len < n {
         part := net.conn_read(fd, n - out.len) or (err) { << ReadResult{data: "", err: "mysql: connection: " + err.msg()} }
         if part.len == 0 { << ReadResult{data: "", err: "mysql: connection closed"} }
@@ -70,7 +70,7 @@ fn read_exact(fd int, n int) ReadResult {
 }
 
 fn write_all(fd int, data string) string {
-    mut off := 0
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) or (err) { << "mysql: connection: " + err.msg() }
@@ -97,8 +97,8 @@ fn send_packet(fd int, seq int, payload string) string {
 
 fn cstring(body &string, off int) ReadResult {
     if off < 0 || off > body.len { << ReadResult{data: "", err: "mysql: malformed cstring"} }
-    mut out := ""
-    mut i := off
+    $out := ""
+    $i := off
     while i < body.len {
         if (body[i] & 255) == 0 { << ReadResult{data: out, err: ""} }
         out.push_byte(body[i] & 255)
@@ -109,7 +109,7 @@ fn cstring(body &string, off int) ReadResult {
 
 fn err_text(body string) string {
     if body.len < 3 { << "mysql: server error"}
-    mut off := 3
+    $off := 3
     if off < body.len && (body[off] & 255) == 35 { off += 6 }
     if off < body.len { << "mysql: " + body[off:body.len] }
     << "mysql: server error"
@@ -132,7 +132,7 @@ fn read_len(s &string, off int) LenResult {
     }
     if b == 254 {
         if off + 8 >= s.len { << LenResult{n: 0, next: off, null: 0, err: "mysql: malformed length-encoded value"} }
-        mut n := 0
+        $n := 0
         for i in 0:8 { n = n | ((s[off + 1 + i] & 255) << (8 * i)) }
         << LenResult{n: n, next: off + 9, null: 0, err: ""}
     }

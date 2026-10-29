@@ -14,9 +14,9 @@ Native Prometheus metrics collection, formatting, registry, and Pushgateway clie
 prometheus #github.com/xulang-org/packages/prometheus
 
 fn main() {
-    mut reg := prometheus.new_registry()
+    $reg := prometheus.new_registry()
 
-    mut http_requests := prometheus.new_counter("http_requests_total", "Total incoming HTTP requests")
+    $http_requests := prometheus.new_counter("http_requests_total", "Total incoming HTTP requests")
     http_requests.inc_labels([
         prometheus.Label{name: "method", value: "GET"},
         prometheus.Label{name: "handler", value: "/api/v1/users"}
