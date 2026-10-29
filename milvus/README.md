@@ -14,7 +14,7 @@ Xu 语言原生 Milvus 向量数据库客户端驱动，兼容 Milvus v2 RESTful
 ```xu
 milvus #github.com/xulang-org/packages/milvus
 
-mut p := milvus.pool("http://127.0.0.1:19530", 5)
+$p := milvus.pool("http://127.0.0.1:19530", 5)
 
 // 创建向量集合 (4 维, Cosine 相似度)
 p.create_collection(milvus.CollectionConfig{

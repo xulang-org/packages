@@ -14,7 +14,7 @@ Native client and connection pool for HashiCorp Consul service mesh and distribu
 consul #github.com/xulang-org/packages/consul
 
 fn main() {
-    mut client := consul.open("http://127.0.0.1:8500")
+    $client := consul.open("http://127.0.0.1:8500")
 
     // KV Configuration
     client.put_kv("app/config/timeout", "30s")

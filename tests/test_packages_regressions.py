@@ -433,7 +433,7 @@ fn main() int {{
                     statements.append(f'    r{i} := {call}{handling}\n    if {invalid.replace("r", "r" + str(i))} {{ << 2 }}')
                     length = 999 if path.startswith(b"HEAD ") else len(body)
                     responses.append((f"HTTP/1.1 {status} OK\r\nContent-Length: {length}\r\n\r\n".encode() + body, False))
-                setup = '    mut point := influxdb.new_point("cpu")\n    point.add_field_int("value", 1)\n' if package == "influxdb" else ''
+                setup = '    $point := influxdb.new_point("cpu")\n    point.add_field_int("value", 1)\n' if package == "influxdb" else ''
                 source = f'@main\n#{package}\n#os\nfn main() int {{\n    endpoint := os.getenv("AUDIT_ENDPOINT")\n    p := {constructor}\n' + setup + '\n'.join(statements) + '\n    p.close()\n    << 0\n}\n'
                 with self.http_pool_peer(responses) as (endpoint, stats):
                     self.run_xu(source, [package], endpoint)
@@ -490,7 +490,7 @@ fn main() int {{
 fn worker(p {package}.Pool, start chan int, ready chan int, done chan int) {{
     ready <- 1
     _ := <-start
-    mut failed := 0
+    $failed := 0
     for i in 0:3 {{
         result := {call} or (err) {{ failed = 1
             done <- failed
@@ -935,9 +935,9 @@ fn main() int {{
         source = '''@main
 #os/exec
 fn main() int {
-    mut cmd := exec.command("python3", "-u", "-c", "import sys,os; os.closerange(3,65536); print(sys.stdin.readline().strip(),flush=True)")
-    mut input := cmd.stdin_pipe() or (err) { << 1 }
-    mut output := cmd.stdout_pipe() or (err) { << 2 }
+    $cmd := exec.command("python3", "-u", "-c", "import sys,os; os.closerange(3,65536); print(sys.stdin.readline().strip(),flush=True)")
+    $input := cmd.stdin_pipe() or (err) { << 1 }
+    $output := cmd.stdout_pipe() or (err) { << 2 }
     cmd.start() or (err) { << 3 }
     input.write("ready\\n") or (err) { << 4 }
     input.close() or (err) { << 5 }
@@ -978,7 +978,7 @@ fn main() int {
         source = '''@main
 #redis
 fn main() int {
-    mut c := redis.Client{fd: -1, addr: "", buf: "*3\\r\\n:7\\r\\n$$-1\\r\\n$$0\\r\\n\\r\\n"}
+    $c := redis.Client{fd: -1, addr: "", buf: "*3\\r\\n:7\\r\\n$$-1\\r\\n$$0\\r\\n\\r\\n"}
     v := c.read_value() or (err) { println(err.msg())
         << 1 }
     v.as_strings() or (err) { println("mixed array rejected")
@@ -993,7 +993,7 @@ fn main() int {
         source = '''@main
 #redis
 fn main() int {
-    mut c := redis.Client{fd: -1, addr: "", buf: "%1\\r\\n+k\\r\\n*4\\r\\n:7\\r\\n_\\r\\n$$0\\r\\n\\r\\n*1\\r\\n#t\\r\\n"}
+    $c := redis.Client{fd: -1, addr: "", buf: "%1\\r\\n+k\\r\\n*4\\r\\n:7\\r\\n_\\r\\n$$0\\r\\n\\r\\n*1\\r\\n#t\\r\\n"}
     v := c.read_value() or (err) { println(err.msg())
         << 1 }
     if v.typ != redis.TYPE_MAP { << 2 }
@@ -1018,7 +1018,7 @@ fn main() int {
         source = '''@main
 #redis
 fn main() int {
-    mut c := redis.Client{fd: -1, addr: "", buf: "$$1\\r\\nx!!"}
+    $c := redis.Client{fd: -1, addr: "", buf: "$$1\\r\\nx!!"}
     c.read_value() or (err) { println("bad CRLF rejected")
         << 0 }
     << 1
@@ -1091,7 +1091,7 @@ fn main() int {
 #mongodb
 #os
 fn main() int {
-    mut c := mongodb.connect(os.getenv("AUDIT_ENDPOINT")) or (err) { println(err.msg())
+    $c := mongodb.connect(os.getenv("AUDIT_ENDPOINT")) or (err) { println(err.msg())
         << 1 }
     c.insert_one("test", "test", mongodb.build_doc(mongodb.bson_int32("x", 1))) or (err) {
         println("write rejected: " + err.msg())
@@ -1222,7 +1222,7 @@ fn main() int {
 #elasticsearch
 #os
 fn main() {
-    mut c := elasticsearch.open(os.getenv("AUDIT_ENDPOINT"))
+    $c := elasticsearch.open(os.getenv("AUDIT_ENDPOINT"))
     r := c.info() or (err) { println("rejected: " + err.msg())
         << }
     println("body=" + r)
@@ -1318,10 +1318,10 @@ fn main() int {
     def test_search_results_follow_json_structure(self):
         cases = [
             ("elasticsearch", '{"value":999,"hits":{"hits":[{"_source":{"nested":{"_id":"decoy"},"text":"a\\\"b"},"_score":0.125,"_id":"actual"}],"total":{"value":42,"relation":"eq"}}}',
-             'mut c := elasticsearch.open(endpoint)\n    r := c.search("test", "") or (err) { println(err.msg())\n        << 1 }\n    if r.total != 42 || r.hits.len != 1 || r.hits[0].id != "actual" || r.hits[0].score != "0.125" { << 2 }\n    println(r.hits[0].source)',
+             '$c := elasticsearch.open(endpoint)\n    r := c.search("test", "") or (err) { println(err.msg())\n        << 1 }\n    if r.total != 42 || r.hits.len != 1 || r.hits[0].id != "actual" || r.hits[0].score != "0.125" { << 2 }\n    println(r.hits[0].source)',
              {"nested": {"_id": "decoy"}, "text": 'a"b'}),
             ("qdrant", '{"result":[{"payload":{"nested":{"id":99},"text":"payload"},"score":1.25e-2,"id":7}]}',
-             'mut c := qdrant.open(endpoint)\n    r := c.search("test", ["0.1"], 1) or (err) { println(err.msg())\n        << 1 }\n    if r.len != 1 || r[0].id != 7 || r[0].score != "1.25e-2" { << 2 }\n    println(r[0].payload_json)',
+             '$c := qdrant.open(endpoint)\n    r := c.search("test", ["0.1"], 1) or (err) { println(err.msg())\n        << 1 }\n    if r.len != 1 || r[0].id != 7 || r[0].score != "1.25e-2" { << 2 }\n    println(r[0].payload_json)',
              {"nested": {"id": 99}, "text": "payload"}),
             ("meilisearch", '{"estimatedTotalHits":42,"hits":[{"title":"actual title","id":7,"nested":{"id":99}}]}',
              'c := meilisearch.client(endpoint, "")\n    r := c.search("test", "query", 1) or (err) { println(err.msg())\n        << 1 }\n    if r.total_hits != 42 || r.hits.len != 1 || r.hits[0].id != 7 || r.hits[0].title != "actual title" { << 2 }\n    println(r.hits[0].raw)',
@@ -1342,7 +1342,7 @@ fn main() int {
     def test_search_query_quotes_control_characters(self):
         query = "a\n\t\"b\\c"
         cases = [
-            ("elasticsearch", 'mut c := elasticsearch.open(endpoint)\n    c.search_match("test", "field", "a\\n\\t\\\"b\\\\c") or (err) { println(err.msg())\n        << 1 }',
+            ("elasticsearch", '$c := elasticsearch.open(endpoint)\n    c.search_match("test", "field", "a\\n\\t\\\"b\\\\c") or (err) { println(err.msg())\n        << 1 }',
              {"query": {"match": {"field": query}}}, {"hits": {"hits": [], "total": 0}}),
             ("meilisearch", 'c := meilisearch.client(endpoint, "")\n    c.search("test", "a\\n\\t\\\"b\\\\c", 1) or (err) { println(err.msg())\n        << 1 }',
              {"q": query, "limit": 1}, {"hits": [], "totalHits": 0}),

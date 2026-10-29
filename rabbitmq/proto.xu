@@ -25,20 +25,20 @@ pub struct Frame {
 }
 
 pub fn encode_i8(v int) string {
-    mut s := ""
+    $s := ""
     s.push_byte(v & 255)
     << s
 }
 
 pub fn encode_i16(v int) string {
-    mut s := ""
+    $s := ""
     s.push_byte((v >> 8) & 255)
     s.push_byte(v & 255)
     << s
 }
 
 pub fn encode_i32(v int) string {
-    mut s := ""
+    $s := ""
     s.push_byte((v >> 24) & 255)
     s.push_byte((v >> 16) & 255)
     s.push_byte((v >> 8) & 255)
@@ -47,7 +47,7 @@ pub fn encode_i32(v int) string {
 }
 
 pub fn encode_i64(v int) string {
-    mut s := ""
+    $s := ""
     s.push_byte((v >> 56) & 255)
     s.push_byte((v >> 48) & 255)
     s.push_byte((v >> 40) & 255)
@@ -90,8 +90,8 @@ pub fn decode_i64(s string, off int) int {
     if off + 8 > s.len {
         << 0
     }
-    mut v := 0
-    mut i := 0
+    $v := 0
+    $i := 0
     while i < 8 {
         v = (v << 8) | (s[off + i] & 255)
         i = i + 1
@@ -101,11 +101,11 @@ pub fn decode_i64(s string, off int) int {
 
 // Short string: 1-byte length prefix (0-255) + content
 pub fn encode_shortstr(s string) string {
-    mut len_val := s.len
+    $len_val := s.len
     if len_val > 255 {
         len_val = 255
     }
-    mut res := encode_i8(len_val)
+    $res := encode_i8(len_val)
     if len_val > 0 {
         res = res + s[0:len_val]
     }
@@ -124,7 +124,7 @@ pub fn encode_empty_table() string {
 
 // Frame builder
 pub fn build_frame(frame_type int, channel int, payload string) string {
-    mut f := encode_i8(frame_type)
+    $f := encode_i8(frame_type)
     f = f + encode_i16(channel)
     f = f + encode_i32(payload.len)
     f = f + payload

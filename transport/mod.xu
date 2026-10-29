@@ -56,21 +56,21 @@ fn scheme_port(scheme string, fallback int) int {
 // The path is retained for callers that need a base URL; query handling is
 // intentionally left to the individual protocol driver.
 pub fn parse_endpoint(raw string, fallback_port int) Endpoint {
-    mut rest := raw + ""
-    mut scheme := default_scheme(rest + "")
+    $rest := raw + ""
+    $scheme := default_scheme(rest + "")
     marker := strings.index_of(&rest, "://")
     if marker >= 0 {
         scheme = strings.to_lower(&rest[0:marker])
         rest = rest[marker + 3:rest.len]
     }
-    mut path := ""
+    $path := ""
     slash := strings.index_of(&rest, "/")
     if slash >= 0 {
         path = rest[slash:rest.len]
         rest = rest[0:slash]
     }
-    mut host := rest + ""
-    mut port := scheme_port(scheme + "", fallback_port)
+    $host := rest + ""
+    $port := scheme_port(scheme + "", fallback_port)
     if host.len > 0 && (host[0] & 255) == 91 {
         close := strings.index_of(&host, "]")
         if close < 0 { >> errors.new("transport: invalid IPv6 endpoint") }
@@ -99,12 +99,12 @@ pub fn parse_endpoint(raw string, fallback_port int) Endpoint {
 pub fn secure_endpoint(ep Endpoint) bool { << ep.secure }
 
 pub fn dial(ep Endpoint, cfg tls.Config, timeout_ns int) Conn {
-    mut wait := timeout_ns
+    $wait := timeout_ns
     if wait <= 0 { wait = DEFAULT_TIMEOUT_NS }
     port_text := str(ep.port)
     addr := net.join_host_port(&ep.host, &port_text)
     if ep.secure {
-        mut tc := cfg
+        $tc := cfg
         if tc.server_name.len == 0 { tc.server_name = ep.host + "" }
         d := tls.Dialer{timeout_ns: wait, config: tc}
         conn := d.dial("tcp", addr) or >>
@@ -123,9 +123,9 @@ pub fn closed_conn() Conn {
     << Conn{fd: -1, tls_conn: tls.closed_conn(), secure: false, closed: true, eof: true, buf: ""}
 }
 
-fn raw_read(c &mut Conn, max int) string {
+fn raw_read(c $&Conn, max int) string {
     if c.secure {
-        tc := mut &c.tls_conn
+        tc := $&c.tls_conn
         s := tc.read(max) or >>
         if s.len == 0 { c.eof = true }
         << s
@@ -135,7 +135,7 @@ fn raw_read(c &mut Conn, max int) string {
     << s
 }
 
-pub fn (c &mut Conn) read(max int) string {
+pub fn (c $&Conn) read(max int) string {
     if c.closed { >> errors.new("transport: connection is closed") }
     if c.buf.len > 0 {
         if max <= 0 || c.buf.len <= max {
@@ -150,17 +150,17 @@ pub fn (c &mut Conn) read(max int) string {
     << raw_read(c, max)
 }
 
-pub fn (c &mut Conn) write(data &string) int {
+pub fn (c $&Conn) write(data &string) int {
     if c.closed { >> errors.new("transport: connection is closed") }
     if c.secure {
-        tc := mut &c.tls_conn
+        tc := $&c.tls_conn
         << tc.write(data) or >>
     }
     << net.conn_write(c.fd, data)
 }
 
-pub fn (c &mut Conn) write_all(data string) int {
-    mut off := 0
+pub fn (c $&Conn) write_all(data string) int {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := c.write(&part) or >>
@@ -170,11 +170,11 @@ pub fn (c &mut Conn) write_all(data string) int {
     << 0
 }
 
-pub fn (c &mut Conn) close() int {
+pub fn (c $&Conn) close() int {
     if c.closed { << 0 }
     c.closed = true
     if c.secure {
-        tc := mut &c.tls_conn
+        tc := $&c.tls_conn
         tc.close() or (err) { << 0 }
         << 0
     }
@@ -187,12 +187,12 @@ pub fn (c &mut Conn) close() int {
 // drivers while their legacy plaintext fd pools are being migrated to Conn
 // pools; the TLS handshake and certificate verification still happen here.
 pub fn request_raw(ep Endpoint, cfg tls.Config, request string, method string) http.Response {
-    mut c := dial(ep, cfg, DEFAULT_TIMEOUT_NS) or >>
+    $c := dial(ep, cfg, DEFAULT_TIMEOUT_NS) or >>
     c.write_all(request) or (err) {
         c.close()
         >> err
     }
-    resp := read_response(mut &c, method + "") or (err) {
+    resp := read_response($&c, method + "") or (err) {
         c.close()
         >> err
     }
@@ -201,7 +201,7 @@ pub fn request_raw(ep Endpoint, cfg tls.Config, request string, method string) h
 }
 
 fn find_header_end(s &string) int {
-    mut i := 0
+    $i := 0
     while i + 3 < s.len {
         if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 && (s[i + 2] & 255) == 13 && (s[i + 3] & 255) == 10 {
             << i
@@ -212,7 +212,7 @@ fn find_header_end(s &string) int {
 }
 
 fn find_crlf(s &string, start int) int {
-    mut i := start
+    $i := start
     while i + 1 < s.len {
         if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 { << i }
         i = i + 1
@@ -220,7 +220,7 @@ fn find_crlf(s &string, start int) int {
     << -1
 }
 
-fn read_more(c &mut Conn) int {
+fn read_more(c $&Conn) int {
     chunk := raw_read(c, 4096) or >>
     if chunk.len == 0 { << 0 }
     c.buf = c.buf + chunk
@@ -230,7 +230,7 @@ fn read_more(c &mut Conn) int {
 
 fn decimal(s string) int {
     if s.len == 0 { >> errors.new("transport: empty Content-Length") }
-    mut n := 0
+    $n := 0
     for i in 0:s.len {
         d := (s[i] & 255) - 48
         if d < 0 || d > 9 { >> errors.new("transport: invalid Content-Length") }
@@ -240,11 +240,11 @@ fn decimal(s string) int {
     << n
 }
 
-fn take_chunked(c &mut Conn, start int) string {
-    mut pos := start
-    mut out := ""
+fn take_chunked(c $&Conn, start int) string {
+    $pos := start
+    $out := ""
     while true {
-        mut end := find_crlf(&c.buf, pos)
+        $end := find_crlf(&c.buf, pos)
         while end < 0 {
             n := read_more(c) or >>
             if n == 0 { >> errors.new("transport: incomplete chunk size") }
@@ -252,12 +252,12 @@ fn take_chunked(c &mut Conn, start int) string {
         }
         line := c.buf[pos:end]
         semi := strings.index_of(&line, ";")
-        mut size_text := line + ""
+        $size_text := line + ""
         if semi >= 0 { size_text = line[0:semi] }
         size := parse_hex(size_text) or >>
         pos = end + 2
         if size == 0 {
-            mut trailer := find_header_end(&c.buf[pos:c.buf.len])
+            $trailer := find_header_end(&c.buf[pos:c.buf.len])
             while trailer < 0 {
                 n := read_more(c) or >>
                 if n == 0 { >> errors.new("transport: incomplete chunk trailers") }
@@ -288,10 +288,10 @@ fn take_chunked(c &mut Conn, start int) string {
 
 fn parse_hex(s string) int {
     if s.len == 0 { >> errors.new("transport: empty chunk size") }
-    mut n := 0
+    $n := 0
     for i in 0:s.len {
         c := s[i] & 255
-        mut d := -1
+        $d := -1
         if c >= 48 && c <= 57 { d = c - 48 }
         else if c >= 65 && c <= 70 { d = c - 55 }
         else if c >= 97 && c <= 102 { d = c - 87 }
@@ -304,10 +304,10 @@ fn parse_hex(s string) int {
 
 // read_response reads one HTTP/1.x response while retaining bytes belonging
 // to the next response in Conn.buf. It works for both TCP and TLS sessions.
-pub fn read_response(c &mut Conn, method string) http.Response {
-    mut interim := 0
+pub fn read_response(c $&Conn, method string) http.Response {
+    $interim := 0
     while interim < 16 {
-        mut end := find_header_end(&c.buf)
+        $end := find_header_end(&c.buf)
         while end < 0 {
             if c.buf.len > MAX_HEADER_BYTES { >> errors.new("transport: HTTP headers too large") }
             n := read_more(c) or >>
@@ -319,9 +319,9 @@ pub fn read_response(c &mut Conn, method string) http.Response {
         status := lines[0] + ""
         if status.len < 12 || (status[0:9] != "HTTP/1.1 " && status[0:9] != "HTTP/1.0 ") { >> errors.new("transport: invalid HTTP status") }
         code := decimal(status[9:12]) or >>
-        mut length := -1
-        mut chunked := false
-        mut transfer_seen := false
+        $length := -1
+        $chunked := false
+        $transfer_seen := false
         for i in 1:lines.len {
             line := lines[i] + ""
             colon := strings.index_of(&line, ":")
@@ -348,7 +348,7 @@ pub fn read_response(c &mut Conn, method string) http.Response {
             interim = interim + 1
             ->
         }
-        mut body := ""
+        $body := ""
         if method == "HEAD" || code == 204 || code == 304 {
             c.buf = c.buf[end + 4:c.buf.len]
         } else if chunked {

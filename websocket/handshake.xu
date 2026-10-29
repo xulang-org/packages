@@ -16,11 +16,11 @@ pub fn compute_accept_key(sec_key string) string {
 }
 
 pub fn build_handshake_request(host string, port int, path string, sec_key string) string {
-    mut p := path
+    $p := path
     if p.len == 0 {
         p = "/"
     }
-    mut req := "GET " + p + " HTTP/1.1\r\n"
+    $req := "GET " + p + " HTTP/1.1\r\n"
     req = req + "Host: " + host + ":" + str(port) + "\r\n"
     req = req + "Upgrade: websocket\r\n"
     req = req + "Connection: Upgrade\r\n"
@@ -35,8 +35,8 @@ pub struct HandshakeResult {
 }
 
 pub fn parse_handshake_response(resp string) HandshakeResult {
-    mut code := 0
-    mut accept := ""
+    $code := 0
+    $accept := ""
 
     // Check status line: e.g. "HTTP/1.1 101 Switching Protocols"
     sp1 := strings.index_of(&resp, " ")
@@ -56,7 +56,7 @@ pub fn parse_handshake_response(resp string) HandshakeResult {
     // Look for Sec-WebSocket-Accept
     needle := "sec-websocket-accept:"
     needle_len := needle.len
-    mut lower_resp := ""
+    $lower_resp := ""
     for i in 0:resp.len {
         c := resp[i] & 255
         if c >= 65 && c <= 90 {
@@ -69,7 +69,7 @@ pub fn parse_handshake_response(resp string) HandshakeResult {
     idx := strings.index_of(&lower_resp, needle)
     if idx >= 0 {
         start := idx + needle_len
-        mut end := start
+        $end := start
         while end < resp.len {
             c := resp[end] & 255
             if c == 13 || c == 10 {

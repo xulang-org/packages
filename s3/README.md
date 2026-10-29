@@ -27,7 +27,7 @@ require:
 s3 #github.com/xulang-org/packages/s3
 
 fn main() {
-    mut client := s3.open("http://127.0.0.1:9000", "minioadmin", "minioadmin", "us-east-1")
+    $client := s3.open("http://127.0.0.1:9000", "minioadmin", "minioadmin", "us-east-1")
 
     // 1. 创建 Bucket
     client.make_bucket("xu-test-bucket") or (err) {

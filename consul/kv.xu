@@ -2,13 +2,13 @@
 
 #errors
 
-pub fn (c &mut Client) put_kv(key string, val string) bool {
-    mut reusable := false
-    << c.put_kv_at(-1, key, val, mut &reusable)
+pub fn (c $&Client) put_kv(key string, val string) bool {
+    $reusable := false
+    << c.put_kv_at(-1, key, val, $&reusable)
 }
 
-fn (c &mut Client) put_kv_at(fd int, key string, val string, reusable &mut bool) bool {
-    mut k := key
+fn (c $&Client) put_kv_at(fd int, key string, val string, reusable $&bool) bool {
+    $k := key
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
@@ -18,13 +18,13 @@ fn (c &mut Client) put_kv_at(fd int, key string, val string, reusable &mut bool)
     << resp.status_code == 200
 }
 
-pub fn (c &mut Client) get_kv(key string) string {
-    mut reusable := false
-    << c.get_kv_at(-1, key, mut &reusable) or >>
+pub fn (c $&Client) get_kv(key string) string {
+    $reusable := false
+    << c.get_kv_at(-1, key, $&reusable) or >>
 }
 
-fn (c &mut Client) get_kv_at(fd int, key string, reusable &mut bool) string {
-    mut k := key
+fn (c $&Client) get_kv_at(fd int, key string, reusable $&bool) string {
+    $k := key
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
@@ -35,13 +35,13 @@ fn (c &mut Client) get_kv_at(fd int, key string, reusable &mut bool) string {
     << resp.body
 }
 
-pub fn (c &mut Client) delete_kv(key string) bool {
-    mut reusable := false
-    << c.delete_kv_at(-1, key, mut &reusable)
+pub fn (c $&Client) delete_kv(key string) bool {
+    $reusable := false
+    << c.delete_kv_at(-1, key, $&reusable)
 }
 
-fn (c &mut Client) delete_kv_at(fd int, key string, reusable &mut bool) bool {
-    mut k := key
+fn (c $&Client) delete_kv_at(fd int, key string, reusable $&bool) bool {
+    $k := key
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }

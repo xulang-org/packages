@@ -29,7 +29,7 @@ require:
 nats #github.com/xulang-org/packages/nats
 
 fn main() int {
-    mut nc := nats.connect("127.0.0.1:4222") or >>
+    $nc := nats.connect("127.0.0.1:4222") or >>
 
     // 1. 订阅主题
     sub := nc.subscribe("orders.new") or >>

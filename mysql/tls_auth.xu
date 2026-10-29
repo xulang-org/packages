@@ -3,10 +3,10 @@
 #crypto/tls
 transport #github.com/xulang-org/packages/transport
 
-fn handshake_tls_greeting(tc &mut transport.Conn, cfg &Config, p Packet) string {
+fn handshake_tls_greeting(tc $&transport.Conn, cfg &Config, p Packet) string {
     if p.err.len > 0 { << p.err }
     if p.payload.len < 1 || (p.payload[0] & 255) != 10 { << "mysql: unsupported server handshake" }
-    mut off := 1
+    $off := 1
     sv := cstring(&p.payload, off)
     if sv.err.len > 0 { << sv.err }
     off += sv.data.len + 1
@@ -17,9 +17,9 @@ fn handshake_tls_greeting(tc &mut transport.Conn, cfg &Config, p Packet) string 
     cap_low := le16_at(&p.payload, off)
     if cap_low < 0 { << "mysql: malformed server handshake" }
     off += 2
-    mut cap_flags := cap_low
-    mut scramble2 := ""
-    mut plugin := "mysql_native_password"
+    $cap_flags := cap_low
+    $scramble2 := ""
+    $plugin := "mysql_native_password"
     if off < p.payload.len {
         if off + 1 + 2 + 1 + 10 > p.payload.len { << "mysql: malformed server handshake" }
         off += 1
@@ -31,7 +31,7 @@ fn handshake_tls_greeting(tc &mut transport.Conn, cfg &Config, p Packet) string 
         auth_len := p.payload[off] & 255
         off += 1
         off += 10
-        mut n2 := auth_len - 8
+        $n2 := auth_len - 8
         if n2 < 13 { n2 = 13 }
         if n2 > p.payload.len - off { n2 = p.payload.len - off }
         if n2 > 0 {
@@ -49,12 +49,12 @@ fn handshake_tls_greeting(tc &mut transport.Conn, cfg &Config, p Packet) string 
     if (cap_flags & 512) == 0 || (cap_flags & 32768) == 0 {
         << "mysql: server does not support protocol 4.1 secure authentication"
     }
-    mut cap := 1 | 8 | 512 | 32768 | 8192 | 131072 | 524288
+    $cap := 1 | 8 | 512 | 32768 | 8192 | 131072 | 524288
     // CLIENT_CONNECT_WITH_DB is only valid when a database is present.
     if cfg.database.len == 0 { cap = cap & (0 - 9) }
     auth := native_token(cfg.password, trim_scramble(scramble1 + scramble2))
     body := le32(cap) + le32(16777216) + string_from_byte(45)
-    mut resp := body
+    $resp := body
     for i in 0:23 { resp = resp + string_from_byte(0) }
     resp = resp + cfg.user + string_from_byte(0)
     resp = resp + string_from_byte(auth.len) + auth
@@ -72,7 +72,7 @@ fn handshake_tls_greeting(tc &mut transport.Conn, cfg &Config, p Packet) string 
         if sw.err.len > 0 { << sw.err }
         if sw.data != "mysql_native_password" { << "mysql: authentication plugin " + sw.data + " is not supported" }
         sstart := 1 + sw.data.len + 1
-        mut scramble := p2.payload[sstart:p2.payload.len]
+        $scramble := p2.payload[sstart:p2.payload.len]
         scramble = trim_scramble(scramble)
         e2 := send_packet_tls(tc, p2.seq + 1, native_token(cfg.password, scramble))
         if e2.len > 0 { << e2 }

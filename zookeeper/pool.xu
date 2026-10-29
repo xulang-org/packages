@@ -12,7 +12,7 @@ pub struct Pool {
 
 pub fn new_pool(endpoint string, max_idle int) Pool {
     cli := new_client(endpoint)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -73,7 +73,7 @@ pub fn (p &Pool) mntr() string {
 }
 
 pub fn (p &Pool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

@@ -20,7 +20,7 @@ fn safe_close(fd int) {
 }
 
 pub fn new_pool(addr string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -29,7 +29,7 @@ pub fn new_pool(addr string, max_idle int) Pool {
 }
 
 pub fn new_pool_auth(addr string, auth string, max_idle int) Pool {
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -39,7 +39,7 @@ pub fn new_pool_auth(addr string, auth string, max_idle int) Pool {
 
 pub fn new_pool_url(raw string, max_idle int) Pool {
     opt := parse_url(raw)
-    mut cap_val := max_idle
+    $cap_val := max_idle
     if cap_val <= 0 {
         cap_val = 10
     }
@@ -53,7 +53,7 @@ pub fn (p &Pool) get() Client {
             << Client{fd: fd, buf: "", addr: p.addr}
         }
         else {
-            mut c := dial(p.addr) or >>
+            $c := dial(p.addr) or >>
             if p.auth.len > 0 {
                 c.auth(p.auth) or >>
             }
@@ -63,7 +63,7 @@ pub fn (p &Pool) get() Client {
             << c
         }
     }
-    mut c := dial(p.addr) or >>
+    $c := dial(p.addr) or >>
     << c
 }
 
@@ -82,7 +82,7 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) close() {
-    mut done := false
+    $done := false
     while !done {
         select {
             fd := <-p.idle {

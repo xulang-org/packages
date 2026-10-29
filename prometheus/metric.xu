@@ -45,8 +45,8 @@ fn format_labels(labels &[]Label) string {
     if labels.len == 0 {
         << ""
     }
-    mut out := "{"
-    mut i := 0
+    $out := "{"
+    $i := 0
     while i < labels.len {
         if i > 0 {
             out = out + ","
@@ -58,19 +58,19 @@ fn format_labels(labels &[]Label) string {
     << out
 }
 
-pub fn (c &mut Counter) inc() {
+pub fn (c $&Counter) inc() {
     c.inc_by(1)
 }
 
-pub fn (c &mut Counter) inc_by(delta int) {
+pub fn (c $&Counter) inc_by(delta int) {
     empty_lbls := []Label{}
     c.inc_labels(empty_lbls, delta)
 }
 
-pub fn (c &mut Counter) inc_labels(labels []Label, delta int) {
+pub fn (c $&Counter) inc_labels(labels []Label, delta int) {
     lbl_str := format_labels(&labels)
-    mut found := false
-    mut i := 0
+    $found := false
+    $i := 0
     while i < c.samples.len {
         if c.samples[i].label_str == lbl_str {
             old_val := parse_int_def(c.samples[i].value + "", 0)
@@ -88,15 +88,15 @@ pub fn (c &mut Counter) inc_labels(labels []Label, delta int) {
     }
 }
 
-pub fn (g &mut Gauge) set(val string) {
+pub fn (g $&Gauge) set(val string) {
     empty_lbls := []Label{}
     g.set_labels(empty_lbls, val)
 }
 
-pub fn (g &mut Gauge) set_labels(labels []Label, val string) {
+pub fn (g $&Gauge) set_labels(labels []Label, val string) {
     lbl_str := format_labels(&labels)
-    mut found := false
-    mut i := 0
+    $found := false
+    $i := 0
     while i < g.samples.len {
         if g.samples[i].label_str == lbl_str {
             g.samples[i].value = val + ""
@@ -114,9 +114,9 @@ pub fn (g &mut Gauge) set_labels(labels []Label, val string) {
 }
 
 pub fn (c Counter) format() string {
-    mut out := "# HELP " + c.name + " " + c.help + "\n"
+    $out := "# HELP " + c.name + " " + c.help + "\n"
     out = out + "# TYPE " + c.name + " counter\n"
-    mut i := 0
+    $i := 0
     while i < c.samples.len {
         out = out + c.name + c.samples[i].label_str + " " + c.samples[i].value + "\n"
         i = i + 1
@@ -125,9 +125,9 @@ pub fn (c Counter) format() string {
 }
 
 pub fn (g Gauge) format() string {
-    mut out := "# HELP " + g.name + " " + g.help + "\n"
+    $out := "# HELP " + g.name + " " + g.help + "\n"
     out = out + "# TYPE " + g.name + " gauge\n"
-    mut i := 0
+    $i := 0
     while i < g.samples.len {
         out = out + g.name + g.samples[i].label_str + " " + g.samples[i].value + "\n"
         i = i + 1

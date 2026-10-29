@@ -13,7 +13,7 @@ Xu 语言原生 DNS 解析器驱动包，严格遵循 RFC 1035 标准。
 ```xu
 dns #github.com/xulang-org/packages/dns
 
-mut p := dns.pool("8.8.8.8:53", 5)
+$p := dns.pool("8.8.8.8:53", 5)
 ips := p.resolve_a("google.com") or panic
 for ip in ips {
     println("Resolved IP: " + ip)

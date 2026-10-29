@@ -36,10 +36,10 @@ fn scram_attr(msg &string, key string) string {
 }
 
 fn pbkdf2_sha256(password string, salt string, rounds int) string {
-    mut msg := salt + string_from_byte(0) + string_from_byte(0) + string_from_byte(0) + string_from_byte(1)
-    mut u := hmac_raw(password + "", msg)
-    mut out := u + ""
-    mut i := 1
+    $msg := salt + string_from_byte(0) + string_from_byte(0) + string_from_byte(0) + string_from_byte(1)
+    $u := hmac_raw(password + "", msg)
+    $out := u + ""
+    $i := 1
     while i < rounds {
         u = hmac_raw(password + "", u)
         out = xor_raw(out, u)
@@ -59,7 +59,7 @@ fn scram_auth(fd int, cfg &Config, initial_body string) string {
     if !strings.contains(&initial_body, "SCRAM-SHA-256") { << "postgres: server does not offer SCRAM-SHA-256" }
     nonce_raw := rand.read(18) or (err) { << err.msg() }
     nonce := base64.encode_raw(nonce_raw)
-    mut bare := "n=" + strings.replace_all(&cfg.user, "=", "=3D")
+    $bare := "n=" + strings.replace_all(&cfg.user, "=", "=3D")
     bare = strings.replace_all(&bare, ",", "=2C") + ",r=" + nonce
     first := "n,," + bare
     body := "SCRAM-SHA-256" + string_from_byte(0) + be32(first.len) + first
@@ -101,13 +101,13 @@ fn scram_auth(fd int, cfg &Config, initial_body string) string {
 }
 
 fn startup(fd int, cfg &Config) string {
-    mut body := be32(196608)
+    $body := be32(196608)
     body = body + "user" + string_from_byte(0) + cfg.user + string_from_byte(0)
     body = body + "database" + string_from_byte(0) + cfg.database + string_from_byte(0) + string_from_byte(0)
     frame := be32(body.len + 4) + body
     e := write_all(fd, frame)
     if e.len > 0 { << e }
-    mut auth_done := 0
+    $auth_done := 0
     while auth_done == 0 {
         p := recv_packet(fd)
         if p.err.len > 0 { << p.err }

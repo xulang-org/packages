@@ -1,8 +1,8 @@
 @"github.com/xulang-org/packages/redis"
 
 pub fn encode_cmd(args []string) string {
-    mut out := "*" + str(args.len) + "\r\n"
-    mut i := 0
+    $out := "*" + str(args.len) + "\r\n"
+    $i := 0
     while i < args.len {
         s := args[i]
         out = out + "$$" + str(s.len) + "\r\n" + s + "\r\n"
@@ -15,7 +15,7 @@ pub fn find_crlf(s &string) int {
     if s.len < 2 {
         << -1
     }
-    mut i := 0
+    $i := 0
     while i + 1 < s.len {
         if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 {
             << i

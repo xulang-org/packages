@@ -14,7 +14,7 @@ Xu 语言官方原生 Apache ZooKeeper 分布式协调服务驱动。
 zookeeper #github.com/xulang-org/packages/zookeeper
 
 fn main() {
-    mut p := zookeeper.open_pool("127.0.0.1:2181", 5)
+    $p := zookeeper.open_pool("127.0.0.1:2181", 5)
     defer p.close()
 
     if p.ruok() {

@@ -21,7 +21,7 @@ Xu 语言官方原生 Alibaba Nacos 驱动，提供微服务动态服务注册�
 nacos #github.com/xulang-org/packages/nacos
 
 fn main() {
-    mut p := nacos.open_pool("http://127.0.0.1:8848", "public", 5)
+    $p := nacos.open_pool("http://127.0.0.1:8848", "public", 5)
     defer p.close()
 
     // 注册微服务

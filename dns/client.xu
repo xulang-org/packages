@@ -18,7 +18,7 @@ fn safe_close(fd int) {
 }
 
 fn read_exact(fd int, need int) string {
-    mut buf := ""
+    $buf := ""
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) or (err) {
@@ -33,7 +33,7 @@ fn read_exact(fd int, need int) string {
 }
 
 fn write_all(fd int, data string) bool {
-    mut off := 0
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -48,9 +48,9 @@ fn write_all(fd int, data string) bool {
 }
 
 pub fn new_client(endpoint string) DnsClient {
-    mut ep := endpoint
-    mut host := "8.8.8.8"
-    mut port := 53
+    $ep := endpoint
+    $host := "8.8.8.8"
+    $port := 53
 
     colon := strings.index_of(&ep, ":")
     if colon >= 0 {

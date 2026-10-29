@@ -15,9 +15,9 @@ pub fn encode_domain(domain string) string {
     if domain.len == 0 {
         << string_from_byte(0)
     }
-    mut out := ""
+    $out := ""
     parts := strings.split(&domain, ".")
-    mut i := 0
+    $i := 0
     while i < parts.len {
         p := parts[i]
         if p.len > 0 {
@@ -38,7 +38,7 @@ pub fn build_query_packet(tx_id int, domain string, qtype int) string {
     flags_lo := 0x00
     qd_hi := 0x00
     qd_lo := 0x01   // 1 Question
-    mut hdr := string_from_byte(id_hi) + string_from_byte(id_lo)
+    $hdr := string_from_byte(id_hi) + string_from_byte(id_lo)
     hdr = hdr + string_from_byte(flags_hi) + string_from_byte(flags_lo)
     hdr = hdr + string_from_byte(qd_hi) + string_from_byte(qd_lo)
     hdr = hdr + string_from_byte(0) + string_from_byte(0) // ANCOUNT = 0
@@ -58,7 +58,7 @@ pub fn build_query_packet(tx_id int, domain string, qtype int) string {
 
 // Skips a name (supports uncompressed labels and compression pointers)
 fn skip_name(pkt &string, pos int) int {
-    mut p := pos
+    $p := pos
     while p < pkt.len {
         b := pkt[p] & 255
         if b == 0 {
@@ -83,7 +83,7 @@ pub struct DnsAnswer {
 
 // Parses DNS response and extracts IPv4 addresses (Type A)
 pub fn parse_a_records(pkt string) []string {
-    mut ips := []string{}
+    $ips := []string{}
     if pkt.len < 12 {
         << ips
     }
@@ -91,9 +91,9 @@ pub fn parse_a_records(pkt string) []string {
     ancount := ((pkt[6] & 255) << 8) | (pkt[7] & 255)
     qdcount := ((pkt[4] & 255) << 8) | (pkt[5] & 255)
 
-    mut p := 12
+    $p := 12
     // Skip questions
-    mut q := 0
+    $q := 0
     while q < qdcount && p < pkt.len {
         p = skip_name(&pkt, p)
         p = p + 4 // QTYPE (2) + QCLASS (2)
@@ -101,7 +101,7 @@ pub fn parse_a_records(pkt string) []string {
     }
 
     // Parse Answers
-    mut ans := 0
+    $ans := 0
     while ans < ancount && p + 10 <= pkt.len {
         p = skip_name(&pkt, p)
         if p + 10 > pkt.len {

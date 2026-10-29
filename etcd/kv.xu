@@ -5,8 +5,8 @@
 
 fn extract_json_value(json_str string, key_field string) string {
     target := "\"" + key_field + "\":\""
-    mut pos := -1
-    mut i := 0
+    $pos := -1
+    $i := 0
     while i + target.len <= json_str.len {
         if json_str[i:(i + target.len)] == target {
             pos = i + target.len
@@ -17,8 +17,8 @@ fn extract_json_value(json_str string, key_field string) string {
     if pos < 0 {
         << ""
     }
-    mut end_pos := -1
-    mut j := pos
+    $end_pos := -1
+    $j := pos
     while j < json_str.len {
         if (json_str[j] & 255) == 34 { // double quote '"'
             end_pos = j
@@ -32,12 +32,12 @@ fn extract_json_value(json_str string, key_field string) string {
     << json_str[pos:end_pos]
 }
 
-pub fn (c &mut Client) put(key string, value string) int {
-    mut reusable := false
-    << c.put_at(-1, key, value, mut &reusable) or >>
+pub fn (c $&Client) put(key string, value string) int {
+    $reusable := false
+    << c.put_at(-1, key, value, $&reusable) or >>
 }
 
-fn (c &mut Client) put_at(fd int, key string, value string, reusable &mut bool) int {
+fn (c $&Client) put_at(fd int, key string, value string, reusable $&bool) int {
     k_b64 := base64.encode_to_string(key)
     v_b64 := base64.encode_to_string(value)
     body := "{\"key\":\"" + k_b64 + "\",\"value\":\"" + v_b64 + "\"}"
@@ -48,12 +48,12 @@ fn (c &mut Client) put_at(fd int, key string, value string, reusable &mut bool) 
     << 0
 }
 
-pub fn (c &mut Client) put_with_lease(key string, value string, lease_id int) int {
-    mut reusable := false
-    << c.put_with_lease_at(-1, key, value, lease_id, mut &reusable) or >>
+pub fn (c $&Client) put_with_lease(key string, value string, lease_id int) int {
+    $reusable := false
+    << c.put_with_lease_at(-1, key, value, lease_id, $&reusable) or >>
 }
 
-fn (c &mut Client) put_with_lease_at(fd int, key string, value string, lease_id int, reusable &mut bool) int {
+fn (c $&Client) put_with_lease_at(fd int, key string, value string, lease_id int, reusable $&bool) int {
     k_b64 := base64.encode_to_string(key)
     v_b64 := base64.encode_to_string(value)
     body := "{\"key\":\"" + k_b64 + "\",\"value\":\"" + v_b64 + "\",\"lease\":\"" + str(lease_id) + "\"}"
@@ -66,7 +66,7 @@ fn (c &mut Client) put_with_lease_at(fd int, key string, value string, lease_id 
 
 fn contains_kvs(body string) bool {
     target := "\"kvs\":"
-    mut i := 0
+    $i := 0
     while i + target.len <= body.len {
         if body[i:(i + target.len)] == target {
             << true
@@ -76,12 +76,12 @@ fn contains_kvs(body string) bool {
     << false
 }
 
-pub fn (c &mut Client) get(key string) string {
-    mut reusable := false
-    << c.get_at(-1, key, mut &reusable) or >>
+pub fn (c $&Client) get(key string) string {
+    $reusable := false
+    << c.get_at(-1, key, $&reusable) or >>
 }
 
-fn (c &mut Client) get_at(fd int, key string, reusable &mut bool) string {
+fn (c $&Client) get_at(fd int, key string, reusable $&bool) string {
     k_b64 := base64.encode_to_string(key)
     body := "{\"key\":\"" + k_b64 + "\"}"
     resp := c.request_at(fd, "/v3/kv/range", body, reusable) or >>
@@ -101,12 +101,12 @@ fn (c &mut Client) get_at(fd int, key string, reusable &mut bool) string {
     << raw
 }
 
-pub fn (c &mut Client) exists(key string) bool {
-    mut reusable := false
-    << c.exists_at(-1, key, mut &reusable)
+pub fn (c $&Client) exists(key string) bool {
+    $reusable := false
+    << c.exists_at(-1, key, $&reusable)
 }
 
-fn (c &mut Client) exists_at(fd int, key string, reusable &mut bool) bool {
+fn (c $&Client) exists_at(fd int, key string, reusable $&bool) bool {
     k_b64 := base64.encode_to_string(key)
     body := "{\"key\":\"" + k_b64 + "\"}"
     resp := c.request_at(fd, "/v3/kv/range", body, reusable) or (err) {
@@ -118,12 +118,12 @@ fn (c &mut Client) exists_at(fd int, key string, reusable &mut bool) bool {
     << contains_kvs(resp.body)
 }
 
-pub fn (c &mut Client) delete(key string) int {
-    mut reusable := false
-    << c.delete_at(-1, key, mut &reusable) or >>
+pub fn (c $&Client) delete(key string) int {
+    $reusable := false
+    << c.delete_at(-1, key, $&reusable) or >>
 }
 
-fn (c &mut Client) delete_at(fd int, key string, reusable &mut bool) int {
+fn (c $&Client) delete_at(fd int, key string, reusable $&bool) int {
     k_b64 := base64.encode_to_string(key)
     body := "{\"key\":\"" + k_b64 + "\"}"
     resp := c.request_at(fd, "/v3/kv/deleterange", body, reusable) or >>

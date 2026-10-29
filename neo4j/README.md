@@ -16,7 +16,7 @@ Xu 语言官方原生 Neo4j 图数据库驱动，基于 HTTP Cypher Transactiona
 neo4j #github.com/xulang-org/packages/neo4j
 
 fn main() {
-    mut p := neo4j.open_pool("http://127.0.0.1:7474", "neo4j", "secret123", "neo4j", 5)
+    $p := neo4j.open_pool("http://127.0.0.1:7474", "neo4j", "secret123", "neo4j", 5)
     defer p.close()
 
     // 创建节点

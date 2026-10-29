@@ -106,8 +106,8 @@ fn main() {{
         println(err.msg())
         <<
     }}
-    mut cfg := tls.new_config("localhost")
-    n := x509.append_certificates(mut &cfg.root_cas, &cert) or (err) {{
+    $cfg := tls.new_config("localhost")
+    n := x509.append_certificates($&cfg.root_cas, &cert) or (err) {{
         println(err.msg())
         <<
     }}
@@ -125,8 +125,8 @@ fn main() {{
         println("bad-body-1")
         <<
     }}
-    mut cfg2 := tls.new_config("localhost")
-    x509.append_certificates(mut &cfg2.root_cas, &cert) or (err) {{
+    $cfg2 := tls.new_config("localhost")
+    x509.append_certificates($&cfg2.root_cas, &cert) or (err) {{
         println(err.msg())
         <<
     }}
@@ -140,8 +140,8 @@ fn main() {{
         println("bad-body-2")
         <<
     }}
-    mut bad := tls.new_config("wrong.test")
-    x509.append_certificates(mut &bad.root_cas, &cert) or (err) {{
+    $bad := tls.new_config("wrong.test")
+    x509.append_certificates($&bad.root_cas, &cert) or (err) {{
         println(err.msg())
         <<
     }}

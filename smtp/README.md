@@ -14,7 +14,7 @@ Xu 语言原生 SMTP 客户端，提供下列握手、认证和邮件发送操�
 ```xu
 smtp #github.com/xulang-org/packages/smtp
 
-mut p := smtp.pool("smtp://127.0.0.1:1025", 5)
+$p := smtp.pool("smtp://127.0.0.1:1025", 5)
 
 // 发送邮件
 msg := smtp.Message{

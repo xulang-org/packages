@@ -18,8 +18,8 @@ pub struct ScoredPoint {
 }
 
 fn format_vector_json(vec []string) string {
-    mut res := "["
-    mut i := 0
+    $res := "["
+    $i := 0
     while i < vec.len {
         if i > 0 {
             res = res + ","
@@ -31,14 +31,14 @@ fn format_vector_json(vec []string) string {
     << res
 }
 
-pub fn (c &mut Client) upsert_point(collection string, id int, vector []string, payload_json string) bool {
-    mut reusable := false
-    << c.upsert_point_at(-1, collection, id, vector, payload_json, mut &reusable)
+pub fn (c $&Client) upsert_point(collection string, id int, vector []string, payload_json string) bool {
+    $reusable := false
+    << c.upsert_point_at(-1, collection, id, vector, payload_json, $&reusable)
 }
 
-fn (c &mut Client) upsert_point_at(fd int, collection string, id int, vector []string, payload_json string, reusable &mut bool) bool {
+fn (c $&Client) upsert_point_at(fd int, collection string, id int, vector []string, payload_json string, reusable $&bool) bool {
     vec_json := format_vector_json(vector)
-    mut body := "{\"points\":[{\"id\":" + str(id) + ",\"vector\":" + vec_json
+    $body := "{\"points\":[{\"id\":" + str(id) + ",\"vector\":" + vec_json
     if payload_json.len > 0 {
         body = body + ",\"payload\":" + payload_json
     }
@@ -50,12 +50,12 @@ fn (c &mut Client) upsert_point_at(fd int, collection string, id int, vector []s
     << resp.status_code == 200
 }
 
-pub fn (c &mut Client) search(collection string, vector []string, limit int) []ScoredPoint {
-    mut reusable := false
-    << c.search_at(-1, collection, vector, limit, mut &reusable) or >>
+pub fn (c $&Client) search(collection string, vector []string, limit int) []ScoredPoint {
+    $reusable := false
+    << c.search_at(-1, collection, vector, limit, $&reusable) or >>
 }
 
-fn (c &mut Client) search_at(fd int, collection string, vector []string, limit int, reusable &mut bool) []ScoredPoint {
+fn (c $&Client) search_at(fd int, collection string, vector []string, limit int, reusable $&bool) []ScoredPoint {
     vec_json := format_vector_json(vector)
     body := "{\"vector\":" + vec_json + ",\"limit\":" + str(limit) + ",\"with_payload\":true}"
 
@@ -69,7 +69,7 @@ fn (c &mut Client) search_at(fd int, collection string, vector []string, limit i
     if !d.ok() { >> errors.new("qdrant: invalid JSON: " + d.error()) }
     nodes := d.get(d.root(), "result")
     if nodes < 0 || !d.is_list(nodes) { >> errors.new("qdrant: missing result array") }
-    mut results := []ScoredPoint{}
+    $results := []ScoredPoint{}
     for i in 0:d.count(nodes) {
         hit := d.at(nodes, i)
         if !d.is_dict(hit) { >> errors.new("qdrant: invalid scored point") }
@@ -80,7 +80,7 @@ fn (c &mut Client) search_at(fd int, collection string, vector []string, limit i
         text := d.text(id)
         value := strconv.atoi(&text) or >>
         payload := d.get(hit, "payload")
-        mut payload_json := ""
+        $payload_json := ""
         if payload >= 0 { payload_json = d.encode(payload) or >> }
         results.push(ScoredPoint{id: value, score: d.text(score), payload_json: payload_json})
     }

@@ -37,15 +37,15 @@ pub fn new_pusher(endpoint string, job string) Pusher {
         ep := transport.parse_endpoint(endpoint, 9091) or (err) { << Pusher{host: "127.0.0.1", port: 9091, secure: true, job: job + ""} }
         << Pusher{host: ep.host, port: ep.port, secure: true, job: job + ""}
     }
-    mut ep := endpoint
+    $ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 9091
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 9091
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -68,7 +68,7 @@ pub fn new_pusher(endpoint string, job string) Pusher {
 pub fn (p &Pusher) push(metrics_text string) bool {
     if p.secure {
         path := "/metrics/job/" + p.job
-        mut req := "POST " + path + " HTTP/1.1\r\n"
+        $req := "POST " + path + " HTTP/1.1\r\n"
         req = req + "Host: " + p.host + ":" + str(p.port) + "\r\n"
         req = req + "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n"
         req = req + "Content-Length: " + str(metrics_text.len) + "\r\n"
@@ -80,17 +80,17 @@ pub fn (p &Pusher) push(metrics_text string) bool {
     }
     addr := p.host + ":" + str(p.port)
     fd := net.dial(strings.clone(&addr)) or (err) { << false }
-    mut reusable := false
-    result := p.push_on_fd(fd, metrics_text, mut &reusable)
+    $reusable := false
+    result := p.push_on_fd(fd, metrics_text, $&reusable)
     safe_close(fd)
     << result
 }
 
-fn (p &Pusher) push_on_fd(fd int, metrics_text string, reusable &mut bool) bool {
+fn (p &Pusher) push_on_fd(fd int, metrics_text string, reusable $&bool) bool {
     *reusable = false
 
     path := "/metrics/job/" + p.job
-    mut req := "POST " + path + " HTTP/1.1\r\n"
+    $req := "POST " + path + " HTTP/1.1\r\n"
     req = req + "Host: " + p.host + ":" + str(p.port) + "\r\n"
     req = req + "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n"
     req = req + "Content-Length: " + str(metrics_text.len) + "\r\n"
@@ -99,7 +99,7 @@ fn (p &Pusher) push_on_fd(fd int, metrics_text string, reusable &mut bool) bool 
         req = req + metrics_text
     }
 
-    mut off := 0
+    $off := 0
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) or (err) {

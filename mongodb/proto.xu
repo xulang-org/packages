@@ -8,7 +8,7 @@ pub fn encode_op_msg(request_id int, doc_bytes string) string {
     // Header (16) + flagBits (4) + section kind (1) + doc_bytes
     total_len := 16 + 4 + 1 + doc_bytes.len
 
-    mut pkt := ""
+    $pkt := ""
     pkt = pkt + encode_i32(total_len)
     pkt = pkt + encode_i32(request_id)
     pkt = pkt + encode_i32(0) // responseTo

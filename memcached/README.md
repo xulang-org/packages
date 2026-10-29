@@ -28,7 +28,7 @@ require:
 memcached #github.com/xulang-org/packages/memcached
 
 fn main() int {
-    mut mc := memcached.open("127.0.0.1:11211") or >>
+    $mc := memcached.open("127.0.0.1:11211") or >>
 
     // 1. 设置与读取
     mc.set("user:token", "xyz_token_value", 0, 3600) or >>
@@ -41,7 +41,7 @@ fn main() int {
 
     // 3. 连接池
     pool := memcached.new_pool("127.0.0.1:11211", 5)
-    mut conn := pool.get() or >>
+    $conn := pool.get() or >>
     ver := conn.version() or >>
     pool.put(conn)
 

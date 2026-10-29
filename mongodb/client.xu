@@ -18,8 +18,8 @@ fn safe_close(fd int) {
     }
 }
 
-pub fn (c &mut Client) write_exact(data string) int {
-    mut off := 0
+pub fn (c $&Client) write_exact(data string) int {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) or (err) {
@@ -33,8 +33,8 @@ pub fn (c &mut Client) write_exact(data string) int {
     << 0
 }
 
-pub fn (c &mut Client) read_exact(n int) string {
-    mut res := ""
+pub fn (c $&Client) read_exact(n int) string {
+    $res := ""
     while res.len < n {
         chunk := net.conn_read(c.fd, n - res.len) or (err) {
             >> errors.new("mongodb: read failed: " + err.msg())
@@ -47,8 +47,8 @@ pub fn (c &mut Client) read_exact(n int) string {
     << res
 }
 
-pub fn (c &mut Client) run_command(db_name string, cmd_elements string) string {
-    mut elems := cmd_elements
+pub fn (c $&Client) run_command(db_name string, cmd_elements string) string {
+    $elems := cmd_elements
     elems = elems + bson_string("$$db", db_name)
     doc := build_doc(elems)
 
@@ -106,7 +106,7 @@ pub fn connect(addr string) Client {
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("mongodb: dial failed: " + err.msg())
     }
-    mut c := Client{
+    $c := Client{
         fd: fd,
         addr: addr,
         next_req_id: 1
@@ -119,7 +119,7 @@ pub fn connect(addr string) Client {
     << c
 }
 
-pub fn (c &mut Client) hello() bool {
+pub fn (c $&Client) hello() bool {
     elems := bson_int32("hello", 1)
     doc := c.run_command("admin", elems) or (err) {
         << false
@@ -127,13 +127,13 @@ pub fn (c &mut Client) hello() bool {
     << is_bson_ok(doc)
 }
 
-pub fn (c &mut Client) insert_one(db_name string, col_name string, doc_bytes string) int {
-    mut target_doc := doc_bytes
+pub fn (c $&Client) insert_one(db_name string, col_name string, doc_bytes string) int {
+    $target_doc := doc_bytes
     // Check if doc_bytes is already a full document (len >= 5 and decode_i32 == len)
     if target_doc.len < 5 || decode_i32(&target_doc, 0) != target_doc.len {
         target_doc = build_doc(target_doc)
     }
-    mut elems := bson_string("insert", col_name)
+    $elems := bson_string("insert", col_name)
     arr_elem := bson_doc("0", target_doc)
     arr := build_doc(arr_elem)
     elems = elems + bson_array("documents", arr)
@@ -141,8 +141,8 @@ pub fn (c &mut Client) insert_one(db_name string, col_name string, doc_bytes str
     << 0
 }
 
-pub fn (c &mut Client) find_first_string(db_name string, col_name string, target_field string) string {
-    mut elems := bson_string("find", col_name)
+pub fn (c $&Client) find_first_string(db_name string, col_name string, target_field string) string {
+    $elems := bson_string("find", col_name)
     elems = elems + bson_int32("limit", 1)
     res_doc := c.run_command(db_name, elems) or >>
     cursor := find_bson_document(res_doc, "cursor")
@@ -151,7 +151,7 @@ pub fn (c &mut Client) find_first_string(db_name string, col_name string, target
     << find_bson_string(first, target_field)
 }
 
-pub fn (c &mut Client) drop_collection(db_name string, col_name string) bool {
+pub fn (c $&Client) drop_collection(db_name string, col_name string) bool {
     elems := bson_string("drop", col_name)
     c.run_command(db_name, elems) or (err) {
         << false
@@ -159,7 +159,7 @@ pub fn (c &mut Client) drop_collection(db_name string, col_name string) bool {
     << true
 }
 
-pub fn (c &mut Client) close() {
+pub fn (c $&Client) close() {
     if c.fd >= 0 {
         safe_close(c.fd)
         c.fd = -1

@@ -17,7 +17,7 @@ pub fn dial(addr string) Client {
     << Client{fd: fd, buf: "", addr: addr}
 }
 
-fn (c &mut Client) fill() int {
+fn (c $&Client) fill() int {
     chunk := net.conn_read(c.fd, 4096) or (err) {
         >> errors.new("memcached: read error: " + err.msg())
     }
@@ -32,7 +32,7 @@ fn find_crlf(s &string) int {
     if s.len < 2 {
         << -1
     }
-    mut i := 0
+    $i := 0
     while i + 1 < s.len {
         if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 {
             << i
@@ -42,7 +42,7 @@ fn find_crlf(s &string) int {
     << -1
 }
 
-pub fn (c &mut Client) read_line() string {
+pub fn (c $&Client) read_line() string {
     while true {
         idx := find_crlf(&c.buf)
         if idx >= 0 {
@@ -59,7 +59,7 @@ pub fn (c &mut Client) read_line() string {
     << ""
 }
 
-pub fn (c &mut Client) read_bytes(n int) string {
+pub fn (c $&Client) read_bytes(n int) string {
     if n <= 0 {
         << ""
     }
@@ -75,8 +75,8 @@ pub fn (c &mut Client) read_bytes(n int) string {
     << res
 }
 
-pub fn (c &mut Client) write_raw(data string) int {
-    mut off := 0
+pub fn (c $&Client) write_raw(data string) int {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) or (err) {
@@ -98,7 +98,7 @@ fn safe_close(fd int) {
     }
 }
 
-pub fn (c &mut Client) close() int {
+pub fn (c $&Client) close() int {
     if c.fd >= 0 {
         safe_close(c.fd)
         c.fd = -1

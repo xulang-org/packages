@@ -11,7 +11,7 @@ pub struct RedisURL {
 }
 
 fn find_char(s &string, ch int) int {
-    mut i := 0
+    $i := 0
     while i < s.len {
         if (s[i] & 255) == ch {
             << i
@@ -32,13 +32,13 @@ fn parse_int_def(s &string, def int) int {
 }
 
 pub fn parse_url(raw string) RedisURL {
-    mut rest := raw
+    $rest := raw
     prefix := "redis://"
     if rest.len >= prefix.len && rest[0:prefix.len] == prefix {
         rest = rest[prefix.len:rest.len]
     }
 
-    mut db := 0
+    $db := 0
     slash_idx := find_char(&rest, 47) // '/'
     if slash_idx >= 0 {
         db_part := rest[(slash_idx + 1):rest.len]
@@ -48,7 +48,7 @@ pub fn parse_url(raw string) RedisURL {
         }
     }
 
-    mut password := ""
+    $password := ""
     at_idx := find_char(&rest, 64) // '@'
     if at_idx >= 0 {
         auth_part := rest[0:at_idx]
@@ -61,8 +61,8 @@ pub fn parse_url(raw string) RedisURL {
         }
     }
 
-    mut host := "127.0.0.1"
-    mut port := 6379
+    $host := "127.0.0.1"
+    $port := 6379
     colon_idx := find_char(&rest, 58) // ':'
     if colon_idx >= 0 {
         h := rest[0:colon_idx]

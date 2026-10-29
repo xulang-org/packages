@@ -29,7 +29,7 @@ mqtt #github.com/xulang-org/packages/mqtt
 
 fn main() int {
     // 1. 连接 MQTT Broker
-    mut client := mqtt.open("127.0.0.1:1883", "xu_iot_node_1") or >>
+    $client := mqtt.open("127.0.0.1:1883", "xu_iot_node_1") or >>
 
     // 2. 心跳探测
     if client.ping() {

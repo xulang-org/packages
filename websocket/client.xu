@@ -16,7 +16,7 @@ pub struct WsClient {
 }
 
 fn read_exact(fd int, need int) string {
-    mut buf := ""
+    $buf := ""
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) or (err) {
@@ -31,7 +31,7 @@ fn read_exact(fd int, need int) string {
 }
 
 fn write_all(fd int, data string) bool {
-    mut off := 0
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -58,11 +58,11 @@ pub fn new_client(endpoint string) WsClient {
         ep := transport.parse_endpoint("https://" + endpoint[6:endpoint.len], 443) or (err) {
             << WsClient{host: "127.0.0.1", port: 443, path: "/", secure: true}
         }
-        mut path0 := ep.path
+        $path0 := ep.path
         if path0.len == 0 { path0 = "/" }
         << WsClient{host: ep.host, port: ep.port, path: path0, secure: true}
     }
-    mut ep := endpoint
+    $ep := endpoint
     prefix_ws := "ws://"
     if ep.len >= prefix_ws.len && ep[0:prefix_ws.len] == prefix_ws {
         ep = ep[prefix_ws.len:ep.len]
@@ -72,9 +72,9 @@ pub fn new_client(endpoint string) WsClient {
         ep = ep[prefix_http.len:ep.len]
     }
 
-    mut host := "127.0.0.1"
-    mut port := 8080
-    mut path := "/"
+    $host := "127.0.0.1"
+    $port := 8080
+    $path := "/"
 
     slash := strings.index_of(&ep, "/")
     if slash >= 0 {
@@ -105,8 +105,8 @@ pub fn new_client(endpoint string) WsClient {
     }
 }
 
-fn read_exact_secure(c &mut transport.Conn, need int) string {
-    mut buf := ""
+fn read_exact_secure(c $&transport.Conn, need int) string {
+    $buf := ""
     while buf.len < need {
         chunk := c.read(need - buf.len) or >>
         if chunk.len == 0 { >> errors.new("wss read unexpected EOF") }
@@ -115,7 +115,7 @@ fn read_exact_secure(c &mut transport.Conn, need int) string {
     << buf
 }
 
-fn write_secure(c &mut transport.Conn, data string) int {
+fn write_secure(c $&transport.Conn, data string) int {
     << c.write_all(data) or >>
 }
 
@@ -123,15 +123,15 @@ pub fn (c WsClient) connect_secure() transport.Conn {
     if !c.secure { >> errors.new("ws: endpoint is not wss") }
     ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: c.path + "", secure: true}
     cfg := tls.new_config(c.host + "")
-    mut tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or >>
+    $tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or >>
     nonce := rand.read(16) or >>
     key := base64.encode_to_string(nonce)
     req := build_handshake_request(c.host, c.port, c.path, key + "")
-    write_secure(mut &tc, req) or (err) {
+    write_secure($&tc, req) or (err) {
         tc.close()
         >> err
     }
-    mut resp := ""
+    $resp := ""
     while strings.index_of(&resp, "\r\n\r\n") < 0 {
         chunk := tc.read(256) or (err) {
             tc.close()
@@ -155,17 +155,17 @@ pub fn (c WsClient) connect_secure() transport.Conn {
     << tc
 }
 
-pub fn (c WsClient) send_text_secure(tc &mut transport.Conn, text string) bool {
+pub fn (c WsClient) send_text_secure(tc $&transport.Conn, text string) bool {
     write_secure(tc, build_frame(OPCODE_TEXT, text, true, true)) or (err) { << false }
     << true
 }
 
-pub fn (c WsClient) send_pong_secure(tc &mut transport.Conn, payload string) bool {
+pub fn (c WsClient) send_pong_secure(tc $&transport.Conn, payload string) bool {
     write_secure(tc, build_frame(OPCODE_PONG, payload, true, true)) or (err) { << false }
     << true
 }
 
-pub fn (c WsClient) read_frame_secure(tc &mut transport.Conn) Frame {
+pub fn (c WsClient) read_frame_secure(tc $&transport.Conn) Frame {
     hdr := read_exact_secure(tc, 2) or >>
     b0 := hdr[0] & 255
     b1 := hdr[1] & 255
@@ -173,7 +173,7 @@ pub fn (c WsClient) read_frame_secure(tc &mut transport.Conn) Frame {
     opcode := b0 & 15
     masked := (b1 & 128) != 0
     code := b1 & 127
-    mut n := code
+    $n := code
     if code == 126 {
         ext := read_exact_secure(tc, 2) or >>
         n = ((ext[0] & 255) << 8) | (ext[1] & 255)
@@ -182,10 +182,10 @@ pub fn (c WsClient) read_frame_secure(tc &mut transport.Conn) Frame {
         n = 0
         for i in 0:8 { n = (n << 8) | (ext[i] & 255) }
     }
-    mut m0 := 0
-    mut m1 := 0
-    mut m2 := 0
-    mut m3 := 0
+    $m0 := 0
+    $m1 := 0
+    $m2 := 0
+    $m3 := 0
     if masked {
         mask := read_exact_secure(tc, 4) or >>
         m0 = mask[0] & 255
@@ -193,14 +193,14 @@ pub fn (c WsClient) read_frame_secure(tc &mut transport.Conn) Frame {
         m2 = mask[2] & 255
         m3 = mask[3] & 255
     }
-    mut payload := ""
+    $payload := ""
     if n > 0 { payload = read_exact_secure(tc, n) or >> }
     if masked { payload = apply_mask(payload, m0, m1, m2, m3) }
     if opcode == OPCODE_PING { c.send_pong_secure(tc, payload) or (err) { << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload} } }
     << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload}
 }
 
-pub fn (c WsClient) read_text_secure(tc &mut transport.Conn) string {
+pub fn (c WsClient) read_text_secure(tc $&transport.Conn) string {
     while true {
         f := c.read_frame_secure(tc) or >>
         if f.opcode == OPCODE_TEXT { << f.payload }
@@ -209,7 +209,7 @@ pub fn (c WsClient) read_text_secure(tc &mut transport.Conn) string {
     << ""
 }
 
-pub fn (c WsClient) close_secure(tc &mut transport.Conn) {
+pub fn (c WsClient) close_secure(tc $&transport.Conn) {
     write_secure(tc, build_frame(OPCODE_CLOSE, "", true, true)) or (err) { << }
     tc.close()
 }
@@ -230,8 +230,8 @@ pub fn (c WsClient) connect() int {
     }
 
     // Read HTTP response headers until "\r\n\r\n"
-    mut resp := ""
-    mut found_header_end := false
+    $resp := ""
+    $found_header_end := false
     while !found_header_end {
         chunk := net.conn_read(fd, 256) or (err) {
             safe_close(fd)
@@ -302,7 +302,7 @@ pub fn (c WsClient) read_frame(fd int) Frame {
     masked := (b1 & 128) != 0
     len_code := b1 & 127
 
-    mut payload_len := len_code
+    $payload_len := len_code
     if len_code == 126 {
         ext := read_exact(fd, 2) or >>
         e0 := ext[0] & 255
@@ -310,8 +310,8 @@ pub fn (c WsClient) read_frame(fd int) Frame {
         payload_len = (e0 << 8) | e1
     } else if len_code == 127 {
         ext := read_exact(fd, 8) or >>
-        mut l := 0
-        mut i := 0
+        $l := 0
+        $i := 0
         while i < 8 {
             eb := ext[i] & 255
             l = (l << 8) | eb
@@ -320,10 +320,10 @@ pub fn (c WsClient) read_frame(fd int) Frame {
         payload_len = l
     }
 
-    mut m0 := 0
-    mut m1 := 0
-    mut m2 := 0
-    mut m3 := 0
+    $m0 := 0
+    $m1 := 0
+    $m2 := 0
+    $m3 := 0
     if masked {
         mbytes := read_exact(fd, 4) or >>
         m0 = mbytes[0] & 255
@@ -332,7 +332,7 @@ pub fn (c WsClient) read_frame(fd int) Frame {
         m3 = mbytes[3] & 255
     }
 
-    mut payload := ""
+    $payload := ""
     if payload_len > 0 {
         raw_payload := read_exact(fd, payload_len) or >>
         if masked {

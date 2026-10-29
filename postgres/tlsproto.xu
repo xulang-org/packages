@@ -3,9 +3,9 @@
 #crypto/tls
 transport #github.com/xulang-org/packages/transport
 
-fn read_exact_tls(tc &mut transport.Conn, n int) ReadResult {
+fn read_exact_tls(tc $&transport.Conn, n int) ReadResult {
     if n < 0 || n > 16777216 { << ReadResult{data: "", err: "postgres: invalid packet length"} }
-    mut out := ""
+    $out := ""
     while out.len < n {
         need := n - out.len
         part := tc.read(need) or (err) { << ReadResult{data: "", err: err.msg()} }
@@ -15,8 +15,8 @@ fn read_exact_tls(tc &mut transport.Conn, n int) ReadResult {
     << ReadResult{data: out, err: ""}
 }
 
-fn write_all_tls(tc &mut transport.Conn, data string) string {
-    mut off := 0
+fn write_all_tls(tc $&transport.Conn, data string) string {
+    $off := 0
     while off < data.len {
         part := data[off:data.len] + ""
         n := tc.write(&part) or (err) { << err.msg() }
@@ -26,12 +26,12 @@ fn write_all_tls(tc &mut transport.Conn, data string) string {
     << ""
 }
 
-fn send_packet_tls(tc &mut transport.Conn, typ int, body string) string {
+fn send_packet_tls(tc $&transport.Conn, typ int, body string) string {
     frame := string_from_byte(typ & 255) + be32(body.len + 4) + body
     << write_all_tls(tc, frame)
 }
 
-fn recv_packet_tls(tc &mut transport.Conn) Packet {
+fn recv_packet_tls(tc $&transport.Conn) Packet {
     h := read_exact_tls(tc, 5)
     if h.err.len > 0 { << Packet{typ: 0, body: "", err: h.err} }
     n := be32_at(&h.data, 1)

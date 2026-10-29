@@ -15,7 +15,7 @@
 influxdb #github.com/xulang-org/packages/influxdb
 
 fn main() {
-    mut client := influxdb.open(
+    $client := influxdb.open(
         "http://127.0.0.1:8086",
         "my-super-secret-token",
         "xu-org",
@@ -30,7 +30,7 @@ fn main() {
     println("InfluxDB health: " + str(is_ok))
 
     // 2. 构造数据点并写入 (Line Protocol)
-    mut pt := influxdb.new_point("cpu_metrics")
+    $pt := influxdb.new_point("cpu_metrics")
     pt.add_tag("host", "server-01")
     pt.add_tag("region", "ap-east")
     pt.add_field_float("usage_user", "12.35")
@@ -67,7 +67,7 @@ fn main() {
         5
     )
 
-    mut client := pool.get()
+    $client := pool.get()
     client.ping() or (err) {
         println("Ping failed: " + err.msg())
     }

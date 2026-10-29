@@ -5,7 +5,7 @@
 // Lightweight BSON Encoder & Decoder for MongoDB Wire Protocol.
 
 pub fn encode_i32(v int) string {
-    mut b := ""
+    $b := ""
     b.push_byte(v & 255)
     b.push_byte((v >> 8) & 255)
     b.push_byte((v >> 16) & 255)
@@ -14,7 +14,7 @@ pub fn encode_i32(v int) string {
 }
 
 pub fn encode_i64(v int) string {
-    mut b := ""
+    $b := ""
     b.push_byte(v & 255)
     b.push_byte((v >> 8) & 255)
     b.push_byte((v >> 16) & 255)
@@ -39,14 +39,14 @@ pub fn decode_i32(s &string, off int) int {
 
 pub fn build_doc(elements string) string {
     total_len := elements.len + 5 // 4 bytes length + elements + 1 byte 0x00
-    mut out := encode_i32(total_len)
+    $out := encode_i32(total_len)
     out = out + elements
     out.push_byte(0)
     << out
 }
 
 pub fn bson_string(name string, val string) string {
-    mut out := ""
+    $out := ""
     out.push_byte(2) // 0x02 = String
     out = out + name
     out.push_byte(0)
@@ -57,7 +57,7 @@ pub fn bson_string(name string, val string) string {
 }
 
 pub fn bson_int32(name string, val int) string {
-    mut out := ""
+    $out := ""
     out.push_byte(16) // 0x10 = 32-bit int
     out = out + name
     out.push_byte(0)
@@ -66,7 +66,7 @@ pub fn bson_int32(name string, val int) string {
 }
 
 pub fn bson_int64(name string, val int) string {
-    mut out := ""
+    $out := ""
     out.push_byte(18) // 0x12 = 64-bit int
     out = out + name
     out.push_byte(0)
@@ -75,7 +75,7 @@ pub fn bson_int64(name string, val int) string {
 }
 
 pub fn bson_bool(name string, val bool) string {
-    mut out := ""
+    $out := ""
     out.push_byte(8) // 0x08 = Boolean
     out = out + name
     out.push_byte(0)
@@ -88,7 +88,7 @@ pub fn bson_bool(name string, val bool) string {
 }
 
 pub fn bson_doc(name string, doc_bytes string) string {
-    mut out := ""
+    $out := ""
     out.push_byte(3) // 0x03 = Embedded Document
     out = out + name
     out.push_byte(0)
@@ -97,7 +97,7 @@ pub fn bson_doc(name string, doc_bytes string) string {
 }
 
 pub fn bson_array(name string, arr_bytes string) string {
-    mut out := ""
+    $out := ""
     out.push_byte(4) // 0x04 = Array Document
     out = out + name
     out.push_byte(0)
@@ -106,14 +106,14 @@ pub fn bson_array(name string, arr_bytes string) string {
 }
 
 pub fn bson_object_id(name string, oid_bytes string) string {
-    mut out := ""
+    $out := ""
     out.push_byte(7) // 0x07 = ObjectId (12 bytes)
     out = out + name
     out.push_byte(0)
     if oid_bytes.len == 12 {
         out = out + oid_bytes
     } else {
-        mut pad := oid_bytes
+        $pad := oid_bytes
         while pad.len < 12 {
             pad.push_byte(0)
         }
@@ -123,7 +123,7 @@ pub fn bson_object_id(name string, oid_bytes string) string {
 }
 
 pub fn bson_utc_datetime(name string, millis int) string {
-    mut out := ""
+    $out := ""
     out.push_byte(9) // 0x09 = UTC datetime (64-bit int)
     out = out + name
     out.push_byte(0)
@@ -132,7 +132,7 @@ pub fn bson_utc_datetime(name string, millis int) string {
 }
 
 pub fn bson_null(name string) string {
-    mut out := ""
+    $out := ""
     out.push_byte(10) // 0x0A = Null
     out = out + name
     out.push_byte(0)
@@ -153,7 +153,7 @@ fn bson_invalid() BsonField {
 }
 
 fn bson_cstring_end(doc &string, off int, limit int) int {
-    mut i := off
+    $i := off
     while i < limit {
         if (doc[i] & 255) == 0 { << i + 1 }
         i += 1
@@ -167,7 +167,7 @@ fn bson_next(doc &string, off int) BsonField {
     typ := doc[off] & 255
     name_end := bson_cstring_end(doc, off + 1, limit)
     if name_end < 0 { << bson_invalid() }
-    mut end := name_end
+    $end := name_end
     if typ == 1 || typ == 9 || typ == 17 || typ == 18 { end += 8 }
     else if typ == 7 { end += 12 }
     else if typ == 8 { end += 1 }
@@ -224,11 +224,11 @@ fn valid_bson_depth(doc &string, depth int, array bool) bool {
     if depth > 64 { << false }
     if doc.len < 5 || doc.len > 16777216 { << false }
     if decode_i32(doc, 0) != doc.len || (doc[doc.len - 1] & 255) != 0 { << false }
-    mut off := 4
-    mut index := 0
-    mut ok_count := 0
-    mut errors_count := 0
-    mut concern_count := 0
+    $off := 4
+    $index := 0
+    $ok_count := 0
+    $errors_count := 0
+    $concern_count := 0
     while off < doc.len - 1 {
         f := bson_next(doc, off)
         if f.typ < 0 || f.end <= off { << false }
@@ -254,8 +254,8 @@ fn valid_bson_depth(doc &string, depth int, array bool) bool {
 
 fn bson_field(doc &string, name string) BsonField {
     if !valid_bson(doc) { << bson_invalid() }
-    mut off := 4
-    mut found := bson_invalid()
+    $off := 4
+    $found := bson_invalid()
     while off < doc.len - 1 {
         f := bson_next(doc, off)
         if f.name == name {

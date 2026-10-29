@@ -24,7 +24,7 @@ require:
 etcd #github.com/xulang-org/packages/etcd
 
 fn main() {
-    mut client := etcd.open("http://127.0.0.1:2379")
+    $client := etcd.open("http://127.0.0.1:2379")
 
     // 1. 写入配置
     client.put("/config/app/title", "Xu High-Performance Service") or (err) {

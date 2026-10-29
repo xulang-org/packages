@@ -16,92 +16,92 @@ pub fn (c &Client) pipeline() Pipeline {
     << new_pipeline()
 }
 
-pub fn (p &mut Pipeline) len() int {
+pub fn (p $&Pipeline) len() int {
     << p.count
 }
 
-pub fn (p &mut Pipeline) command(args []string) {
+pub fn (p $&Pipeline) command(args []string) {
     p.raw = p.raw + encode_cmd(args)
     p.count = p.count + 1
 }
 
-pub fn (p &mut Pipeline) ping() {
+pub fn (p $&Pipeline) ping() {
     p.command(["PING"])
 }
 
-pub fn (p &mut Pipeline) get(key string) {
+pub fn (p $&Pipeline) get(key string) {
     p.command(["GET", key])
 }
 
-pub fn (p &mut Pipeline) set(key string, val string) {
+pub fn (p $&Pipeline) set(key string, val string) {
     p.command(["SET", key, val])
 }
 
-pub fn (p &mut Pipeline) set_ex(key string, seconds int, val string) {
+pub fn (p $&Pipeline) set_ex(key string, seconds int, val string) {
     p.command(["SETEX", key, str(seconds), val])
 }
 
-pub fn (p &mut Pipeline) del(key string) {
+pub fn (p $&Pipeline) del(key string) {
     p.command(["DEL", key])
 }
 
-pub fn (p &mut Pipeline) incr(key string) {
+pub fn (p $&Pipeline) incr(key string) {
     p.command(["INCR", key])
 }
 
-pub fn (p &mut Pipeline) decr(key string) {
+pub fn (p $&Pipeline) decr(key string) {
     p.command(["DECR", key])
 }
 
-pub fn (p &mut Pipeline) incr_by(key string, delta int) {
+pub fn (p $&Pipeline) incr_by(key string, delta int) {
     p.command(["INCRBY", key, str(delta)])
 }
 
-pub fn (p &mut Pipeline) decr_by(key string, delta int) {
+pub fn (p $&Pipeline) decr_by(key string, delta int) {
     p.command(["DECRBY", key, str(delta)])
 }
 
-pub fn (p &mut Pipeline) expire(key string, seconds int) {
+pub fn (p $&Pipeline) expire(key string, seconds int) {
     p.command(["EXPIRE", key, str(seconds)])
 }
 
-pub fn (p &mut Pipeline) ttl(key string) {
+pub fn (p $&Pipeline) ttl(key string) {
     p.command(["TTL", key])
 }
 
-pub fn (p &mut Pipeline) hget(key string, field string) {
+pub fn (p $&Pipeline) hget(key string, field string) {
     p.command(["HGET", key, field])
 }
 
-pub fn (p &mut Pipeline) hset(key string, field string, val string) {
+pub fn (p $&Pipeline) hset(key string, field string, val string) {
     p.command(["HSET", key, field, val])
 }
 
-pub fn (p &mut Pipeline) hdel(key string, field string) {
+pub fn (p $&Pipeline) hdel(key string, field string) {
     p.command(["HDEL", key, field])
 }
 
-pub fn (p &mut Pipeline) lpush(key string, val string) {
+pub fn (p $&Pipeline) lpush(key string, val string) {
     p.command(["LPUSH", key, val])
 }
 
-pub fn (p &mut Pipeline) rpush(key string, val string) {
+pub fn (p $&Pipeline) rpush(key string, val string) {
     p.command(["RPUSH", key, val])
 }
 
-pub fn (p &mut Pipeline) lpop(key string) {
+pub fn (p $&Pipeline) lpop(key string) {
     p.command(["LPOP", key])
 }
 
-pub fn (p &mut Pipeline) rpop(key string) {
+pub fn (p $&Pipeline) rpop(key string) {
     p.command(["RPOP", key])
 }
 
-pub fn (p &mut Pipeline) sadd(key string, member string) {
+pub fn (p $&Pipeline) sadd(key string, member string) {
     p.command(["SADD", key, member])
 }
 
-pub fn (p &mut Pipeline) srem(key string, member string) {
+pub fn (p $&Pipeline) srem(key string, member string) {
     p.command(["SREM", key, member])
 }
 
@@ -112,26 +112,26 @@ fn format_score(score f64) string {
     << s
 }
 
-pub fn (p &mut Pipeline) zadd(key string, score f64, member string) {
+pub fn (p $&Pipeline) zadd(key string, score f64, member string) {
     fs := format_score(score)
     p.command(["ZADD", key, fs, member])
 }
 
-pub fn (p &mut Pipeline) zrem(key string, member string) {
+pub fn (p $&Pipeline) zrem(key string, member string) {
     p.command(["ZREM", key, member])
 }
 
-pub fn (p &mut Pipeline) zscore(key string, member string) {
+pub fn (p $&Pipeline) zscore(key string, member string) {
     p.command(["ZSCORE", key, member])
 }
 
-pub fn (p &mut Pipeline) zrange(key string, start int, stop int) {
+pub fn (p $&Pipeline) zrange(key string, start int, stop int) {
     p.command(["ZRANGE", key, str(start), str(stop)])
 }
 
-pub fn (p &mut Pipeline) mget(keys []string) {
-    mut args := ["MGET"]
-    mut i := 0
+pub fn (p $&Pipeline) mget(keys []string) {
+    $args := ["MGET"]
+    $i := 0
     while i < keys.len {
         args.push(keys[i])
         i = i + 1
@@ -139,9 +139,9 @@ pub fn (p &mut Pipeline) mget(keys []string) {
     p.command(args)
 }
 
-pub fn (p &mut Pipeline) mset(pairs []string) {
-    mut args := ["MSET"]
-    mut i := 0
+pub fn (p $&Pipeline) mset(pairs []string) {
+    $args := ["MSET"]
+    $i := 0
     while i < pairs.len {
         args.push(pairs[i])
         i = i + 1
@@ -149,14 +149,14 @@ pub fn (p &mut Pipeline) mset(pairs []string) {
     p.command(args)
 }
 
-pub fn (c &mut Client) exec_pipeline(p &mut Pipeline) []Value {
+pub fn (c $&Client) exec_pipeline(p $&Pipeline) []Value {
     if p.count == 0 {
         << []Value{}
     }
     c.write_raw(p.raw) or >>
 
-    mut results := []Value{}
-    mut j := 0
+    $results := []Value{}
+    $j := 0
     while j < p.count {
         val := c.read_value() or >>
         results.push(val)
@@ -167,6 +167,6 @@ pub fn (c &mut Client) exec_pipeline(p &mut Pipeline) []Value {
     << results
 }
 
-pub fn (p &mut Pipeline) exec(c &mut Client) []Value {
+pub fn (p $&Pipeline) exec(c $&Client) []Value {
     << c.exec_pipeline(p) or >>
 }

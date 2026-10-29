@@ -24,7 +24,7 @@ require:
 mongodb #github.com/xulang-org/packages/mongodb
 
 fn main() {
-    mut client := mongodb.open("127.0.0.1:27017") or (err) { println(err.msg())
+    $client := mongodb.open("127.0.0.1:27017") or (err) { println(err.msg())
         << }
     defer client.close()
 

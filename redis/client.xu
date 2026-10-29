@@ -18,7 +18,7 @@ pub fn dial(addr string) Client {
     << Client{fd: fd, buf: "", addr: addr}
 }
 
-fn (c &mut Client) fill() int {
+fn (c $&Client) fill() int {
     chunk := net.conn_read(c.fd, 4096) or (err) {
         >> errors.new("redis: read error: " + err.msg())
     }
@@ -30,7 +30,7 @@ fn (c &mut Client) fill() int {
     << chunk.len
 }
 
-pub fn (c &mut Client) read_line() string {
+pub fn (c $&Client) read_line() string {
     while true {
         idx := find_crlf(&c.buf)
         if idx >= 0 {
@@ -47,7 +47,7 @@ pub fn (c &mut Client) read_line() string {
     << ""
 }
 
-pub fn (c &mut Client) read_bytes(n int) string {
+pub fn (c $&Client) read_bytes(n int) string {
     if n <= 0 {
         << ""
     }
@@ -63,17 +63,17 @@ pub fn (c &mut Client) read_bytes(n int) string {
     << res
 }
 
-pub fn (c &mut Client) read_value() Value {
+pub fn (c $&Client) read_value() Value {
     << c.read_value_depth(0) or >>
 }
 
-fn (c &mut Client) read_value_depth(depth int) Value {
+fn (c $&Client) read_value_depth(depth int) Value {
     if depth > 64 { >> errors.new("redis: response nesting limit exceeded") }
     line := c.read_line() or >>
     if line.len == 0 { >> errors.new("redis: empty response") }
     prefix := line[0] & 255
-    mut v := nil_value()
-    mut raw := line + "\r\n"
+    $v := nil_value()
+    $raw := line + "\r\n"
     text := line[1:line.len] + ""
     if prefix == 43 { v = str_value(text) }
     else if prefix == 45 { v = err_value(text) }
@@ -96,13 +96,13 @@ fn (c &mut Client) read_value_depth(depth int) Value {
         count := parse_int(text) or >>
         if count == -1 && prefix == 42 { << nil_value() }
         if count < 0 || count > 100000 { >> errors.new("redis: invalid aggregate count") }
-        mut typ := TYPE_ARR
-        mut total := count
+        $typ := TYPE_ARR
+        $total := count
         if prefix == 37 { typ = TYPE_MAP
             total = count * 2 }
         if prefix == 126 { typ = TYPE_SET }
         if prefix == 62 { typ = TYPE_PUSH }
-        mut strings_only := []string{}
+        $strings_only := []string{}
         for i in 0:total {
             elem := c.read_value_depth(depth + 1) or >>
             raw = raw + elem.raw
@@ -123,7 +123,7 @@ fn (c &mut Client) read_value_depth(depth int) Value {
         v = str_value(text)
         v.typ = TYPE_DOUBLE
     } else if prefix == 40 {
-        mut start := 0
+        $start := 0
         if text.len > 0 && (text[0] & 255) == 45 { start = 1 }
         if start == text.len { >> errors.new("redis: malformed big number") }
         for i in start:text.len {
@@ -136,8 +136,8 @@ fn (c &mut Client) read_value_depth(depth int) Value {
     << v
 }
 
-pub fn (c &mut Client) write_raw(data string) int {
-    mut off := 0
+pub fn (c $&Client) write_raw(data string) int {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) or (err) {
@@ -151,7 +151,7 @@ pub fn (c &mut Client) write_raw(data string) int {
     << 0
 }
 
-pub fn (c &mut Client) do(args []string) Value {
+pub fn (c $&Client) do(args []string) Value {
     if c.fd < 0 {
         >> errors.new("redis: client closed")
     }
@@ -160,17 +160,17 @@ pub fn (c &mut Client) do(args []string) Value {
     << c.read_value() or >>
 }
 
-pub fn (c &mut Client) auth(password string) string {
+pub fn (c $&Client) auth(password string) string {
     v := c.do(["AUTH", password]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) select_db(index int) string {
+pub fn (c $&Client) select_db(index int) string {
     v := c.do(["SELECT", str(index)]) or >>
     << v.as_string() or >>
 }
 
-pub fn (c &mut Client) close() int {
+pub fn (c $&Client) close() int {
     if c.fd >= 0 {
         net.conn_close(c.fd) or (err) {
             << 0

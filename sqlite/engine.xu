@@ -17,10 +17,10 @@ struct QueryReply {
 fn native_buffer(text &string) int {
     handle := sqlite_native.buffer_new(text.len)
     if handle == 0 { << 0 }
-    mut off := 0
+    $off := 0
     while off < text.len {
-        mut word := 0
-        mut count := 0
+        $word := 0
+        $count := 0
         while count < 8 && off + count < text.len {
             word = word | ((text[off + count] & 255) << (count * 8))
             count += 1
@@ -37,10 +37,10 @@ fn native_buffer(text &string) int {
 fn native_blob(bytes &[]u8) int {
     handle := sqlite_native.buffer_new(bytes.len)
     if handle == 0 { << 0 }
-    mut off := 0
+    $off := 0
     while off < bytes.len {
-        mut word := 0
-        mut count := 0
+        $word := 0
+        $count := 0
         while count < 8 && off + count < bytes.len {
             word = word | (int(bytes[off + count]) << (count * 8))
             count += 1
@@ -59,11 +59,11 @@ fn native_bytes(handle int) []u8 {
     length := sqlite_native.buffer_len(handle)
     if length < 0 { sqlite_native.buffer_free(handle)
         << []u8{} }
-    mut bytes := []u8{}
-    mut off := 0
+    $bytes := []u8{}
+    $off := 0
     while off < length {
         word := sqlite_native.buffer_get(handle, off)
-        mut count := 0
+        $count := 0
         while count < 8 && off + count < length {
             bytes.push(u8((word >> (count * 8)) & 255))
             count += 1
@@ -76,7 +76,7 @@ fn native_bytes(handle int) []u8 {
 
 fn native_text(handle int) string {
     bytes := native_bytes(handle)
-    mut ints := []int{}
+    $ints := []int{}
     for i in 0:bytes.len { ints.push(int(bytes[i])) }
     << string_from_bytes(ints)
 }
@@ -86,7 +86,7 @@ fn db_error_text(handle int) string {
     << "sqlite: " + message
 }
 
-fn stop_session(st &mut SqliteState) string {
+fn stop_session(st $&SqliteState) string {
     rc := sqlite_native.close(st.handle)
     if rc != 0 { << db_error_text(st.handle) }
     st.handle = 0
@@ -96,7 +96,7 @@ fn stop_session(st &mut SqliteState) string {
 }
 
 fn start_session(path string) SqliteState {
-    mut st := SqliteState{path: path + "", closed: 0, tx: 0, tx_seq: 0, tx_err: "", read_only: false, open_err: "", handle: 0}
+    $st := SqliteState{path: path + "", closed: 0, tx: 0, tx_seq: 0, tx_err: "", read_only: false, open_err: "", handle: 0}
     buffer := native_buffer(&path)
     if buffer == 0 { st.open_err = "sqlite: path allocation failed or exceeds 16 MiB"
         st.closed = 1
@@ -105,7 +105,7 @@ fn start_session(path string) SqliteState {
     sqlite_native.buffer_free(buffer)
     if st.handle == 0 { st.open_err = "sqlite: open failed: invalid path or allocation failure" }
     else if sqlite_native.status(st.handle) != 0 { st.open_err = db_error_text(st.handle) }
-    if st.open_err.len > 0 { stop_session(mut &st) }
+    if st.open_err.len > 0 { stop_session($&st) }
     << st
 }
 
@@ -149,11 +149,11 @@ fn bind_index(stmt int, index int, values &[]BindArg, i int) int {
 
 fn bind_parameters(stmt int, args &[]driver.NamedValue) string {
     count := sqlite_native.parameter_count(stmt)
-    mut named := 0
+    $named := 0
     for i in 0:args.len { if args[i].name.len > 0 { named += 1 } }
     if named > 0 && named != args.len { << "sqlite: mixed named and positional parameters" }
     if named == 0 && count != args.len { << "sqlite: incorrect parameter count" }
-    mut values := []BindArg{}
+    $values := []BindArg{}
     for i in 0:args.len { values.push(prepare_binding(args, i)) }
     result := bind_prepared(stmt, count, named > 0, args, &values)
     for i in 0:values.len { sqlite_native.buffer_free(values[i].buffer) }
@@ -173,7 +173,7 @@ fn bind_prepared(stmt int, count int, named bool, args &[]driver.NamedValue, val
         if token == 0 { << "sqlite: named arguments require named SQL parameters" }
         name := native_text(token)
         key := name[1:name.len] + ""
-        mut found := -1
+        $found := -1
         for i in 0:args.len { if args[i].name == key { found = i } }
         if found < 0 { << "sqlite: missing named parameter: " + key }
         if bind_index(stmt, index, values, found) != 0 { << "sqlite: parameter binding failed" }
@@ -206,7 +206,7 @@ fn column_value(stmt int, column int) string {
     << ""
 }
 
-fn session_query(st &mut SqliteState, query string, args &[]driver.NamedValue) QueryReply {
+fn session_query(st $&SqliteState, query string, args &[]driver.NamedValue) QueryReply {
     buffer := native_buffer(&query)
     if buffer == 0 { << query_error("sqlite: SQL allocation failed or exceeds 16 MiB") }
     stmt := sqlite_native.prepare(st.handle, buffer)
@@ -221,12 +221,12 @@ fn session_query(st &mut SqliteState, query string, args &[]driver.NamedValue) Q
     << reply
 }
 
-fn read_statement(st &mut SqliteState, stmt int, args &[]driver.NamedValue) QueryReply {
+fn read_statement(st $&SqliteState, stmt int, args &[]driver.NamedValue) QueryReply {
     bound := bind_parameters(stmt, args)
     if bound.len > 0 { << query_error(bound) }
-    mut columns := []string{}
-    mut cells := []string{}
-    mut size := 0
+    $columns := []string{}
+    $cells := []string{}
+    $size := 0
     count := sqlite_native.column_count(stmt)
     for i in 0:count {
         buffer := sqlite_native.column_name(stmt, i)
@@ -236,7 +236,7 @@ fn read_statement(st &mut SqliteState, stmt int, args &[]driver.NamedValue) Quer
         columns.push(name)
     }
     before := sqlite_native.total_changes(st.handle)
-    mut rc := sqlite_native.step(stmt)
+    $rc := sqlite_native.step(stmt)
     while rc == 100 {
         for i in 0:count {
             cell := column_value(stmt, i)
@@ -248,7 +248,7 @@ fn read_statement(st &mut SqliteState, stmt int, args &[]driver.NamedValue) Quer
         rc = sqlite_native.step(stmt)
     }
     if rc != 101 { << query_error(db_error_text(st.handle)) }
-    mut affected := 0
+    $affected := 0
     if sqlite_native.total_changes(st.handle) > before { affected = sqlite_native.changes(st.handle) }
     << QueryReply{err: "", columns: columns, cells: cells, last_id: sqlite_native.last_id(st.handle), affected: affected}
 }
@@ -259,11 +259,11 @@ fn query_error(message string) QueryReply {
     << reply
 }
 
-fn session_reply_safe(st &mut SqliteState, query string, args &[]driver.NamedValue) QueryReply {
+fn session_reply_safe(st $&SqliteState, query string, args &[]driver.NamedValue) QueryReply {
     << session_query(st, query, args)
 }
 
-fn session_command(st &mut SqliteState, query string) string {
+fn session_command(st $&SqliteState, query string) string {
     args := []driver.NamedValue{}
     reply := session_reply_safe(st, query, &args)
     << strings.clone(&reply.err)
@@ -276,8 +276,8 @@ fn parse_exec_reply(d &QueryReply) driver.ExecResult {
 
 fn parse_rows_reply(d &QueryReply) driver.RowsResult {
     if d.err.len > 0 { << driver.rows_err(d.err + "") }
-    mut cols := []string{}
-    mut cells := []string{}
+    $cols := []string{}
+    $cells := []string{}
     for i in 0:d.columns.len { cols.push(d.columns[i] + "") }
     for i in 0:d.cells.len { cells.push(d.cells[i] + "") }
     ncols := cols.len

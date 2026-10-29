@@ -39,12 +39,12 @@ fn safe_close(fd int) {
 
 pub fn new_client(endpoint string) GrpcClient {
     if strings.has_prefix(&endpoint, "https://") || strings.has_prefix(&endpoint, "grpcs://") {
-        mut raw := endpoint
+        $raw := endpoint
         if strings.has_prefix(&raw, "grpcs://") { raw = "https://" + raw[8:raw.len] }
         ep := transport.parse_endpoint(raw, 9000) or (err) { << GrpcClient{host: "127.0.0.1", port: 9000, secure: true} }
         << GrpcClient{host: ep.host, port: ep.port, secure: true}
     }
-    mut ep := endpoint
+    $ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
@@ -53,10 +53,10 @@ pub fn new_client(endpoint string) GrpcClient {
     if ep.len >= prefix_grpc.len && ep[0:prefix_grpc.len] == prefix_grpc {
         ep = ep[prefix_grpc.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 9000
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 9000
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -81,7 +81,7 @@ pub fn new_client(endpoint string) GrpcClient {
 }
 
 fn read_exact(fd int, need int) string {
-    mut buf := ""
+    $buf := ""
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) or (err) {
@@ -96,7 +96,7 @@ fn read_exact(fd int, need int) string {
 }
 
 fn write_all(fd int, data string) bool {
-    mut off := 0
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -123,7 +123,7 @@ pub fn (c GrpcClient) read_h2_frame(fd int) H2Frame {
     s3 := hdr[8] & 255
     stream_id := (s0 << 24) | (s1 << 16) | (s2 << 8) | s3
 
-    mut payload := ""
+    $payload := ""
     if flen > 0 {
         payload = read_exact(fd, flen) or >>
     }
@@ -137,8 +137,8 @@ pub fn (c GrpcClient) read_h2_frame(fd int) H2Frame {
     }
 }
 
-fn read_exact_tls(tc &mut tls.Conn, need int) string {
-    mut buf := ""
+fn read_exact_tls(tc $&tls.Conn, need int) string {
+    $buf := ""
     while buf.len < need {
         chunk := tc.read(need - buf.len) or (err) { >> errors.new("grpc TLS read error: " + err.msg()) }
         if chunk.len == 0 { >> errors.new("grpc TLS unexpected EOF") }
@@ -147,8 +147,8 @@ fn read_exact_tls(tc &mut tls.Conn, need int) string {
     << buf
 }
 
-fn write_all_tls(tc &mut tls.Conn, data string) bool {
-    mut off := 0
+fn write_all_tls(tc $&tls.Conn, data string) bool {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         tc.write(&part) or (err) { >> errors.new("grpc TLS write error: " + err.msg()) }
@@ -157,7 +157,7 @@ fn write_all_tls(tc &mut tls.Conn, data string) bool {
     << true
 }
 
-fn read_h2_frame_tls(tc &mut tls.Conn) H2Frame {
+fn read_h2_frame_tls(tc $&tls.Conn) H2Frame {
     hdr := read_exact_tls(tc, 9) or >>
     b0 := hdr[0] & 255
     b1 := hdr[1] & 255
@@ -167,7 +167,7 @@ fn read_h2_frame_tls(tc &mut tls.Conn) H2Frame {
     ftype := hdr[3] & 255
     flags := hdr[4] & 255
     stream_id := ((hdr[5] & 127) << 24) | ((hdr[6] & 255) << 16) | ((hdr[7] & 255) << 8) | (hdr[8] & 255)
-    mut payload := ""
+    $payload := ""
     if flen > 0 { payload = read_exact_tls(tc, flen) or >> }
     << H2Frame{length: flen, frame_type: ftype, flags: flags, stream_id: stream_id, payload: payload}
 }
@@ -224,16 +224,16 @@ pub fn (c GrpcClient) connect() int {
 fn (c GrpcClient) connect_tls() tls.Conn {
     cfg := tls.new_config(c.host + "")
     d := tls.Dialer{timeout_ns: transport.DEFAULT_TIMEOUT_NS, config: cfg}
-    mut tc := d.dial("tcp", c.host + ":" + str(c.port)) or >>
-    write_all_tls(mut &tc, H2_CLIENT_PREFACE) or (err) {
+    $tc := d.dial("tcp", c.host + ":" + str(c.port)) or >>
+    write_all_tls($&tc, H2_CLIENT_PREFACE) or (err) {
         tc.close()
         >> err
     }
-    write_all_tls(mut &tc, build_settings_frame(false)) or (err) {
+    write_all_tls($&tc, build_settings_frame(false)) or (err) {
         tc.close()
         >> err
     }
-    f1 := read_h2_frame_tls(mut &tc) or (err) {
+    f1 := read_h2_frame_tls($&tc) or (err) {
         tc.close()
         >> err
     }
@@ -250,7 +250,7 @@ fn (c GrpcClient) connect_tls() tls.Conn {
             >> errors.new("grpc: reduced request window is unsupported")
         }
     }
-    write_all_tls(mut &tc, build_settings_frame(true)) or (err) {
+    write_all_tls($&tc, build_settings_frame(true)) or (err) {
         tc.close()
         >> err
     }
@@ -260,8 +260,8 @@ fn (c GrpcClient) connect_tls() tls.Conn {
 // Executes an Unary RPC Call over HTTP/2 with gRPC framing
 pub fn (c GrpcClient) call_unary(path string, req_bytes string) Response {
     if c.secure {
-        mut tc := c.connect_tls() or >>
-        resp := c.call_unary_on_tls(mut &tc, path, req_bytes, 1) or (err) {
+        $tc := c.connect_tls() or >>
+        resp := c.call_unary_on_tls($&tc, path, req_bytes, 1) or (err) {
             tc.close()
             >> err
         }
@@ -282,13 +282,13 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
     if req_bytes.len > 65530 { >> errors.new("grpc: request exceeds supported initial window") }
     block := build_grpc_headers_for_host(path, c.host + ":" + str(c.port))
     if block.len > 65536 { >> errors.new("grpc: request headers too large") }
-    mut off := 0
+    $off := 0
     while off < block.len {
-        mut end := off + 16384
+        $end := off + 16384
         if end > block.len { end = block.len }
-        mut typ := FRAME_CONTINUATION
+        $typ := FRAME_CONTINUATION
         if off == 0 { typ = FRAME_HEADERS }
-        mut flags := 0
+        $flags := 0
         if end == block.len { flags = FLAG_END_HEADERS }
         frame := encode_h2_header(end - off, typ, flags, stream_id) + block[off:end]
         write_all(fd, frame) or >>
@@ -297,18 +297,18 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
     grpc_msg := build_grpc_message(req_bytes)
     off = 0
     while off < grpc_msg.len {
-        mut end := off + 16384
+        $end := off + 16384
         if end > grpc_msg.len { end = grpc_msg.len }
         write_all(fd, build_data_frame(stream_id, grpc_msg[off:end] + "", end == grpc_msg.len)) or >>
         off = end
     }
-    mut message_bytes := ""
-    mut grpc_status := -1
-    mut grpc_message := ""
-    mut http_status := 0
-    mut content_type := ""
-    mut got_headers := false
-    mut end_stream := false
+    $message_bytes := ""
+    $grpc_status := -1
+    $grpc_message := ""
+    $http_status := 0
+    $content_type := ""
+    $got_headers := false
+    $end_stream := false
     while !end_stream {
         frame := c.read_h2_frame(fd) or >>
         if frame.frame_type == FRAME_SETTINGS {
@@ -323,8 +323,8 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
             }
         } else if frame.frame_type == FRAME_DATA && frame.stream_id == stream_id {
             if !got_headers { >> errors.new("grpc: DATA before headers") }
-            mut start := 0
-            mut end := frame.payload.len
+            $start := 0
+            $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
                 if end < 1 { >> errors.new("grpc: malformed padded DATA") }
                 end -= frame.payload[0] & 255
@@ -340,8 +340,8 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
             }
             if (frame.flags & FLAG_END_STREAM) != 0 { end_stream = true }
         } else if frame.frame_type == FRAME_HEADERS && frame.stream_id == stream_id {
-            mut start := 0
-            mut end := frame.payload.len
+            $start := 0
+            $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
                 if end < 1 { >> errors.new("grpc: malformed padded HEADERS") }
                 end -= frame.payload[0] & 255
@@ -349,8 +349,8 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
             }
             if (frame.flags & FLAG_PRIORITY) != 0 { start += 5 }
             if end < start { >> errors.new("grpc: malformed HEADERS") }
-            mut headers := frame.payload[start:end] + ""
-            mut done := (frame.flags & FLAG_END_HEADERS) != 0
+            $headers := frame.payload[start:end] + ""
+            $done := (frame.flags & FLAG_END_HEADERS) != 0
             while !done {
                 next := c.read_h2_frame(fd) or >>
                 if next.frame_type != FRAME_CONTINUATION || next.stream_id != stream_id { >> errors.new("grpc: expected CONTINUATION") }
@@ -393,25 +393,25 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
         else if frame.frame_type == FRAME_PUSH_PROMISE { >> errors.new("grpc: PUSH_PROMISE is unsupported") }
     }
     if grpc_status < 0 { >> errors.new("grpc: missing grpc-status trailers") }
-    mut payload := ""
+    $payload := ""
     if message_bytes.len > 0 { payload = decode_grpc_message(message_bytes) or >> }
     else if grpc_status == 0 { >> errors.new("grpc: missing unary response message") }
     << Response{status: grpc_status, message: grpc_message, payload: payload}
 }
 
 
-fn (c GrpcClient) call_unary_on_tls(tc &mut tls.Conn, path string, req_bytes string, stream_id int) Response {
+fn (c GrpcClient) call_unary_on_tls(tc $&tls.Conn, path string, req_bytes string, stream_id int) Response {
     if stream_id <= 0 || stream_id > 2147483647 || stream_id % 2 == 0 { >> errors.new("grpc: invalid client stream id") }
     if req_bytes.len > 65530 { >> errors.new("grpc: request exceeds supported initial window") }
     block := build_grpc_headers_for_host_scheme(path, c.host + ":" + str(c.port), "https")
     if block.len > 65536 { >> errors.new("grpc: request headers too large") }
-    mut off := 0
+    $off := 0
     while off < block.len {
-        mut end := off + 16384
+        $end := off + 16384
         if end > block.len { end = block.len }
-        mut typ := FRAME_CONTINUATION
+        $typ := FRAME_CONTINUATION
         if off == 0 { typ = FRAME_HEADERS }
-        mut flags := 0
+        $flags := 0
         if end == block.len { flags = FLAG_END_HEADERS }
         frame := encode_h2_header(end - off, typ, flags, stream_id) + block[off:end]
         write_all_tls(tc, frame) or >>
@@ -420,18 +420,18 @@ fn (c GrpcClient) call_unary_on_tls(tc &mut tls.Conn, path string, req_bytes str
     grpc_msg := build_grpc_message(req_bytes)
     off = 0
     while off < grpc_msg.len {
-        mut end := off + 16384
+        $end := off + 16384
         if end > grpc_msg.len { end = grpc_msg.len }
         write_all_tls(tc, build_data_frame(stream_id, grpc_msg[off:end] + "", end == grpc_msg.len)) or >>
         off = end
     }
-    mut message_bytes := ""
-    mut grpc_status := -1
-    mut grpc_message := ""
-    mut http_status := 0
-    mut content_type := ""
-    mut got_headers := false
-    mut end_stream := false
+    $message_bytes := ""
+    $grpc_status := -1
+    $grpc_message := ""
+    $http_status := 0
+    $content_type := ""
+    $got_headers := false
+    $end_stream := false
     while !end_stream {
         frame := read_h2_frame_tls(tc) or >>
         if frame.frame_type == FRAME_SETTINGS {
@@ -446,8 +446,8 @@ fn (c GrpcClient) call_unary_on_tls(tc &mut tls.Conn, path string, req_bytes str
             }
         } else if frame.frame_type == FRAME_DATA && frame.stream_id == stream_id {
             if !got_headers { >> errors.new("grpc: DATA before headers") }
-            mut start := 0
-            mut end := frame.payload.len
+            $start := 0
+            $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
                 if end < 1 { >> errors.new("grpc: malformed padded DATA") }
                 end -= frame.payload[0] & 255
@@ -463,8 +463,8 @@ fn (c GrpcClient) call_unary_on_tls(tc &mut tls.Conn, path string, req_bytes str
             }
             if (frame.flags & FLAG_END_STREAM) != 0 { end_stream = true }
         } else if frame.frame_type == FRAME_HEADERS && frame.stream_id == stream_id {
-            mut start := 0
-            mut end := frame.payload.len
+            $start := 0
+            $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
                 if end < 1 { >> errors.new("grpc: malformed padded HEADERS") }
                 end -= frame.payload[0] & 255
@@ -472,8 +472,8 @@ fn (c GrpcClient) call_unary_on_tls(tc &mut tls.Conn, path string, req_bytes str
             }
             if (frame.flags & FLAG_PRIORITY) != 0 { start += 5 }
             if end < start { >> errors.new("grpc: malformed HEADERS") }
-            mut headers := frame.payload[start:end] + ""
-            mut done := (frame.flags & FLAG_END_HEADERS) != 0
+            $headers := frame.payload[start:end] + ""
+            $done := (frame.flags & FLAG_END_HEADERS) != 0
             while !done {
                 next := read_h2_frame_tls(tc) or >>
                 if next.frame_type != FRAME_CONTINUATION || next.stream_id != stream_id { >> errors.new("grpc: expected CONTINUATION") }
@@ -516,7 +516,7 @@ fn (c GrpcClient) call_unary_on_tls(tc &mut tls.Conn, path string, req_bytes str
         else if frame.frame_type == FRAME_PUSH_PROMISE { >> errors.new("grpc: PUSH_PROMISE is unsupported") }
     }
     if grpc_status < 0 { >> errors.new("grpc: missing grpc-status trailers") }
-    mut payload := ""
+    $payload := ""
     if message_bytes.len > 0 { payload = decode_grpc_message(message_bytes) or >> }
     else if grpc_status == 0 { >> errors.new("grpc: missing unary response message") }
     << Response{status: grpc_status, message: grpc_message, payload: payload}

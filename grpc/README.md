@@ -16,7 +16,7 @@ Xu 语言gRPC 远程过程调用客户端与 HTTP/2 连接池接口。
 grpc #github.com/xulang-org/packages/grpc
 
 fn main() {
-    mut p := grpc.open_pool("127.0.0.1:9000", 5)
+    $p := grpc.open_pool("127.0.0.1:9000", 5)
     defer p.close()
 
     // 构造 Protobuf 请求 (field 1 string: "Xu Language")

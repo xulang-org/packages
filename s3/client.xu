@@ -57,7 +57,7 @@ pub fn new_client(endpoint string, access_key string, secret_key string, region 
     host := ep_parts[0]
     port := parse_int_def(ep_parts[1], 9000)
     secure := ep_parts[2] == "true"
-    mut reg := region
+    $reg := region
     if reg.len == 0 {
         reg = "us-east-1"
     }
@@ -91,15 +91,15 @@ fn get_amz_dates() []string {
     << [amz_date, date_stamp]
 }
 
-pub fn (c &mut Client) request(method string, path string, body string, content_type string) Response {
+pub fn (c $&Client) request(method string, path string, body string, content_type string) Response {
     if c.secure {
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
-        mut tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or (err) {
+        $tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or (err) {
             >> errors.new("s3: TLS dial failed: " + err.msg())
         }
-        mut reusable := false
-        result := c.request_on_transport(mut &tc, method, path, body, content_type, mut &reusable) or (err) {
+        $reusable := false
+        result := c.request_on_transport($&tc, method, path, body, content_type, $&reusable) or (err) {
             tc.close()
             >> err
         }
@@ -110,8 +110,8 @@ pub fn (c &mut Client) request(method string, path string, body string, content_
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("s3: dial failed: " + err.msg())
     }
-    mut reusable := false
-    result := c.request_on_fd(fd, method, path, body, content_type, mut &reusable) or (err) {
+    $reusable := false
+    result := c.request_on_fd(fd, method, path, body, content_type, $&reusable) or (err) {
         safe_close(fd)
         >> err
     }
@@ -119,14 +119,14 @@ pub fn (c &mut Client) request(method string, path string, body string, content_
     << result
 }
 
-fn (c &mut Client) request_at(fd int, method string, path string, body string, content_type string, reusable &mut bool) Response {
+fn (c $&Client) request_at(fd int, method string, path string, body string, content_type string, reusable $&bool) Response {
     if c.secure { << c.request(method, path, body, content_type) or >> }
     if fd < 0 { << c.request(method, path, body, content_type) or >> }
     << c.request_on_fd(fd, method, path, body, content_type, reusable) or >>
 }
 
-fn (c &mut Client) build_request(method string, path string, body string, content_type string) string {
-    mut p := path
+fn (c $&Client) build_request(method string, path string, body string, content_type string) string {
+    $p := path
     if p.len == 0 || (p[0] & 255) != 47 { p = "/" + p }
     dates := get_amz_dates()
     amz_date := dates[0]
@@ -134,7 +134,7 @@ fn (c &mut Client) build_request(method string, path string, body string, conten
     payload_hash := sha256_hex(body + "")
     host_hdr := c.host + ":" + str(c.port)
     auth_hdr := compute_auth_header(method + "", p + "", host_hdr + "", c.access_key + "", c.secret_key + "", c.region + "", amz_date + "", date_stamp, payload_hash + "")
-    mut req := method + " " + p + " HTTP/1.1\r\n"
+    $req := method + " " + p + " HTTP/1.1\r\n"
     req = req + "Host: " + host_hdr + "\r\n"
     req = req + "x-amz-date: " + amz_date + "\r\n"
     req = req + "x-amz-content-sha256: " + payload_hash + "\r\n"
@@ -146,7 +146,7 @@ fn (c &mut Client) build_request(method string, path string, body string, conten
     << req
 }
 
-fn (c &mut Client) request_on_transport(tc &mut transport.Conn, method string, path string, body string, content_type string, reusable &mut bool) Response {
+fn (c $&Client) request_on_transport(tc $&transport.Conn, method string, path string, body string, content_type string, reusable $&bool) Response {
     *reusable = false
     req := c.build_request(method + "", path, body, content_type)
     tc.write_all(req) or (err) { >> errors.new("s3: TLS write failed: " + err.msg()) }
@@ -155,12 +155,12 @@ fn (c &mut Client) request_on_transport(tc &mut transport.Conn, method string, p
     << Response{status_code: resp.status_code, body: resp.body}
 }
 
-fn (c &mut Client) request_on_fd(fd int, method string, path string, body string, content_type string, reusable &mut bool) Response {
+fn (c $&Client) request_on_fd(fd int, method string, path string, body string, content_type string, reusable $&bool) Response {
     *reusable = false
     req := c.build_request(method + "", path, body, content_type)
 
     // Send request
-    mut off := 0
+    $off := 0
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) or (err) {

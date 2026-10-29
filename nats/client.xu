@@ -16,7 +16,7 @@ fn find_crlf(s &string) int {
     if s.len < 2 {
         << -1
     }
-    mut i := 0
+    $i := 0
     while i + 1 < s.len {
         if (s[i] & 255) == 13 && (s[i + 1] & 255) == 10 {
             << i
@@ -27,9 +27,9 @@ fn find_crlf(s &string) int {
 }
 
 fn split_space_tokens(s &string) []string {
-    mut tokens := []string{}
-    mut cur := ""
-    mut i := 0
+    $tokens := []string{}
+    $cur := ""
+    $i := 0
     while i < s.len {
         c := s[i] & 255
         if c == 32 || c == 9 {
@@ -58,7 +58,7 @@ fn parse_int_or(s string, def int) int {
     << n
 }
 
-fn (c &mut Client) fill() int {
+fn (c $&Client) fill() int {
     chunk := net.conn_read(c.fd, 4096) or (err) {
         >> errors.new("nats: read error: " + err.msg())
     }
@@ -69,7 +69,7 @@ fn (c &mut Client) fill() int {
     << chunk.len
 }
 
-pub fn (c &mut Client) read_line() string {
+pub fn (c $&Client) read_line() string {
     while true {
         idx := find_crlf(&c.buf)
         if idx >= 0 {
@@ -86,7 +86,7 @@ pub fn (c &mut Client) read_line() string {
     << ""
 }
 
-pub fn (c &mut Client) read_bytes(n int) string {
+pub fn (c $&Client) read_bytes(n int) string {
     if n <= 0 {
         << ""
     }
@@ -102,8 +102,8 @@ pub fn (c &mut Client) read_bytes(n int) string {
     << res
 }
 
-pub fn (c &mut Client) write_raw(data string) int {
-    mut off := 0
+pub fn (c $&Client) write_raw(data string) int {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) or (err) {
@@ -133,7 +133,7 @@ pub fn connect_auth(addr string, user string, pass string) Client {
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("nats: dial failed: " + err.msg())
     }
-    mut c := Client{
+    $c := Client{
         fd: fd,
         buf: "",
         addr: addr,
@@ -145,7 +145,7 @@ pub fn connect_auth(addr string, user string, pass string) Client {
     c.server_info = info_line
 
     // Send CONNECT command
-    mut connect_cmd := "CONNECT {\"verbose\":false,\"pedantic\":false,\"name\":\"xu-nats\""
+    $connect_cmd := "CONNECT {\"verbose\":false,\"pedantic\":false,\"name\":\"xu-nats\""
     if user.len > 0 {
         connect_cmd = connect_cmd + ",\"user\":\"" + user + "\",\"pass\":\"" + pass + "\""
     }
@@ -162,25 +162,25 @@ pub fn connect_auth(addr string, user string, pass string) Client {
     << c
 }
 
-pub fn (c &mut Client) ping() bool {
+pub fn (c $&Client) ping() bool {
     c.write_raw("PING\r\n") or >>
     line := c.read_line() or >>
     << line == "PONG"
 }
 
-pub fn (c &mut Client) publish(subject string, data string) int {
+pub fn (c $&Client) publish(subject string, data string) int {
     wire := "PUB " + subject + " " + str(data.len) + "\r\n" + data + "\r\n"
     c.write_raw(wire) or >>
     << 0
 }
 
-pub fn (c &mut Client) publish_request(subject string, reply_to string, data string) int {
+pub fn (c $&Client) publish_request(subject string, reply_to string, data string) int {
     wire := "PUB " + subject + " " + reply_to + " " + str(data.len) + "\r\n" + data + "\r\n"
     c.write_raw(wire) or >>
     << 0
 }
 
-pub fn (c &mut Client) subscribe(subject string) Subscription {
+pub fn (c $&Client) subscribe(subject string) Subscription {
     c.next_sid = c.next_sid + 1
     sid := str(c.next_sid)
     wire := "SUB " + subject + " " + sid + "\r\n"
@@ -188,7 +188,7 @@ pub fn (c &mut Client) subscribe(subject string) Subscription {
     << new_sub(sid, subject, "")
 }
 
-pub fn (c &mut Client) queue_subscribe(subject string, queue_group string) Subscription {
+pub fn (c $&Client) queue_subscribe(subject string, queue_group string) Subscription {
     c.next_sid = c.next_sid + 1
     sid := str(c.next_sid)
     wire := "SUB " + subject + " " + queue_group + " " + sid + "\r\n"
@@ -196,13 +196,13 @@ pub fn (c &mut Client) queue_subscribe(subject string, queue_group string) Subsc
     << new_sub(sid, subject, queue_group)
 }
 
-pub fn (c &mut Client) unsubscribe(sub Subscription) int {
+pub fn (c $&Client) unsubscribe(sub Subscription) int {
     wire := "UNSUB " + sub.sid + "\r\n"
     c.write_raw(wire) or >>
     << 0
 }
 
-pub fn (c &mut Client) next_msg() Message {
+pub fn (c $&Client) next_msg() Message {
     while true {
         line := c.read_line() or >>
         if line == "PING" {
@@ -217,8 +217,8 @@ pub fn (c &mut Client) next_msg() Message {
             // MSG <subject> <sid> [reply-to] <#bytes>
             subj := tokens[1]
             sid := tokens[2]
-            mut reply_to := ""
-            mut bytes_count := 0
+            $reply_to := ""
+            $bytes_count := 0
             if tokens.len >= 5 {
                 reply_to = tokens[3]
                 bytes_count = parse_int_or(tokens[4], 0)
@@ -236,12 +236,12 @@ pub fn (c &mut Client) next_msg() Message {
     << new_msg("", "", "", "")
 }
 
-pub fn (c &mut Client) request(subject string, data string) Message {
+pub fn (c $&Client) request(subject string, data string) Message {
     c.next_sid = c.next_sid + 1
     inbox := "_INBOX." + str(c.fd) + "." + str(c.next_sid)
     sub := c.subscribe(inbox + "") or >>
     c.publish_request(subject, inbox + "", data) or >>
-    mut target_msg := new_msg("", "", "", "")
+    $target_msg := new_msg("", "", "", "")
     while true {
         msg := c.next_msg() or >>
         if msg.subject == inbox {
@@ -253,7 +253,7 @@ pub fn (c &mut Client) request(subject string, data string) Message {
     << target_msg
 }
 
-pub fn (c &mut Client) close() int {
+pub fn (c $&Client) close() int {
     if c.fd >= 0 {
         safe_close(c.fd)
         c.fd = -1

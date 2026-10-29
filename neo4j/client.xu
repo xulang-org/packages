@@ -37,26 +37,26 @@ fn safe_close(fd int) {
 }
 
 pub fn new_client(endpoint string, user string, pass string, db string) Neo4jClient {
-    mut secure := false
+    $secure := false
     if strings.has_prefix(&endpoint, "https://") {
         secure = true
         ep0 := transport.parse_endpoint(endpoint, 7474) or (err) {
             << Neo4jClient{host: "127.0.0.1", port: 7474, secure: true, user: user, password: pass, database: "neo4j", auth_header: "Basic " + base64.encode_to_string(user + ":" + pass)}
         }
-        mut database0 := db
+        $database0 := db
         if database0.len == 0 { database0 = "neo4j" }
         raw0 := user + ":" + pass
         << Neo4jClient{host: ep0.host, port: ep0.port, secure: true, user: user, password: pass, database: database0, auth_header: "Basic " + base64.encode_to_string(raw0)}
     }
-    mut ep := endpoint
+    $ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 7474
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 7474
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -74,7 +74,7 @@ pub fn new_client(endpoint string, user string, pass string, db string) Neo4jCli
         }
     }
 
-    mut database := db
+    $database := db
     if database.len == 0 {
         database = "neo4j"
     }
@@ -95,8 +95,8 @@ pub fn new_client(endpoint string, user string, pass string, db string) Neo4jCli
 }
 
 fn escape_json(s string) string {
-    mut out := ""
-    mut i := 0
+    $out := ""
+    $i := 0
     while i < s.len {
         c := s[i] & 255
         if c == 34 { // quote
@@ -122,7 +122,7 @@ pub fn (c Neo4jClient) execute(stmt string) string {
         escaped := escape_json(stmt)
         payload := "{\"statements\":[{\"statement\":\"" + escaped + "\"}]}"
         path := "/db/" + c.database + "/tx/commit"
-        mut req := "POST " + path + " HTTP/1.1\r\n"
+        $req := "POST " + path + " HTTP/1.1\r\n"
         req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
         req = req + "Authorization: " + c.auth_header + "\r\n"
         req = req + "Content-Type: application/json\r\n"
@@ -151,16 +151,16 @@ pub fn (c Neo4jClient) execute(stmt string) string {
 }
 
 pub fn (c Neo4jClient) execute_on_fd(fd int, stmt string, keep_alive bool) string {
-    mut reusable := false
-    << c.execute_response(fd, stmt, keep_alive, mut &reusable) or >>
+    $reusable := false
+    << c.execute_response(fd, stmt, keep_alive, $&reusable) or >>
 }
 
-fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusable &mut bool) string {
+fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusable $&bool) string {
     escaped := escape_json(stmt)
     payload := "{\"statements\":[{\"statement\":\"" + escaped + "\"}]}"
 
     path := "/db/" + c.database + "/tx/commit"
-    mut req := "POST " + path + " HTTP/1.1\r\n"
+    $req := "POST " + path + " HTTP/1.1\r\n"
     req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
     req = req + "Authorization: " + c.auth_header + "\r\n"
     req = req + "Content-Type: application/json\r\n"
@@ -173,7 +173,7 @@ fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusab
     }
     req = req + payload
 
-    mut off := 0
+    $off := 0
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -191,8 +191,8 @@ fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusab
 
     // Check if errors array is non-empty
     err_needle := "\"errors\":["
-    mut err_pos := -1
-    mut e_idx := 0
+    $err_pos := -1
+    $e_idx := 0
     while e_idx + err_needle.len <= body.len {
         if body[e_idx:(e_idx + err_needle.len)] == err_needle {
             err_pos = e_idx + err_needle.len

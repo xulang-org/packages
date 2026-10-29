@@ -39,7 +39,7 @@ pub fn int_value(n int) Value {
 }
 
 pub fn arr_value(arr []string) Value {
-    mut raw := "*" + str(arr.len) + "\r\n"
+    $raw := "*" + str(arr.len) + "\r\n"
     for i in 0:arr.len { raw = raw + "$$" + str(arr[i].len) + "\r\n" + arr[i] + "\r\n" }
     << Value{typ: TYPE_ARR, str_val: "", int_val: 0, arr_val: arr, is_null: false, raw: raw}
 }
@@ -50,8 +50,8 @@ pub fn err_value(msg string) Value {
 }
 
 pub fn bool_value(b bool) Value {
-    mut n := 0
-    mut raw := "#f\r\n"
+    $n := 0
+    $raw := "#f\r\n"
     if b {
         n = 1
         raw = "#t\r\n"
@@ -115,12 +115,12 @@ pub fn (v &Value) elements() []Value {
     if v.typ != TYPE_ARR && v.typ != TYPE_MAP && v.typ != TYPE_SET && v.typ != TYPE_PUSH {
         >> errors.new("redis: not an aggregate")
     }
-    mut c := Client{fd: -1, addr: "", buf: v.raw + ""}
+    $c := Client{fd: -1, addr: "", buf: v.raw + ""}
     line := c.read_line() or >>
     count := parse_int(line[1:line.len]) or >>
-    mut total := count
+    $total := count
     if v.typ == TYPE_MAP { total = count * 2 }
-    mut out := []Value{}
+    $out := []Value{}
     for i in 0:total { out.push(c.read_value() or >>) }
     << out
 }
@@ -128,7 +128,7 @@ pub fn (v &Value) elements() []Value {
 pub fn (v &Value) as_strings() []string {
     if v.typ != TYPE_ARR && v.typ != TYPE_SET { >> errors.new("redis: not a string array") }
     values := v.elements() or >>
-    mut out := []string{}
+    $out := []string{}
     for i in 0:values.len { out.push(values[i].as_string() or >>) }
     << out
 }

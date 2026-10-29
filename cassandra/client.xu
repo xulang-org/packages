@@ -29,11 +29,11 @@ fn safe_close(fd int) {
 }
 
 pub fn new_client(endpoint string, keyspace string) Client {
-    mut ep := endpoint
-    mut host := "127.0.0.1"
-    mut port := 9042
-    mut colon := -1
-    mut i := 0
+    $ep := endpoint
+    $host := "127.0.0.1"
+    $port := 9042
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -58,7 +58,7 @@ pub fn new_client(endpoint string, keyspace string) Client {
 }
 
 fn read_exact(fd int, need int) string {
-    mut buf := ""
+    $buf := ""
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) or (err) {
@@ -73,7 +73,7 @@ fn read_exact(fd int, need int) string {
 }
 
 fn write_all(fd int, data string) bool {
-    mut off := 0
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -95,7 +95,7 @@ pub fn (c Client) read_frame(fd int) Frame {
     opcode := hdr[4] & 255
     body_len := decode_u32(hdr[5] & 255, hdr[6] & 255, hdr[7] & 255, hdr[8] & 255)
 
-    mut body := ""
+    $body := ""
     if body_len > 0 {
         body = read_exact(fd, body_len) or >>
     }
@@ -169,7 +169,7 @@ pub fn (c Client) execute_on_fd(fd int, cql string) string {
         if resp.body.len >= 6 {
             err_code := decode_u32(resp.body[0] & 255, resp.body[1] & 255, resp.body[2] & 255, resp.body[3] & 255)
             msg_len := decode_u16(resp.body[4] & 255, resp.body[5] & 255)
-            mut err_msg := "unknown"
+            $err_msg := "unknown"
             if 6 + msg_len <= resp.body.len {
                 err_msg = resp.body[6:(6 + msg_len)]
             }

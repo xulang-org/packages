@@ -33,7 +33,7 @@ fn safe_close(fd int) {
 }
 
 fn write_all(fd int, data string) bool {
-    mut off := 0
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) or (err) {
@@ -53,7 +53,7 @@ fn write_cmd(fd int, cmd string) bool {
 }
 
 fn read_line(fd int) string {
-    mut buf := ""
+    $buf := ""
     while true {
         chunk := net.conn_read(fd, 1) or (err) {
             >> errors.new("smtp read error: " + err.msg())
@@ -78,8 +78,8 @@ fn read_line(fd int) string {
 // 250-second line
 // 250 final line
 pub fn read_response(fd int) SmtpResponse {
-    mut lines := ""
-    mut last_code := 0
+    $lines := ""
+    $last_code := 0
 
     while true {
         line := read_line(fd) or >>
@@ -109,14 +109,14 @@ pub fn read_response(fd int) SmtpResponse {
 }
 
 pub fn new_client(endpoint string) SmtpClient {
-    mut ep := endpoint
+    $ep := endpoint
     prefix_smtp := "smtp://"
     if ep.len >= prefix_smtp.len && ep[0:prefix_smtp.len] == prefix_smtp {
         ep = ep[prefix_smtp.len:ep.len]
     }
 
-    mut host := "127.0.0.1"
-    mut port := 1025
+    $host := "127.0.0.1"
+    $port := 1025
     colon := strings.index_of(&ep, ":")
     if colon >= 0 {
         host = ep[0:colon]
@@ -242,7 +242,7 @@ pub fn (c SmtpClient) send_mail_on_fd(fd int, msg Message) bool {
     }
 
     // 4. Send Message Header & Body followed by \r\n.\r\n
-    mut content := "From: " + msg.from + "\r\n"
+    $content := "From: " + msg.from + "\r\n"
     content = content + "To: " + msg.to + "\r\n"
     content = content + "Subject: " + msg.subject + "\r\n"
     content = content + "MIME-Version: 1.0\r\n"

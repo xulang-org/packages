@@ -20,8 +20,8 @@ fn safe_close(fd int) {
     }
 }
 
-pub fn (c &mut Client) write_exact(data string) int {
-    mut off := 0
+pub fn (c $&Client) write_exact(data string) int {
+    $off := 0
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) or (err) {
@@ -35,8 +35,8 @@ pub fn (c &mut Client) write_exact(data string) int {
     << 0
 }
 
-pub fn (c &mut Client) read_exact(n int) string {
-    mut res := ""
+pub fn (c $&Client) read_exact(n int) string {
+    $res := ""
     while res.len < n {
         chunk := net.conn_read(c.fd, n - res.len) or (err) {
             >> errors.new("kafka: read failed: " + err.msg())
@@ -49,7 +49,7 @@ pub fn (c &mut Client) read_exact(n int) string {
     << res
 }
 
-pub fn (c &mut Client) round_trip(req_bytes string) string {
+pub fn (c $&Client) round_trip(req_bytes string) string {
     c.write_exact(req_bytes) or >>
 
     // Read response length (4 bytes)
@@ -64,14 +64,14 @@ pub fn (c &mut Client) round_trip(req_bytes string) string {
 }
 
 pub fn connect(broker string, client_id string) Client {
-    mut cid := client_id
+    $cid := client_id
     if cid.len == 0 {
         cid = "xu-kafka-client"
     }
     fd := net.dial(strings.clone(&broker)) or (err) {
         >> errors.new("kafka: dial failed: " + err.msg())
     }
-    mut c := Client{
+    $c := Client{
         fd: fd,
         broker: broker,
         client_id: cid,
@@ -80,7 +80,7 @@ pub fn connect(broker string, client_id string) Client {
     << c
 }
 
-pub fn (c &mut Client) ping() bool {
+pub fn (c $&Client) ping() bool {
     corr_id := c.next_correlation_id
     c.next_correlation_id = c.next_correlation_id + 1
     req := build_apiversions_request(corr_id, c.client_id)
@@ -94,7 +94,7 @@ pub fn (c &mut Client) ping() bool {
     << false
 }
 
-pub fn (c &mut Client) metadata(topic string) bool {
+pub fn (c $&Client) metadata(topic string) bool {
     corr_id := c.next_correlation_id
     c.next_correlation_id = c.next_correlation_id + 1
     req := build_metadata_request(corr_id, c.client_id, topic)
@@ -104,14 +104,14 @@ pub fn (c &mut Client) metadata(topic string) bool {
     << resp.len > 4
 }
 
-pub fn (c &mut Client) produce(topic string, partition int, message string) int {
+pub fn (c $&Client) produce(topic string, partition int, message string) int {
     << c.produce_key_value(topic, partition, "", message)
 }
 
-pub fn (c &mut Client) produce_key_value(topic string, partition int, key string, val string) int {
+pub fn (c $&Client) produce_key_value(topic string, partition int, key string, val string) int {
     c.metadata(topic + "")
-    mut attempts := 0
-    mut last_err := ""
+    $attempts := 0
+    $last_err := ""
     while attempts < 10 {
         attempts = attempts + 1
         corr_id := c.next_correlation_id
@@ -133,7 +133,7 @@ pub fn (c &mut Client) produce_key_value(topic string, partition int, key string
     >> errors.new("kafka: produce failed after retries: " + last_err)
 }
 
-pub fn (c &mut Client) fetch(topic string, partition int, offset int) []string {
+pub fn (c $&Client) fetch(topic string, partition int, offset int) []string {
     corr_id := c.next_correlation_id
     c.next_correlation_id = c.next_correlation_id + 1
 
@@ -142,7 +142,7 @@ pub fn (c &mut Client) fetch(topic string, partition int, offset int) []string {
     << parse_fetch_response(resp) or >>
 }
 
-pub fn (c &mut Client) close() {
+pub fn (c $&Client) close() {
     if c.fd >= 0 {
         safe_close(c.fd)
         c.fd = -1

@@ -45,15 +45,15 @@ pub fn new_client(endpoint string, namespace string) Client {
         }
         << Client{host: ep.host, port: ep.port, secure: true, namespace_id: namespace}
     }
-    mut ep := endpoint
+    $ep := endpoint
     prefix_http := "http://"
     if ep.len >= prefix_http.len && ep[0:prefix_http.len] == prefix_http {
         ep = ep[prefix_http.len:ep.len]
     }
-    mut host := "127.0.0.1"
-    mut port := 8848
-    mut colon := -1
-    mut i := 0
+    $host := "127.0.0.1"
+    $port := 8848
+    $colon := -1
+    $i := 0
     while i < ep.len {
         if (ep[i] & 255) == 58 {
             colon = i
@@ -80,7 +80,7 @@ pub fn new_client(endpoint string, namespace string) Client {
 
 pub fn (c Client) request(method string, path string, body string) Response {
     if c.secure {
-        mut req := method + " " + path + " HTTP/1.1\r\n"
+        $req := method + " " + path + " HTTP/1.1\r\n"
         req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
         req = req + "Content-Type: application/x-www-form-urlencoded\r\n"
         req = req + "Content-Length: " + str(body.len) + "\r\n"
@@ -95,8 +95,8 @@ pub fn (c Client) request(method string, path string, body string) Response {
     fd := net.dial(strings.clone(&addr)) or (err) {
         >> errors.new("nacos dial failed: " + err.msg())
     }
-    mut reusable := false
-    result := c.request_on_fd(fd, method, path, body, mut &reusable) or (err) {
+    $reusable := false
+    result := c.request_on_fd(fd, method, path, body, $&reusable) or (err) {
         safe_close(fd)
         >> err
     }
@@ -104,7 +104,7 @@ pub fn (c Client) request(method string, path string, body string) Response {
     << result
 }
 
-fn (c Client) request_at(fd int, method string, path string, body string, reusable &mut bool) Response {
+fn (c Client) request_at(fd int, method string, path string, body string, reusable $&bool) Response {
     if c.secure {
         *reusable = false
         << c.request(method, path, body) or >>
@@ -113,10 +113,10 @@ fn (c Client) request_at(fd int, method string, path string, body string, reusab
     << c.request_on_fd(fd, method, path, body, reusable) or >>
 }
 
-fn (c Client) request_on_fd(fd int, method string, path string, body string, reusable &mut bool) Response {
+fn (c Client) request_on_fd(fd int, method string, path string, body string, reusable $&bool) Response {
     *reusable = false
 
-    mut req := method + " " + path + " HTTP/1.1\r\n"
+    $req := method + " " + path + " HTTP/1.1\r\n"
     req = req + "Host: " + c.host + ":" + str(c.port) + "\r\n"
     req = req + "Content-Type: application/x-www-form-urlencoded\r\n"
     req = req + "Content-Length: " + str(body.len) + "\r\n"
@@ -125,7 +125,7 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
         req = req + body
     }
 
-    mut off := 0
+    $off := 0
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) or (err) {

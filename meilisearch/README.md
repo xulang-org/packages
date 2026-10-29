@@ -14,7 +14,7 @@ Xu 语言原生 Meilisearch 搜索引擎客户端驱动包。
 ```xu
 meilisearch #github.com/xulang-org/packages/meilisearch
 
-mut p := meilisearch.pool("http://127.0.0.1:7700", "masterKey", 5)
+$p := meilisearch.pool("http://127.0.0.1:7700", "masterKey", 5)
 
 // 创建电影索引
 p.create_index("movies", "id")

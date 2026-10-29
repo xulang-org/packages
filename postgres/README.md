@@ -32,7 +32,7 @@ postgres #github.com/xulang-org/packages/postgres
 
 fn main() int {
     dsn := "postgres://postgres:postgres@127.0.0.1:5432/xu_demo?sslmode=disable"
-    mut db := sql.open(postgres.driver(), dsn)
+    $db := sql.open(postgres.driver(), dsn)
     db.ping() or (err) {
         println(err.msg())
         << 1
@@ -47,7 +47,7 @@ fn main() int {
         << 1
     }
 
-    mut rows := db.query("SELECT id, name FROM demo") or (err) {
+    $rows := db.query("SELECT id, name FROM demo") or (err) {
         println(err.msg())
         << 1
     }

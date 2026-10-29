@@ -15,7 +15,7 @@ Xu 语言官方原生 Chroma AI 向量数据库驱动。
 chroma #github.com/xulang-org/packages/chroma
 
 fn main() {
-    mut p := chroma.open_pool("http://127.0.0.1:8000", 5)
+    $p := chroma.open_pool("http://127.0.0.1:8000", 5)
     defer p.close()
 
     // 创建集合
