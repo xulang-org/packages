@@ -83,6 +83,15 @@ pub fn (b $&Buffer) put(index int, value int) int {
     << checked(metal_native.buffer_put(b.handle, index, value)) or >>
 }
 
+// Copies synchronously; source storage is never retained by native/GPU work.
+pub fn (b $&Buffer) put_all(values &[]int) int {
+    << checked(metal_native.buffer_write(b.handle, 0, values, 0, values.len)) or >>
+}
+
+pub fn (b $&Buffer) put_range(offset int, values &[]int, first int, count int) int {
+    << checked(metal_native.buffer_write(b.handle, offset, values, first, count)) or >>
+}
+
 pub fn (b &Buffer) snapshot() Snapshot {
     handle := checked(metal_native.buffer_snapshot(b.handle)) or >>
     << Snapshot{handle: handle}
@@ -121,8 +130,21 @@ pub fn (s &Snapshot) ints() []int {
     bytes := s.byte_len() or >>
     if (bytes & 7) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
     $out := []int{}
-    for i in 0:bytes/8 { out.push(s.word(i) or >>) }
+    for i in 0:bytes/8 { out.push(0) }
+    s.copy_into($&out) or >>
     << out
+}
+
+// Copies into existing elements, preserving the Xu array's length/capacity.
+// Every range is validated before any destination element is modified.
+pub fn (s &Snapshot) copy_into(out $&[]int) int {
+    bytes := s.byte_len() or >>
+    if (bytes & 7) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
+    << checked(metal_native.snapshot_copy(s.handle, 0, out, 0, bytes/8)) or >>
+}
+
+pub fn (s &Snapshot) copy_range(first int, out $&[]int, offset int, count int) int {
+    << checked(metal_native.snapshot_copy(s.handle, first, out, offset, count)) or >>
 }
 pub fn (s $&Snapshot) close() int {
     if s.handle == 0 { << 0 }

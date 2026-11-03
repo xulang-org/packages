@@ -20,7 +20,7 @@ xulanguage/
 ```xun
 module: my_app
 version: !ver 0.1.0
-xu: !ver 0.11.2
+xu: !ver 0.11.3-dev.10
 require:
   "github.com/xulang-org/packages": file:../packages
 ```
@@ -43,7 +43,7 @@ TLS 回归当前固定调用相邻 `../xu/bin/xu`，不读取 `XU` 或 `XU_ROOT`
 
 ### 可选 Metal 计算
 
-`metal` 包通过现有 `xu-c-1` 原生接口提供显式整数 GPU buffer 和完成等待，当前唯一算子为 `madd_i64`，按模 2⁶⁴ 计算 `dst[i] = a[i] * factor + b[i]`。它不改变 Xu `int` 的位宽，不执行浮点精度转换，也不自动迁移普通循环。首次使用须单独构建：
+`metal` 包通过 `xu-c-2` 同步借用接口提供显式整数 GPU buffer、批量复制和完成等待，当前唯一算子为 `madd_i64`，按模 2⁶⁴ 计算 `dst[i] = a[i] * factor + b[i]`。本开发批次选择 Xu `0.11.3-dev.10`；旧 SDK 会拒绝新原生格式，需要旧 SDK 的应用继续使用此前的包版本。它不改变 Xu `int` 的位宽，不执行浮点精度转换，也不自动迁移普通循环。首次使用须单独构建：
 
 ```bash
 XU_ROOT=/path/to/xu make metal-native
@@ -122,3 +122,15 @@ Constants use `UPPER_SNAKE_CASE`, including exported driver constants such as `r
 ## 许可证
 
 本仓库自有代码和文档采用 [MIT License](LICENSE)。第三方源码保留各自声明；例如 SQLite 的来源与公有领域说明见 [sqlite/vendor/README.md](sqlite/vendor/README.md)。
+
+`Buffer.put_all(&values)` 同步上传完整数组；`put_range(offset, &values, first, count)`
+复制指定区间。`Snapshot.copy_into($&out)` 写入已有目标元素，`copy_range(first, $&out,
+ offset, count)` 支持局部读回；数组长度和容量保持不变。`Buffer.ints()` 和
+`Snapshot.ints()` 继续返回独立数组，内部采用批量读回。原有 `put`、`word` 等标量
+方法保留，运行时 ABI 查询为 2。
+
+批量入口先检查句柄、完整范围、大小溢出与 busy/命令失败状态，再执行复制；失败时
+目标内容不变。零长度复制仍检查句柄及 busy 状态。上传在返回前完成，不让 GPU 保留
+Xu 数组指针；GPU fence 等待规则不变。快照仍是独立、不可变的副本。批量 API 的收益
+应以包含数组准备、分配、上传、提交等待、读回和消费结果的应用总成本评估，不能只用
+GPU 内核时间判断是否优于 CPU。

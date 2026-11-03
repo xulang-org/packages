@@ -1,6 +1,6 @@
 {
   "module": "metal_native",
-  "abi": "xu-c-1",
+  "abi": "xu-c-2",
   "exports": [
     {
       "name": "available",
@@ -156,6 +156,28 @@
     {
       "name": "fence_dispose",
       "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_write",
+      "params": [
+        "int",
+        "int",
+        "i64_span",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_copy",
+      "params": [
+        "int",
+        "int",
+        "i64_span_mut",
+        "int",
         "int"
       ],
       "ret": "int"

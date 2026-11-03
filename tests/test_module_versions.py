@@ -64,3 +64,25 @@ def test_official_package_identity_and_single_module_root():
     for package in packages:
         for source in package.glob('*.xu'):
             assert source.read_text().startswith('@"github.com/xulang-org/packages/'+package.name+'"')
+
+def test_selected_sdk_preserves_prerelease_identity():
+    value = versions.version('xu: !ver 0.11.3-dev.10\n', 'xu')
+    assert versions.version_string(value) == '0.11.3-dev.10'
+    assert versions.sdk_order((0,11,3)) > versions.sdk_order(value)
+    assert versions.sdk_order((0,11,3,'rc',1)) > versions.sdk_order(value)
+    assert versions.sdk_order((0,11,3,'dev',11)) > versions.sdk_order(value)
+
+def test_prerelease_sdk_sync_and_bump_are_idempotent(tmp_path):
+    module = imported(tmp_path)
+    (module / 'mod.xu').write_text('changed')
+    assert versions.process(tmp_path, bump=True, release=(0,8,2,'dev',10)) == []
+    manifest = (module / 'xu.xun').read_text()
+    assert 'xu: !ver 0.8.2-dev.10\n' in manifest
+    assert versions.process(tmp_path, bump=True) == []
+    assert (module / 'xu.xun').read_text() == manifest
+
+def test_stable_sdk_cannot_regress_to_same_patch_prerelease(tmp_path):
+    module = imported(tmp_path)
+    original = (module / 'xu.xun').read_bytes()
+    assert versions.process(tmp_path, release=(0,8,1,'dev',1))
+    assert (module / 'xu.xun').read_bytes() == original

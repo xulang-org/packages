@@ -94,7 +94,7 @@ static xu_int finish(XMFence *f) {
     return f.status;
 }
 
-xu_int XM_API(abi_version)(void) { return 1; }
+xu_int XM_API(abi_version)(void) { return 2; }
 xu_int XM_API(available)(void) { @autoreleasepool { return MTLCreateSystemDefaultDevice() != nil; } }
 xu_int XM_API(live_handles)(void) { ENTER; RETURN(live); }
 
@@ -173,6 +173,28 @@ xu_int XM_API(buffer_put)(xu_int h, xu_int index, xu_int value) { @autoreleasepo
     memcpy((uint8_t *)b.memory.contents + (uint64_t)index * 8, &bits, 8);
     RETURN(0);
 } }
+
+// Validate the complete range before arithmetic or any observable write.
+// The typed ABI supplies live caller-owned storage; this runtime never keeps
+// its pointer. Even zero-count operations validate handles and busy state.
+static BOOL host_range(xu_int length, const void *data, xu_int first, xu_int count) {
+    if (length < 0 || first < 0 || count < 0 || first > length || count > length - first) return NO;
+    if ((xu_uint)length > SIZE_MAX / 8) return NO;
+    if (count && !data) return NO;
+    if (count && (xu_uint)(first + count) > (UINTPTR_MAX - (uintptr_t)data) / 8) return NO;
+    return YES;
+}
+xu_int XM_API(buffer_write)(xu_int h, xu_int offset, const xu_i64_span *source, xu_int first, xu_int count) { @autoreleasepool {
+    if (!source || !host_range(source->len, source->data, first, count)) return XM_BOUNDS;
+    ENTER; XMBuffer *b = lookup(h, BUFFER);
+    if (!b) RETURN(XM_HANDLE);
+    if (offset < 0 || (xu_uint)offset > b.words || (xu_uint)count > b.words - (xu_uint)offset) RETURN(XM_BOUNDS);
+    if (b.busy) RETURN(XM_BUSY);
+    if (b.poisoned) RETURN(XM_COMMAND);
+    if (count) memmove((uint8_t *)b.memory.contents + (xu_uint)offset * 8,
+        (const uint8_t *)source->data + (xu_uint)first * 8, (size_t)count * 8);
+    RETURN(0);
+} }
 xu_int XM_API(buffer_snapshot)(xu_int h) { @autoreleasepool {
     ENTER; XMBuffer *b = lookup(h, BUFFER);
     if (!b) RETURN(XM_HANDLE);
@@ -212,6 +234,15 @@ static xu_int snapshot_word(xu_int h, xu_int index, BOOL high) {
 }
 xu_int XM_API(snapshot_low)(xu_int h, xu_int i) { @autoreleasepool { return snapshot_word(h, i, NO); } }
 xu_int XM_API(snapshot_high)(xu_int h, xu_int i) { @autoreleasepool { return snapshot_word(h, i, YES); } }
+xu_int XM_API(snapshot_copy)(xu_int h, xu_int first, const xu_i64_span_mut *destination, xu_int offset, xu_int count) { @autoreleasepool {
+    if (!destination || !host_range(destination->len, destination->data, offset, count)) return XM_BOUNDS;
+    ENTER; NSData *data = lookup(h, SNAPSHOT);
+    if (!data) RETURN(XM_HANDLE);
+    if ((data.length & 7) || first < 0 || (xu_uint)first > data.length / 8 || (xu_uint)count > data.length / 8 - (xu_uint)first) RETURN(XM_BOUNDS);
+    if (count) memmove((uint8_t *)destination->data + (xu_uint)offset * 8,
+        (const uint8_t *)data.bytes + (xu_uint)first * 8, (size_t)count * 8);
+    RETURN(0);
+} }
 xu_int XM_API(snapshot_close)(xu_int h) { @autoreleasepool {
     ENTER;
     if (!lookup(h, SNAPSHOT)) RETURN(XM_HANDLE);
