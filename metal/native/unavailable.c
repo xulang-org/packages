@@ -24,3 +24,11 @@ xu_int XM_API(madd_i64)(xu_int a0, xu_int a1, xu_int a2, xu_int a3, xu_int a4) {
 xu_int XM_API(fence_wait)(xu_int a0) { (void)a0; return XM_UNAVAILABLE; }
 xu_int XM_API(fence_close)(xu_int a0) { (void)a0; return XM_UNAVAILABLE; }
 xu_int XM_API(fence_dispose)(xu_int a0) { (void)a0; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_f32_new)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_f32_info)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_f32_write)(xu_int a, const xu_i64_span *b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_f32_snapshot)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_f32_close)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_f32_release)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(snapshot_f32_copy)(xu_int a, const xu_i64_span_mut *b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(gemm_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }

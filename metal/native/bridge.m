@@ -2,12 +2,13 @@
 // the native object, so ordinary Xu builds need no Metal-specific linker path.
 @import Foundation;
 @import Metal;
+@import MetalPerformanceShaders;
 #include <os/lock.h>
 #include <stdint.h>
 #include <string.h>
 #include "api.h"
 
-enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, SLOT_BITS = 12, SLOT_COUNT = 4096 };
+enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, MATRIX_F32, SLOT_BITS = 12, SLOT_COUNT = 4096 };
 // Rounded dispatches use at most 256 threads and must not wrap a uint gid.
 static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 
@@ -17,6 +18,9 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) id<MTLComputePipelineState> pipeline;
 @property(nonatomic) xu_int children;
 @property(nonatomic) xu_int dispatches;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, MPSMatrixMultiplication *> *matrixKernels;
+@property(nonatomic, strong) NSMutableArray<NSString *> *matrixKeys;
+@property(nonatomic) xu_int matrixKernelBuilds;
 @end
 @implementation XMDevice
 @end
@@ -39,6 +43,7 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) NSLock *waitGate;
 @property(nonatomic) BOOL completed;
 @property(nonatomic) xu_int status;
+@property(nonatomic, strong) id operation;
 @end
 @implementation XMFence
 @end
@@ -94,6 +99,29 @@ static xu_int finish(XMFence *f) {
     return f.status;
 }
 
+// Caller holds gate. Integer and MPS operations share lifetime, busy accounting,
+// acknowledgement and failure handling. A dropped fence retains its operation.
+static xu_int submit_command(XMDevice *d, XMBuffer *c, XMBuffer *a, XMBuffer *b,
+                             id<MTLCommandBuffer> command, id operation) {
+    XMFence *f = [XMFence new];
+    if (!f) return XM_ALLOC;
+    f.waitGate = [NSLock new];
+    if (!f.waitGate) return XM_ALLOC;
+    f.owner = d; f.output = c;
+    f.buffers = a == b ? @[c,a] : @[c,a,b];
+    f.command = command; f.operation = operation;
+    f.completed = command == nil;
+    xu_int handle = insert(f, FENCE);
+    if (handle < 0) return handle;
+    d.children++;
+    if (command) {
+        for (XMBuffer *buffer in f.buffers) buffer.busy++;
+        [command commit];
+        d.dispatches++;
+    }
+    return handle;
+}
+
 xu_int XM_API(abi_version)(void) { return 2; }
 xu_int XM_API(available)(void) { @autoreleasepool { return MTLCreateSystemDefaultDevice() != nil; } }
 xu_int XM_API(live_handles)(void) { ENTER; RETURN(live); }
@@ -134,6 +162,9 @@ xu_int XM_API(device_info)(xu_int h, xu_int key) { @autoreleasepool {
     if (key == 2) RETURN(d.dispatches);
     if (key == 3) RETURN(1); // One successfully created, retained pipeline per device.
     if (key == 4) RETURN(MIN(MAX_WORDS, d.gpu.maxBufferLength / 8));
+    if (key == 5) RETURN(d.matrixKernelBuilds);
+    if (key == 6) RETURN((xu_int)d.matrixKernels.count);
+    if (key == 7) RETURN(MPSSupportsMTLDevice(d.gpu));
     RETURN(XM_BOUNDS);
 } }
 xu_int XM_API(device_name)(xu_int h) { @autoreleasepool {
@@ -202,16 +233,16 @@ xu_int XM_API(buffer_snapshot)(xu_int h) { @autoreleasepool {
     if (b.poisoned) RETURN(XM_COMMAND);
     RETURN(snapshot([NSData dataWithBytes:b.memory.contents length:(NSUInteger)b.words * 8]));
 } }
-static xu_int release_buffer(xu_int handle, BOOL force) {
-    ENTER; XMBuffer *b = lookup(handle, BUFFER);
+static xu_int release_buffer_kind(xu_int handle, int kind, BOOL force) {
+    ENTER; XMBuffer *b = lookup(handle, kind);
     if (!b) RETURN(XM_HANDLE);
     if (!force && b.busy) RETURN(XM_BUSY);
     b.owner.children--;
     remove_handle(handle);
     RETURN(0);
 }
-xu_int XM_API(buffer_close)(xu_int h) { @autoreleasepool { return release_buffer(h, NO); } }
-xu_int XM_API(buffer_release)(xu_int h) { @autoreleasepool { return release_buffer(h, YES); } }
+xu_int XM_API(buffer_close)(xu_int h) { @autoreleasepool { return release_buffer_kind(h, BUFFER, NO); } }
+xu_int XM_API(buffer_release)(xu_int h) { @autoreleasepool { return release_buffer_kind(h, BUFFER, YES); } }
 
 xu_int XM_API(snapshot_len)(xu_int h) { @autoreleasepool {
     ENTER; NSData *data = lookup(h, SNAPSHOT);
@@ -260,12 +291,6 @@ xu_int XM_API(madd_i64)(xu_int dst, xu_int ah, xu_int bh, xu_int factor, xu_int 
     if (c.busy || a.busy || b.busy) RETURN(XM_BUSY);
     if (c.poisoned || a.poisoned || b.poisoned) RETURN(XM_COMMAND);
     XMDevice *d = c.owner;
-    XMFence *f = [XMFence new];
-    if (!f) RETURN(XM_ALLOC);
-    f.waitGate = [NSLock new];
-    if (!f.waitGate) RETURN(XM_ALLOC);
-    f.owner = d; f.output = c;
-    f.buffers = a == b ? @[c,a] : @[c,a,b];
     id<MTLCommandBuffer> command = nil;
     if (words) {
         command = [d.queue commandBuffer];
@@ -284,17 +309,7 @@ xu_int XM_API(madd_i64)(xu_int dst, xu_int ah, xu_int bh, xu_int factor, xu_int 
             threadsPerThreadgroup:MTLSizeMake(width,1,1)];
         [encoder endEncoding];
     }
-    f.command = command;
-    f.completed = words == 0;
-    xu_int handle = insert(f, FENCE);
-    if (handle < 0) RETURN(handle);
-    d.children++;
-    if (words) {
-        for (XMBuffer *buffer in f.buffers) buffer.busy++;
-        [command commit];
-        d.dispatches++;
-    }
-    RETURN(handle);
+    RETURN(submit_command(d, c, a, b, command, nil));
 } }
 
 static xu_int wait_fence(xu_int handle, BOOL dispose) { @autoreleasepool {
@@ -329,3 +344,5 @@ xu_int XM_API(fence_close)(xu_int h) { @autoreleasepool {
     f.owner.children--;
     remove_handle(h); RETURN(0);
 } }
+
+#include "matrix_f32.inc"
