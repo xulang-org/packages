@@ -60,7 +60,7 @@ def test_official_package_identity_and_single_module_root():
     assert (root / "xu.xun").read_text().startswith('module: "github.com/xulang-org/packages"\n')
     assert not list(root.glob('*/xu.xun'))
     packages = [p for p in root.iterdir() if (p / 'mod.xu').is_file()]
-    assert len(packages) == 29
+    assert len(packages) == 31
     for package in packages:
         for source in package.glob('*.xu'):
             assert source.read_text().startswith('@"github.com/xulang-org/packages/'+package.name+'"')
