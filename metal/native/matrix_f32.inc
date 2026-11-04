@@ -58,6 +58,7 @@ xu_int XM_API(matrix_f32_info)(xu_int h, xu_int key) { @autoreleasepool {
     if (key == 1) RETURN((xu_int)m.rows);
     if (key == 2) RETURN((xu_int)m.columns);
     if (key == 3) RETURN((xu_int)m.rowBytes);
+    if (key == 4) RETURN((xu_int)m.words);
     RETURN(XM_BOUNDS);
 } }
 
@@ -81,7 +82,7 @@ xu_int XM_API(matrix_f32_write)(xu_int h, const xu_i64_span *source) { @autorele
     // properties once, leaving plain contiguous C loops for the host compiler.
     NSUInteger rows = m.rows, columns = m.columns, stride = m.rowBytes;
     uint8_t *base = m.memory.contents;
-    for (NSUInteger row = 0; row < rows; ++row) {
+    if (m.words) for (NSUInteger row = 0; row < rows; ++row) {
         uint8_t *output = base + row * stride;
         for (NSUInteger col = 0; col < columns; ++col) {
             uint32_t bits = (uint32_t)input[row * columns + col];
@@ -109,6 +110,34 @@ xu_int XM_API(matrix_f32_snapshot)(xu_int h) { @autoreleasepool {
     RETURN(snapshot(data));
 } }
 
+// Exact bit expansion, with no floating-point conversion or alignment
+// assumption about NSData. Both readback paths use this representation rule.
+static void copy_f32_bits(const uint8_t *input, xu_int *output, NSUInteger count) {
+    for (NSUInteger i = 0; i < count; ++i) {
+        uint32_t bits;
+        memcpy(&bits, input + i * 4, 4);
+        output[i] = (xu_int)bits;
+    }
+}
+
+xu_int XM_API(matrix_f32_copy)(xu_int h, const xu_i64_span_mut *destination) { @autoreleasepool {
+    if (!destination || !host_range(destination->len, destination->data, 0, destination->len)) return XM_BOUNDS;
+    ENTER; XMMatrix *m = lookup(h, MATRIX_F32);
+    if (!m) RETURN(XM_HANDLE);
+    if ((uint64_t)destination->len < m.words) RETURN(XM_BOUNDS);
+    if (m.busy) RETURN(XM_BUSY);
+    if (m.poisoned) RETURN(XM_COMMAND);
+    // Empty shapes may have nonzero row counts but only a 16-byte backing
+    // allocation. Do not even form row pointers when there are no elements.
+    if (!m.words) RETURN(0);
+    NSUInteger rows = m.rows, columns = m.columns, stride = m.rowBytes;
+    const uint8_t *input = m.memory.contents;
+    xu_int *output = destination->data;
+    for (NSUInteger row = 0; row < rows; ++row)
+        copy_f32_bits(input + row * stride, output + row * columns, columns);
+    RETURN(0);
+} }
+
 xu_int XM_API(snapshot_f32_copy)(xu_int h, const xu_i64_span_mut *destination) { @autoreleasepool {
     if (!destination || !host_range(destination->len, destination->data, 0, destination->len)) return XM_BOUNDS;
     ENTER; NSData *data = lookup(h, SNAPSHOT);
@@ -117,11 +146,7 @@ xu_int XM_API(snapshot_f32_copy)(xu_int h, const xu_i64_span_mut *destination) {
     NSUInteger count = data.length / 4;
     const uint8_t *input = data.bytes;
     xu_int *output = destination->data;
-    for (NSUInteger i = 0; i < count; ++i) {
-        uint32_t bits;
-        memcpy(&bits, input + i * 4, 4);
-        output[i] = (xu_int)bits;
-    }
+    copy_f32_bits(input, output, count);
     RETURN(0);
 } }
 
