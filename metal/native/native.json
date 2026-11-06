@@ -244,6 +244,14 @@
         "int"
       ],
       "ret": "int"
+    },
+    {
+      "name": "matrix_f32_copy",
+      "params": [
+        "int",
+        "i64_span_mut"
+      ],
+      "ret": "int"
     }
   ]
 }

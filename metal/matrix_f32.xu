@@ -35,8 +35,16 @@ pub fn (m &F32Matrix) snapshot() F32Snapshot {
     << F32Snapshot{handle: handle}
 }
 pub fn (m &F32Matrix) bits() []int {
-    s := m.snapshot() or >>
-    << s.bits() or >>
+    count := checked(metal_native.matrix_f32_info(m.handle, 4)) or >>
+    $out := []int{}
+    for i in 0:count { out.push(0) }
+    m.copy_bits($&out) or >>
+    << out
+}
+// Synchronous read into existing elements, without a temporary Snapshot.
+// Wait first; rejected reads leave all destination elements unchanged.
+pub fn (m &F32Matrix) copy_bits(out $&[]int) int {
+    << checked(metal_native.matrix_f32_copy(m.handle, out)) or >>
 }
 pub fn (m $&F32Matrix) close() int {
     if m.handle == 0 { << 0 }

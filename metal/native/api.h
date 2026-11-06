@@ -38,6 +38,7 @@ XM_DECL(matrix_f32_new, (xu_int device, xu_int rows, xu_int columns));
 XM_DECL(matrix_f32_info, (xu_int matrix, xu_int key));
 XM_DECL(matrix_f32_write, (xu_int matrix, const xu_i64_span *bits));
 XM_DECL(matrix_f32_snapshot, (xu_int matrix));
+XM_DECL(matrix_f32_copy, (xu_int matrix, const xu_i64_span_mut *bits));
 XM_DECL(matrix_f32_close, (xu_int matrix));
 XM_DECL(matrix_f32_release, (xu_int matrix));
 XM_DECL(snapshot_f32_copy, (xu_int snapshot, const xu_i64_span_mut *bits));

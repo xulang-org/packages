@@ -116,7 +116,8 @@ fn run() int {
     b.write_bits(&[1073741824]) or >> // 2.0f
     f := metal.gemm_f32($&c, &a, &b) or >>
     f.wait() or >>
-    bits := c.bits() or >>
+    $bits := [0] // Reuse this array on later iterations.
+    c.copy_bits($&bits) or >>
     println(bits[0]) // 1073741824: 2.0f
     << 0
 }
@@ -143,10 +144,16 @@ fn main() int {
 用于诊断 MPS 选择的内部 padding；调用者不能传入任意 stride。零输出维度产生空快照，
 K=0 产生正零矩阵；两者返回已完成 Fence，不提交 GPU 命令。分配失败不形成有效 owner。
 
-`F32Matrix.snapshot()` 生成不含行 padding 的独立 `F32Snapshot`；其 `bits()` 及
-矩阵的 `bits()` 返回独立 Xu 数组。`F32Snapshot.copy_bits($&out)` 只写已有目标元素，
-不足时不写入，较长目标的尾部不变。矩阵在完成前的读写、关闭与再次提交遵守相同 `BUSY`
-规则；失败输出被标记为不可读取，丢弃 Fence 仍等待并回收资源。
+`F32Matrix.copy_bits($&out)` 同步回读已完成矩阵，直接写入已有目标元素，省去临时快照。
+目标不足、句柄失效、未确认完成或输出失败时不改变目标；较长目标的尾部保持原值，数组
+长度/容量不变。它不分配原生句柄，在句柄预算耗尽时也可读取已有矩阵。矩阵的 `bits()`
+仍返回独立新数组，内部使用同一直接回读路径；不会保留宿主指针。
+
+需要捕获不可变时间点时，`F32Matrix.snapshot()` 继续生成不含行 padding 的独立
+`F32Snapshot`，即使原矩阵后来写入或关闭也能读取。`F32Snapshot.bits()` 返回独立数组；
+`F32Snapshot.copy_bits($&out)` 写入已有目标，长度不足时不写，较长目标尾部不变。
+矩阵完成前的读写、关闭与再次提交遵守相同 `BUSY` 规则；失败输出不可读取，丢弃 Fence
+仍等待并回收资源。直接回读遵守相同完成等待契约，不代表零复制。
 
 `supports_f32_gemm()` 返回实际设备的 MPS 能力布尔值；不支持设备的矩阵操作返回
 `UNAVAILABLE`，无 CPU 伪成功回退。MPS kernel 按设备及 M/N/K 缓存，最多 8 项，逐出后未完成的 Fence 仍保留其
