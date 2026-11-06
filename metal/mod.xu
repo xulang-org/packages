@@ -1,0 +1,180 @@
+@"github.com/xulang-org/packages/metal"
+
+#metal_native
+#errors
+
+// Explicit i64 GPU buffers. Owners are non-Copy through their drop hooks.
+// Pending GPU work is acknowledged with Fence.wait before host access.
+pub struct Device { handle int }
+pub struct Buffer { handle int }
+pub struct Fence { handle int }
+pub struct Snapshot { handle int }
+
+pub const UNAVAILABLE = -1
+pub const INVALID_HANDLE = -2
+pub const BOUNDS = -3
+pub const BUSY = -4
+pub const DIFFERENT_DEVICE = -5
+pub const ALIAS = -6
+pub const ALLOCATION = -7
+pub const PIPELINE = -8
+pub const COMMAND = -9
+pub const DTYPE = -10
+pub const RESOURCE_LIMIT = -11
+pub const NUMERICS = -12
+pub const SHAPE = -13
+
+fn checked(code int) int {
+    if code >= 0 { << code }
+    $message := "metal: invalid native status"
+    if code == UNAVAILABLE { message = "metal: device or platform unavailable" }
+    if code == INVALID_HANDLE { message = "metal: closed or invalid handle" }
+    if code == BOUNDS { message = "metal: length or index out of bounds" }
+    if code == BUSY { message = "metal: wait for pending work before access or close" }
+    if code == DIFFERENT_DEVICE { message = "metal: buffers belong to different devices" }
+    if code == ALIAS { message = "metal: output aliases an input" }
+    if code == ALLOCATION { message = "metal: resource allocation failed" }
+    if code == PIPELINE { message = "metal: requested compute kernel unavailable" }
+    if code == COMMAND { message = "metal: GPU command failed; discard its output buffer" }
+    if code == DTYPE { message = "metal: unsupported dtype" }
+    if code == RESOURCE_LIMIT { message = "metal: native handle budget exhausted" }
+    if code == NUMERICS { message = "metal: GEMM requires finite normal f32 values or signed zero" }
+    if code == SHAPE { message = "metal: incompatible matrix shapes" }
+    >> errors.code(code, message)
+}
+
+pub fn available() bool { << metal_native.available() == 1 }
+pub fn abi_version() int { << metal_native.abi_version() }
+pub fn live_handles() int { << metal_native.live_handles() }
+
+pub fn open() Device {
+    handle := checked(metal_native.device_new()) or >>
+    << Device{handle: handle}
+}
+
+pub fn (d &Device) name() string {
+    handle := checked(metal_native.device_name(d.handle)) or >>
+    s := Snapshot{handle: handle}
+    bytes := s.bytes() or >>
+    << string_from_bytes(bytes)
+}
+
+pub fn (d &Device) unified_memory() bool {
+    value := checked(metal_native.device_info(d.handle, 1)) or >>
+    << value == 1
+}
+
+pub fn (d &Device) dispatch_count() int { << checked(metal_native.device_info(d.handle, 2)) or >> }
+pub fn (d &Device) pipeline_count() int { << checked(metal_native.device_info(d.handle, 3)) or >> }
+pub fn (d &Device) max_words() int { << checked(metal_native.device_info(d.handle, 4)) or >> }
+
+pub fn (d &Device) buffer_i64(words int) Buffer {
+    handle := checked(metal_native.buffer_new(d.handle, words, 1)) or >>
+    << Buffer{handle: handle}
+}
+
+pub fn (d $&Device) close() int {
+    if d.handle == 0 { << 0 }
+    checked(metal_native.device_close(d.handle)) or >>
+    d.handle = 0
+    << 0
+}
+fn (d $&Device) drop() {
+    if d.handle > 0 { metal_native.device_release(d.handle) d.handle = 0 }
+}
+
+pub fn (b $&Buffer) put(index int, value int) int {
+    << checked(metal_native.buffer_put(b.handle, index, value)) or >>
+}
+
+// Copies synchronously; source storage is never retained by native/GPU work.
+pub fn (b $&Buffer) put_all(values &[]int) int {
+    << checked(metal_native.buffer_write(b.handle, 0, values, 0, values.len)) or >>
+}
+
+pub fn (b $&Buffer) put_range(offset int, values &[]int, first int, count int) int {
+    << checked(metal_native.buffer_write(b.handle, offset, values, first, count)) or >>
+}
+
+pub fn (b &Buffer) snapshot() Snapshot {
+    handle := checked(metal_native.buffer_snapshot(b.handle)) or >>
+    << Snapshot{handle: handle}
+}
+
+pub fn (b &Buffer) ints() []int {
+    s := b.snapshot() or >>
+    << s.ints() or >>
+}
+
+pub fn (b $&Buffer) close() int {
+    if b.handle == 0 { << 0 }
+    checked(metal_native.buffer_close(b.handle)) or >>
+    b.handle = 0
+    << 0
+}
+fn (b $&Buffer) drop() {
+    // Fence and Metal retain physical storage; the owning handle can retire.
+    if b.handle > 0 { metal_native.buffer_release(b.handle) b.handle = 0 }
+}
+
+pub fn (s &Snapshot) byte_len() int { << checked(metal_native.snapshot_len(s.handle)) or >> }
+pub fn (s &Snapshot) byte_at(index int) int { << checked(metal_native.snapshot_byte(s.handle, index)) or >> }
+pub fn (s &Snapshot) word(index int) int {
+    low := checked(metal_native.snapshot_low(s.handle, index)) or >>
+    high := checked(metal_native.snapshot_high(s.handle, index)) or >>
+    << (high << 32) | low
+}
+pub fn (s &Snapshot) bytes() []int {
+    count := s.byte_len() or >>
+    $out := []int{}
+    for i in 0:count { out.push(s.byte_at(i) or >>) }
+    << out
+}
+pub fn (s &Snapshot) ints() []int {
+    bytes := s.byte_len() or >>
+    if (bytes & 7) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
+    $out := []int{}
+    for i in 0:bytes/8 { out.push(0) }
+    s.copy_into($&out) or >>
+    << out
+}
+
+// Copies into existing elements, preserving the Xu array's length/capacity.
+// Every range is validated before any destination element is modified.
+pub fn (s &Snapshot) copy_into(out $&[]int) int {
+    bytes := s.byte_len() or >>
+    if (bytes & 7) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
+    << checked(metal_native.snapshot_copy(s.handle, 0, out, 0, bytes/8)) or >>
+}
+
+pub fn (s &Snapshot) copy_range(first int, out $&[]int, offset int, count int) int {
+    << checked(metal_native.snapshot_copy(s.handle, first, out, offset, count)) or >>
+}
+pub fn (s $&Snapshot) close() int {
+    if s.handle == 0 { << 0 }
+    checked(metal_native.snapshot_close(s.handle)) or >>
+    s.handle = 0
+    << 0
+}
+fn (s $&Snapshot) drop() {
+    if s.handle > 0 { metal_native.snapshot_close(s.handle) s.handle = 0 }
+}
+
+// dst[i] = a[i]*factor + b[i], with the same mod 2^64 bits as Xu int.
+// GPU and CPU accesses to these buffers are serialized until wait succeeds
+// or reports the command failure. No implicit precision conversion occurs.
+pub fn madd_i64(dst $&Buffer, a &Buffer, b &Buffer, factor int, words int) Fence {
+    handle := checked(metal_native.madd_i64(dst.handle, a.handle, b.handle, factor, words)) or >>
+    << Fence{handle: handle}
+}
+pub fn (f &Fence) wait() int { << checked(metal_native.fence_wait(f.handle)) or >> }
+pub fn (f $&Fence) close() int {
+    if f.handle == 0 { << 0 }
+    checked(metal_native.fence_close(f.handle)) or >>
+    f.handle = 0
+    << 0
+}
+fn (f $&Fence) drop() {
+    // A dropped fence waits and retires its handle even on command failure.
+    if f.handle > 0 { metal_native.fence_dispose(f.handle) f.handle = 0 }
+}

@@ -1,0 +1,257 @@
+{
+  "module": "metal_native",
+  "abi": "xu-c-2",
+  "exports": [
+    {
+      "name": "available",
+      "params": [],
+      "ret": "int"
+    },
+    {
+      "name": "abi_version",
+      "params": [],
+      "ret": "int"
+    },
+    {
+      "name": "live_handles",
+      "params": [],
+      "ret": "int"
+    },
+    {
+      "name": "device_new",
+      "params": [],
+      "ret": "int"
+    },
+    {
+      "name": "device_close",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "device_release",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "device_info",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "device_name",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_new",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_put",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_snapshot",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_close",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_release",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_len",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_byte",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_low",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_high",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_close",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "madd_i64",
+      "params": [
+        "int",
+        "int",
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "fence_wait",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "fence_close",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "fence_dispose",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "buffer_write",
+      "params": [
+        "int",
+        "int",
+        "i64_span",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_copy",
+      "params": [
+        "int",
+        "int",
+        "i64_span_mut",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_new",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_info",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_write",
+      "params": [
+        "int",
+        "i64_span"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_snapshot",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_close",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_release",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_f32_copy",
+      "params": [
+        "int",
+        "i64_span_mut"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "gemm_f32",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_copy",
+      "params": [
+        "int",
+        "i64_span_mut"
+      ],
+      "ret": "int"
+    }
+  ]
+}
