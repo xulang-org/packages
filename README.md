@@ -43,7 +43,7 @@ TLS 回归当前固定调用相邻 `../xu/bin/xu`，不读取 `XU` 或 `XU_ROOT`
 
 ### 可选 Metal 计算
 
-`metal` 包通过 `xu-c-2` 同步借用接口提供显式整数 GPU buffer、批量复制和完成等待，当前唯一算子为 `madd_i64`，按模 2⁶⁴ 计算 `dst[i] = a[i] * factor + b[i]`。本开发批次选择 Xu `0.11.3-dev.10`；旧 SDK 会拒绝新原生格式，需要旧 SDK 的应用继续使用此前的包版本。它不改变 Xu `int` 的位宽，不执行浮点精度转换，也不自动迁移普通循环。首次使用须单独构建：
+`metal` 包通过 `xu-c-2` 同步借用接口提供显式整数 GPU buffer、批量复制和完成等待；其中 `madd_i64` 按模 2⁶⁴ 计算 `dst[i] = a[i] * factor + b[i]`。本开发批次选择 Xu `0.11.3-dev.10`；旧 SDK 会拒绝新原生格式，需要旧 SDK 的应用继续使用此前的包版本。它不改变 Xu `int` 的位宽，不执行浮点精度转换，也不自动迁移普通循环。首次使用须单独构建：
 
 ```bash
 XU_ROOT=/path/to/xu make metal-native
@@ -78,11 +78,85 @@ fn main() int {
 
 `Device` 持有一个队列及一个初始化时建立的整数 pipeline；同一 Device 的后续提交复用 pipeline。`buffer_i64(n)` 分配零初始化、连续、步长为 8 字节的一维存储，`max_words()` 返回设备与索引共同允许的上限。提交的长度可以小于容量；零长度合法且不提交 GPU 命令。三个 buffer 必须属于同一 Device，输出不能与输入重叠，两个只读输入可以相同。`put` 按元素写入；`snapshot()` 复制已完成数据，`Snapshot.word/ints/byte_at/bytes` 读取这份不可变副本，`Buffer.ints()` 是创建副本并读取的便捷方法。当前接口不提供零复制视图或通用 shape/stride tensor。
 
+`Buffer.put_all(&values)` 同步上传完整数组；`put_range(offset, &values, first, count)`
+复制指定区间。`Snapshot.copy_into($&out)` 写入已有目标元素，`copy_range(first, $&out,
+ offset, count)` 支持局部读回；数组长度和容量保持不变。`Buffer.ints()` 和
+`Snapshot.ints()` 继续返回独立数组，内部采用批量读回。原有 `put`、`word` 等标量
+方法保留，运行时 ABI 查询为 2。
+
+批量入口先检查句柄、完整范围、大小溢出与 busy/命令失败状态，再执行复制；失败时
+目标内容不变。零长度复制仍检查句柄及 busy 状态。上传在返回前完成，不让 GPU 保留
+Xu 数组指针；GPU fence 等待规则不变。快照仍是独立、不可变的副本。批量 API 的收益
+应以包含数组准备、分配、上传、提交等待、读回和消费结果的应用总成本评估，不能只用
+GPU 内核时间判断是否优于 CPU。
+
 提交后参与计算的 buffer 保持忙状态，直到 `Fence.wait()` 确认完成；期间主机读写、再次提交或显式关闭返回 `BUSY`，即使 GPU 已物理完成。成功等待可重复调用。命令失败返回 `COMMAND` 并禁止继续使用输出内容；应丢弃输出 buffer。错误通过 Xu `errors.CodeErr` 传播，可用本包导出的状态常量判断。无设备/不支持平台返回 `UNAVAILABLE`，不能把它当作已执行 CPU 回退。
 
-四种 owner 均不可复制，离开作用域和错误展开会释放其句柄。丢弃 buffer/Device 时，pending fence 仍保留实际 GPU 资源；丢弃 fence 会阻塞等待并清理，失败时同样回收。显式 `close()` 成功后可重复调用；关闭 pending fence、忙 buffer 或仍有子资源的 Device 返回 `BUSY` 并保留所有权。`live_handles()`、`pipeline_count()`、`dispatch_count()` 用于诊断，不作为应用同步机制。每进程最多有 4096 个同时存活的原生句柄，耗尽时返回 `RESOURCE_LIMIT`，释放后可继续分配。
+六种 owner（含 `F32Matrix`/`F32Snapshot`）均不可复制，离开作用域和错误展开会释放其句柄。丢弃 buffer/Device 时，pending fence 仍保留实际 GPU 资源；丢弃 fence 会阻塞等待并清理，失败时同样回收。显式 `close()` 成功后可重复调用；关闭 pending fence、忙 buffer 或仍有子资源的 Device 返回 `BUSY` 并保留所有权。`live_handles()`、`pipeline_count()`、`dispatch_count()` 用于诊断，不作为应用同步机制。每进程最多有 4096 个同时存活的原生句柄，耗尽时返回 `RESOURCE_LIMIT`，释放后可继续分配。
 
-本接口用于建立正确性、同步和成本测量基础。它不承诺简单整数 map 比 CPU 快；首次 shader 编译、逐元素跨 ABI 写入、分配、提交等待和复制读回都应计入应用总成本。MPS GEMM、显式浮点数值契约、自动选路、GPU Tile 与算子融合尚待实现。
+本接口用于建立正确性、同步和成本测量基础。它不承诺简单整数 map 比 CPU 快；首次 shader 编译、逐元素跨 ABI 写入、分配、提交等待和复制读回都应计入应用总成本。显式 f32 MPS GEMM 见下节；自动选路、通用 tensor、GPU Tile 与算子融合仍待实现。
+
+### 显式 f32 矩阵与 MPS GEMM
+
+`F32Matrix` 是独立的二维 binary32 存储，使用 `Device.matrix_f32(rows, columns)` 创建。
+`write_bits(&values)` 接收逐行排列的 IEEE 754 binary32 位模式：每个 Xu `int` 必须在
+`0..4294967295`，元素数须与矩阵完全相符。这里传递的是位模式，例如 `1065353216`
+表示 `1.0f`，不是把这个整数数值转换成浮点数。接口不隐式收窄 Xu `f64`。
+上传逐位保留负零、NaN payload 和次正规数，且同步完成、校验后才写；GPU 不保留宿主指针。
+
+```xu
+@main
+metal #"github.com/xulang-org/packages/metal"
+fn run() int {
+    d := metal.open() or >>
+    $a := d.matrix_f32(1, 1) or >>
+    $b := d.matrix_f32(1, 1) or >>
+    $c := d.matrix_f32(1, 1) or >>
+    a.write_bits(&[1065353216]) or >> // 1.0f
+    b.write_bits(&[1073741824]) or >> // 2.0f
+    f := metal.gemm_f32($&c, &a, &b) or >>
+    f.wait() or >>
+    bits := c.bits() or >>
+    println(bits[0]) // 1073741824: 2.0f
+    << 0
+}
+fn main() int {
+    run() or (err) {
+        eprintln(err.msg())
+        << 1
+    }
+    << 0
+}
+```
+
+`gemm_f32` 显式调用 MPS，计算 `C=A*B`（alpha=1、beta=0、无转置），要求
+`A[M,K]`、`B[K,N]`、`C[M,N]`，否则返回 `SHAPE`。三个 owner 必须属于同一 Device，
+输出不允许别名；共享输入合法。接口承诺 MPS 的近似 f32 计算，允许不同归约顺序与 FMA，
+不承诺与 CPU 顺序 f64 或逐步 f32 求值逐位一致。首批计算只接受有限正规数及正负零；
+非有限值和次正规输入在提交前返回 `NUMERICS`。输出可能出现 binary32 溢出/下溢；
+后续把结果作为输入时仍会重新验证。原始位存储接口不受这项计算准入限制。
+上传时同时记录数值类别；未变化的输入可复用已验证事实。GPU 写入的结果使该事实失效，
+下次作为输入时重新检查；正常输入计算出的 Inf 或次正规数仍不能绕过准入。
+
+形状非负，每个维度最多 16384，每个矩阵最多 16777216 个逻辑元素，并检查设备 buffer
+上限与行跨度，超出时返回 `BOUNDS`。`rows()`/`columns()` 返回逻辑形状，`row_bytes()`
+用于诊断 MPS 选择的内部 padding；调用者不能传入任意 stride。零输出维度产生空快照，
+K=0 产生正零矩阵；两者返回已完成 Fence，不提交 GPU 命令。分配失败不形成有效 owner。
+
+`F32Matrix.snapshot()` 生成不含行 padding 的独立 `F32Snapshot`；其 `bits()` 及
+矩阵的 `bits()` 返回独立 Xu 数组。`F32Snapshot.copy_bits($&out)` 只写已有目标元素，
+不足时不写入，较长目标的尾部不变。矩阵在完成前的读写、关闭与再次提交遵守相同 `BUSY`
+规则；失败输出被标记为不可读取，丢弃 Fence 仍等待并回收资源。
+
+`supports_f32_gemm()` 返回实际设备的 MPS 能力布尔值；不支持设备的矩阵操作返回
+`UNAVAILABLE`，无 CPU 伪成功回退。MPS kernel 按设备及 M/N/K 缓存，最多 8 项，逐出后未完成的 Fence 仍保留其
+operation 和矩阵。`matrix_kernel_count()` 统计累计创建数，`matrix_cache_size()` 返回
+当前项数；`pipeline_count()` 继续表示整数 pipeline，`dispatch_count()` 统计实际 GPU
+提交。本包保留 `xu-c-2`/运行时 ABI 2，新增导出兼容原有整数入口。
+
+性能须分别测量首次设备初始化、准备与位模式 packing、分配、上传、kernel 建立/命中、
+编码与等待、快照读回及应用消费；常驻矩阵的 kernel 收益不能替代应用总成本。接口不自动
+决定 CPU/GPU 路径，不提供通用 tensor、f32 标量语法或浮点精度的隐式改变。
 
 SQL 驱动接口、连接池和事务管理位于标准库，驱动实现位于本仓库的 mysql、postgres、sqlite 模块。其余数据库、消息、HTTP 服务模块的 API 和限制见各自 README。
 
@@ -122,15 +196,3 @@ Constants use `UPPER_SNAKE_CASE`, including exported driver constants such as `r
 ## 许可证
 
 本仓库自有代码和文档采用 [MIT License](LICENSE)。第三方源码保留各自声明；例如 SQLite 的来源与公有领域说明见 [sqlite/vendor/README.md](sqlite/vendor/README.md)。
-
-`Buffer.put_all(&values)` 同步上传完整数组；`put_range(offset, &values, first, count)`
-复制指定区间。`Snapshot.copy_into($&out)` 写入已有目标元素，`copy_range(first, $&out,
- offset, count)` 支持局部读回；数组长度和容量保持不变。`Buffer.ints()` 和
-`Snapshot.ints()` 继续返回独立数组，内部采用批量读回。原有 `put`、`word` 等标量
-方法保留，运行时 ABI 查询为 2。
-
-批量入口先检查句柄、完整范围、大小溢出与 busy/命令失败状态，再执行复制；失败时
-目标内容不变。零长度复制仍检查句柄及 busy 状态。上传在返回前完成，不让 GPU 保留
-Xu 数组指针；GPU fence 等待规则不变。快照仍是独立、不可变的副本。批量 API 的收益
-应以包含数组准备、分配、上传、提交等待、读回和消费结果的应用总成本评估，不能只用
-GPU 内核时间判断是否优于 CPU。

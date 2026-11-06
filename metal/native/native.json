@@ -181,6 +181,69 @@
         "int"
       ],
       "ret": "int"
+    },
+    {
+      "name": "matrix_f32_new",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_info",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_write",
+      "params": [
+        "int",
+        "i64_span"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_snapshot",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_close",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f32_release",
+      "params": [
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "snapshot_f32_copy",
+      "params": [
+        "int",
+        "i64_span_mut"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "gemm_f32",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
     }
   ]
 }

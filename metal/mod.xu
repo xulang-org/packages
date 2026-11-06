@@ -21,6 +21,8 @@ pub const PIPELINE = -8
 pub const COMMAND = -9
 pub const DTYPE = -10
 pub const RESOURCE_LIMIT = -11
+pub const NUMERICS = -12
+pub const SHAPE = -13
 
 fn checked(code int) int {
     if code >= 0 { << code }
@@ -32,10 +34,12 @@ fn checked(code int) int {
     if code == DIFFERENT_DEVICE { message = "metal: buffers belong to different devices" }
     if code == ALIAS { message = "metal: output aliases an input" }
     if code == ALLOCATION { message = "metal: resource allocation failed" }
-    if code == PIPELINE { message = "metal: integer compute pipeline unavailable" }
+    if code == PIPELINE { message = "metal: requested compute kernel unavailable" }
     if code == COMMAND { message = "metal: GPU command failed; discard its output buffer" }
     if code == DTYPE { message = "metal: unsupported dtype" }
     if code == RESOURCE_LIMIT { message = "metal: native handle budget exhausted" }
+    if code == NUMERICS { message = "metal: GEMM requires finite normal f32 values or signed zero" }
+    if code == SHAPE { message = "metal: incompatible matrix shapes" }
     >> errors.code(code, message)
 }
 
