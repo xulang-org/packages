@@ -13,9 +13,22 @@ SEMVER = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
 
 def version(text, field='version'):
     lines = re.findall(rf'^{field}:\s*!ver\s+([^\n]+)$', text, re.M)
-    if len(lines) != 1 or not re.fullmatch(SEMVER, lines[0]):
+    pattern = SEMVER + (r'(?:-(dev|rc)\.([1-9][0-9]*))?' if field == 'xu' else '')
+    match = re.fullmatch(pattern, lines[0]) if len(lines) == 1 else None
+    if not match:
         raise ValueError(f'expected one valid {field}: !ver x.y.z field')
-    return tuple(map(int, lines[0].split('.')))
+    value = tuple(map(int, match.groups()[:3]))
+    if field == 'xu' and match.group(4):
+        value += (match.group(4), int(match.group(5)))
+    return value
+
+def version_string(value):
+    text = '.'.join(map(str, value[:3]))
+    return text if len(value) == 3 else text + f'-{value[3]}.{value[4]}'
+
+def sdk_order(value):
+    rank = {'dev': 0, 'rc': 1}
+    return (*value[:3], 2, 0) if len(value) == 3 else (*value[:3], rank[value[3]], value[4])
 
 def digest(files):
     sha = hashlib.sha256()
@@ -92,15 +105,15 @@ def process(root, base='HEAD', bump=False, kind='patch', release=None):
         if target != value:
             text = re.sub(r'^version:[^\n]*', 'version: !ver '+'.'.join(map(str,target)), text, flags=re.M)
         if release is not None:
-            if tuple(info['xu']) > release:
+            if sdk_order(info['xu']) > sdk_order(release):
                 errors.append(f'{name}: cannot regress xu:')
-            text = re.sub(r'^xu:[^\n]*', 'xu: !ver '+'.'.join(map(str,release)), text, flags=re.M)
+            text = re.sub(r'^xu:[^\n]*', 'xu: !ver '+version_string(release), text, flags=re.M)
         if text != path.read_text():
             updates[path] = text
     if not errors:
         for path, text in updates.items():
             path.write_text(text)
-            print(f'{path.parent.name}: version {".".join(map(str,version(text)))} / xu {".".join(map(str,version(text,"xu")))}')
+            print(f'{path.parent.name}: version {version_string(version(text))} / xu {version_string(version(text,"xu"))}')
     return errors
 
 def main():
@@ -116,7 +129,7 @@ def main():
         release = None
         if args.sync_release:
             compiler = Path(os.environ.get('XU_ROOT', ROOT.parent/'xu'))
-            release = version('version: !ver '+(compiler/'VERSION').read_text().strip()+'\n')
+            release = version('xu: !ver '+(compiler/'VERSION').read_text().strip()+'\n', 'xu')
         errors = process(ROOT, args.base, args.bump, args.kind, release)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise SystemExit(str(error))
