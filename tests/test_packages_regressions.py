@@ -108,7 +108,7 @@ fn main() int {
     << 0
 }
 '''
-        for flags in [("-O0",), ("-O1",), ("--no-regcache",)]:
+        for flags in [(), ("--no-opt",)]:
             with self.subTest(flags=flags):
                 self.assertIn("preserved", self.run_xu(source, [], build_flags=flags))
 
