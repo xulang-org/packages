@@ -1,0 +1,388 @@
+@"github.com/xulang-org/packages/metal_native"
+// Xu FFI front-end for the Metal ObjC bridge (libxu_metal.dylib).
+// bridge.m remains the Metal/MPS implementation; this package replaces the
+// packed metal.xulib import with dlopen + dynamic calls (same shape as
+// #internal/sdl → libSDL3).
+
+#ffi
+#os
+
+const SLOT = 2
+const OFF_LIBRARY = 0
+const OFF_LOADED = 8
+const OFF_SYMS = 16
+const SYM_COUNT = 33
+const BLOB_SIZE = 280
+
+const XM_UNAVAILABLE = -1
+
+extern "C" fn xm_available(fn_ptr c_ptr) int = dynamic
+extern "C" fn xm_abi_version(fn_ptr c_ptr) int = dynamic
+extern "C" fn xm_live_handles(fn_ptr c_ptr) int = dynamic
+extern "C" fn xm_device_new(fn_ptr c_ptr) int = dynamic
+extern "C" fn xm_device_close(fn_ptr c_ptr, device int) int = dynamic
+extern "C" fn xm_device_release(fn_ptr c_ptr, device int) int = dynamic
+extern "C" fn xm_device_info(fn_ptr c_ptr, device int, key int) int = dynamic
+extern "C" fn xm_device_name(fn_ptr c_ptr, device int) int = dynamic
+extern "C" fn xm_buffer_new(fn_ptr c_ptr, device int, words int, dtype int) int = dynamic
+extern "C" fn xm_buffer_put(fn_ptr c_ptr, buffer int, index int, value int) int = dynamic
+extern "C" fn xm_buffer_write(fn_ptr c_ptr, buffer int, offset int, source c_ptr, first int, count int) int = dynamic
+extern "C" fn xm_buffer_snapshot(fn_ptr c_ptr, buffer int) int = dynamic
+extern "C" fn xm_buffer_close(fn_ptr c_ptr, buffer int) int = dynamic
+extern "C" fn xm_buffer_release(fn_ptr c_ptr, buffer int) int = dynamic
+extern "C" fn xm_snapshot_len(fn_ptr c_ptr, snapshot int) int = dynamic
+extern "C" fn xm_snapshot_byte(fn_ptr c_ptr, snapshot int, index int) int = dynamic
+extern "C" fn xm_snapshot_low(fn_ptr c_ptr, snapshot int, index int) int = dynamic
+extern "C" fn xm_snapshot_high(fn_ptr c_ptr, snapshot int, index int) int = dynamic
+extern "C" fn xm_snapshot_copy(fn_ptr c_ptr, snapshot int, first int, destination c_ptr, offset int, count int) int = dynamic
+extern "C" fn xm_snapshot_close(fn_ptr c_ptr, snapshot int) int = dynamic
+extern "C" fn xm_madd_i64(fn_ptr c_ptr, dst int, a int, b int, factor int, words int) int = dynamic
+extern "C" fn xm_fence_wait(fn_ptr c_ptr, fence int) int = dynamic
+extern "C" fn xm_fence_close(fn_ptr c_ptr, fence int) int = dynamic
+extern "C" fn xm_fence_dispose(fn_ptr c_ptr, fence int) int = dynamic
+extern "C" fn xm_matrix_f32_new(fn_ptr c_ptr, device int, rows int, columns int) int = dynamic
+extern "C" fn xm_matrix_f32_info(fn_ptr c_ptr, matrix int, key int) int = dynamic
+extern "C" fn xm_matrix_f32_write(fn_ptr c_ptr, matrix int, bits c_ptr) int = dynamic
+extern "C" fn xm_matrix_f32_snapshot(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_matrix_f32_copy(fn_ptr c_ptr, matrix int, bits c_ptr) int = dynamic
+extern "C" fn xm_matrix_f32_close(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_matrix_f32_release(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_snapshot_f32_copy(fn_ptr c_ptr, snapshot int, bits c_ptr) int = dynamic
+extern "C" fn xm_gemm_f32(fn_ptr c_ptr, dst int, a int, b int) int = dynamic
+
+fn sym_name(i int) string {
+    if i == 0 { << "xu_metal_native_available" }
+    if i == 1 { << "xu_metal_native_abi_version" }
+    if i == 2 { << "xu_metal_native_live_handles" }
+    if i == 3 { << "xu_metal_native_device_new" }
+    if i == 4 { << "xu_metal_native_device_close" }
+    if i == 5 { << "xu_metal_native_device_release" }
+    if i == 6 { << "xu_metal_native_device_info" }
+    if i == 7 { << "xu_metal_native_device_name" }
+    if i == 8 { << "xu_metal_native_buffer_new" }
+    if i == 9 { << "xu_metal_native_buffer_put" }
+    if i == 10 { << "xu_metal_native_buffer_write" }
+    if i == 11 { << "xu_metal_native_buffer_snapshot" }
+    if i == 12 { << "xu_metal_native_buffer_close" }
+    if i == 13 { << "xu_metal_native_buffer_release" }
+    if i == 14 { << "xu_metal_native_snapshot_len" }
+    if i == 15 { << "xu_metal_native_snapshot_byte" }
+    if i == 16 { << "xu_metal_native_snapshot_low" }
+    if i == 17 { << "xu_metal_native_snapshot_high" }
+    if i == 18 { << "xu_metal_native_snapshot_copy" }
+    if i == 19 { << "xu_metal_native_snapshot_close" }
+    if i == 20 { << "xu_metal_native_madd_i64" }
+    if i == 21 { << "xu_metal_native_fence_wait" }
+    if i == 22 { << "xu_metal_native_fence_close" }
+    if i == 23 { << "xu_metal_native_fence_dispose" }
+    if i == 24 { << "xu_metal_native_matrix_f32_new" }
+    if i == 25 { << "xu_metal_native_matrix_f32_info" }
+    if i == 26 { << "xu_metal_native_matrix_f32_write" }
+    if i == 27 { << "xu_metal_native_matrix_f32_snapshot" }
+    if i == 28 { << "xu_metal_native_matrix_f32_copy" }
+    if i == 29 { << "xu_metal_native_matrix_f32_close" }
+    if i == 30 { << "xu_metal_native_matrix_f32_release" }
+    if i == 31 { << "xu_metal_native_snapshot_f32_copy" }
+    if i == 32 { << "xu_metal_native_gemm_f32" }
+    << ""
+}
+
+fn blob() c_ptr {
+    unsafe {
+        $p := ffi.process_get(SLOT)
+        if !ffi.is_null(p) { << p }
+        p = ffi.calloc(BLOB_SIZE)
+        if ffi.is_null(p) { << ffi.null() }
+        ffi.process_set(SLOT, p)
+        << p
+    }
+}
+
+fn sym(i int) c_ptr {
+    unsafe {
+        p := blob()
+        if ffi.is_null(p) || i < 0 || i >= SYM_COUNT { << ffi.null() }
+        << ffi.read_ptr(p, OFF_SYMS + i * 8)
+    }
+}
+
+fn ensure() bool {
+    unsafe {
+        p := blob()
+        if ffi.is_null(p) { << false }
+        if ffi.read_i64(p, OFF_LOADED) != 0 { << true }
+        library := open_library()
+        if ffi.is_null(library) { << false }
+        for n in 0:SYM_COUNT {
+            name := sym_name(n)
+            f := ffi.dlsym(library, &name)
+            if ffi.is_null(f) {
+                ffi.dlclose(library)
+                << false
+            }
+            ffi.write_ptr(p, OFF_SYMS + n * 8, f)
+        }
+        ffi.write_ptr(p, OFF_LIBRARY, library)
+        ffi.write_i64(p, OFF_LOADED, 1)
+        << true
+    }
+}
+
+fn open_library() c_ptr {
+    unsafe {
+        override := os.getenv("XU_METAL_LIBRARY")
+        if override.len > 0 {
+            << ffi.dlopen_local(&override)
+        }
+        // Relative names first (cwd / dyld path), then each XUPATH root's metal/native.
+        names := ["libxu_metal.dylib", "metal/native/libxu_metal.dylib"]
+        for i in 0:names.len {
+            n := names[i]
+            h := ffi.dlopen_local(&n)
+            if !ffi.is_null(h) { << h }
+        }
+        xupath := os.getenv("XUPATH")
+        if xupath.len > 0 {
+            $start := 0
+            $i := 0
+            while i <= xupath.len {
+                if i == xupath.len || xupath[i] == 58 { // ':'
+                    if i > start {
+                        root := xupath[start:i]
+                        cand := root + "/metal/native/libxu_metal.dylib"
+                        h := ffi.dlopen_local(&cand)
+                        if !ffi.is_null(h) { << h }
+                    }
+                    start = i + 1
+                }
+                i += 1
+            }
+        }
+        << ffi.null()
+    }
+}
+
+// Host-side i64 span: copy into a temporary C buffer. Packages cannot use
+// rt_addr/desc_ptr; the bridge never retains the pointer past the call.
+fn i64_span_copy_in(values &[]int) c_ptr {
+    unsafe {
+        span := ffi.calloc(16)
+        if ffi.is_null(span) { << ffi.null() }
+        ffi.write_i64(span, 0, values.len)
+        if values.len == 0 {
+            ffi.write_ptr(span, 8, ffi.null())
+            << span
+        }
+        data := ffi.calloc(values.len * 8)
+        if ffi.is_null(data) {
+            ffi.free(span)
+            << ffi.null()
+        }
+        for i in 0:values.len { ffi.write_i64(data, i * 8, values[i]) }
+        ffi.write_ptr(span, 8, data)
+        << span
+    }
+}
+
+fn free_span(span c_ptr) {
+    unsafe {
+        if ffi.is_null(span) { << }
+        data := ffi.read_ptr(span, 8)
+        if !ffi.is_null(data) { ffi.free(data) }
+        ffi.free(span)
+    }
+}
+
+fn i64_span_alloc(len int) c_ptr {
+    unsafe {
+        span := ffi.calloc(16)
+        if ffi.is_null(span) { << ffi.null() }
+        ffi.write_i64(span, 0, len)
+        if len == 0 {
+            ffi.write_ptr(span, 8, ffi.null())
+            << span
+        }
+        data := ffi.calloc(len * 8)
+        if ffi.is_null(data) {
+            ffi.free(span)
+            << ffi.null()
+        }
+        ffi.write_ptr(span, 8, data)
+        << span
+    }
+}
+
+fn span_copy_out(span c_ptr, values $&[]int) {
+    unsafe {
+        if ffi.is_null(span) { << }
+        data := ffi.read_ptr(span, 8)
+        if ffi.is_null(data) { << }
+        for i in 0:values.len { values[i] = ffi.read_i64(data, i * 8) }
+    }
+}
+
+pub fn available() int {
+    if !ensure() { << 0 }
+    unsafe { << xm_available(sym(0)) }
+}
+pub fn abi_version() int {
+    if !ensure() { << 2 }
+    unsafe { << xm_abi_version(sym(1)) }
+}
+pub fn live_handles() int {
+    if !ensure() { << 0 }
+    unsafe { << xm_live_handles(sym(2)) }
+}
+pub fn device_new() int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_device_new(sym(3)) }
+}
+pub fn device_close(device int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_device_close(sym(4), device) }
+}
+pub fn device_release(device int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_device_release(sym(5), device) }
+}
+pub fn device_info(device int, key int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_device_info(sym(6), device, key) }
+}
+pub fn device_name(device int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_device_name(sym(7), device) }
+}
+pub fn buffer_new(device int, words int, dtype int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_buffer_new(sym(8), device, words, dtype) }
+}
+pub fn buffer_put(buffer int, index int, value int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_buffer_put(sym(9), buffer, index, value) }
+}
+pub fn buffer_write(buffer int, offset int, source &[]int, first int, count int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(source)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_buffer_write(sym(10), buffer, offset, span, first, count)
+        free_span(span)
+        << rc
+    }
+}
+pub fn buffer_snapshot(buffer int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_buffer_snapshot(sym(11), buffer) }
+}
+pub fn buffer_close(buffer int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_buffer_close(sym(12), buffer) }
+}
+pub fn buffer_release(buffer int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_buffer_release(sym(13), buffer) }
+}
+pub fn snapshot_len(snapshot int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_snapshot_len(sym(14), snapshot) }
+}
+pub fn snapshot_byte(snapshot int, index int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_snapshot_byte(sym(15), snapshot, index) }
+}
+pub fn snapshot_low(snapshot int, index int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_snapshot_low(sym(16), snapshot, index) }
+}
+pub fn snapshot_high(snapshot int, index int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_snapshot_high(sym(17), snapshot, index) }
+}
+pub fn snapshot_copy(snapshot int, first int, destination $&[]int, offset int, count int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_alloc(destination.len)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_snapshot_copy(sym(18), snapshot, first, span, offset, count)
+        if rc >= 0 { span_copy_out(span, destination) }
+        free_span(span)
+        << rc
+    }
+}
+pub fn snapshot_close(snapshot int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_snapshot_close(sym(19), snapshot) }
+}
+pub fn madd_i64(dst int, a int, b int, factor int, words int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_madd_i64(sym(20), dst, a, b, factor, words) }
+}
+pub fn fence_wait(fence int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_fence_wait(sym(21), fence) }
+}
+pub fn fence_close(fence int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_fence_close(sym(22), fence) }
+}
+pub fn fence_dispose(fence int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_fence_dispose(sym(23), fence) }
+}
+pub fn matrix_f32_new(device int, rows int, columns int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_f32_new(sym(24), device, rows, columns) }
+}
+pub fn matrix_f32_info(matrix int, key int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_f32_info(sym(25), matrix, key) }
+}
+pub fn matrix_f32_write(matrix int, bits &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(bits)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_f32_write(sym(26), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_f32_snapshot(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_f32_snapshot(sym(27), matrix) }
+}
+pub fn matrix_f32_copy(matrix int, bits $&[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_alloc(bits.len)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_f32_copy(sym(28), matrix, span)
+        if rc >= 0 { span_copy_out(span, bits) }
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_f32_close(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_f32_close(sym(29), matrix) }
+}
+pub fn matrix_f32_release(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_f32_release(sym(30), matrix) }
+}
+pub fn snapshot_f32_copy(snapshot int, bits $&[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_alloc(bits.len)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_snapshot_f32_copy(sym(31), snapshot, span)
+        if rc >= 0 { span_copy_out(span, bits) }
+        free_span(span)
+        << rc
+    }
+}
+pub fn gemm_f32(dst int, a int, b int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemm_f32(sym(32), dst, a, b) }
+}

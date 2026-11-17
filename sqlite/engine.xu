@@ -1,7 +1,7 @@
 @"github.com/xulang-org/packages/sqlite"
 
 #database/sql/driver
-#sqlite_native
+sqlite_native #"github.com/xulang-org/packages/sqlite_native"
 #time
 #strings
 

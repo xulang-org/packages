@@ -37,19 +37,20 @@ XU_ROOT=/path/to/xu XU=/path/to/product-sdk/bin/xu make test
 python3 scripts/module_versions.py --check
 ```
 
-若环境中未设置 `XU_ROOT`，默认使用相邻 `../xu`；`XU` 默认是该目录下的 `bin/xu`。测试使用产品编译器和本机协议服务，不需要外部数据库或凭据。SQLite 的 `.xulib` 是忽略的构建产物；首次使用或清洁检出后先运行 `make native`，源码、元数据和下载摘要保存在 `sqlite/native`、`sqlite/vendor`。构建默认查找 Clang，并需要目标 SDK；默认生成两个 macOS 原生切片，当前一步原生链接及 SQLite 运行测试限于这两个目标。其他目标需通过 `python3 sqlite/native/build.py --target <target> --cc <compiler>` 显式指定工具链并采用外部链接流程，尚未完成全平台验证。
+若环境中未设置 `XU_ROOT`，默认使用相邻 `../xu`；`XU` 默认是该目录下的 `bin/xu`。测试使用产品编译器和本机协议服务，不需要外部数据库或凭据。SQLite 现通过纯 Xu 包 `sqlite_native` `dlopen` 系统 `libsqlite3`（可用 `XU_SQLITE_LIBRARY` 覆盖），不再需要 `make native` / `sqlite.xulib`。遗留的 `sqlite/native`、`sqlite/vendor` 仍保留旧静态桥接与 amalgamation 说明，仅作对照。
 
 TLS 回归当前固定调用相邻 `../xu/bin/xu`，不读取 `XU` 或 `XU_ROOT`；运行完整测试前，该路径也须有可用的产品编译器。
 
 ### 可选 Metal 计算
 
-`metal` 包通过 `xu-c-2` 同步借用接口提供显式整数 GPU buffer、批量复制和完成等待；其中 `madd_i64` 按模 2⁶⁴ 计算 `dst[i] = a[i] * factor + b[i]`。本开发批次选择 Xu `0.11.3-dev.10`；旧 SDK 会拒绝新原生格式，需要旧 SDK 的应用继续使用此前的包版本。它不改变 Xu `int` 的位宽，不执行浮点精度转换，也不自动迁移普通循环。首次使用须单独构建：
+`metal` 包通过同步借用接口提供显式整数 GPU buffer、批量复制和完成等待；其中 `madd_i64` 按模 2⁶⁴ 计算 `dst[i] = a[i] * factor + b[i]`。ObjC 实现仍在 `metal/native/bridge.m`；构建 `libxu_metal.dylib` 后由纯 Xu 包 `metal_native` `dlopen`（`XU_METAL_LIBRARY` 可覆盖）。它不改变 Xu `int` 的位宽，不执行浮点精度转换，也不自动迁移普通循环。首次使用须单独构建 dylib：
 
 ```bash
-XU_ROOT=/path/to/xu make metal-native
+XU_ROOT=/path/to/xu python3 metal/native/build.py
+# 或：XU_ROOT=/path/to/xu make metal-native
 ```
 
-默认构建 macOS ARM64/x64 的 Metal 切片，以及 Linux/Windows ARM64/x64 的无设备 C 切片。Metal 切片需要 Clang 与匹配的 macOS SDK；其他切片不包含 Apple 头文件。`make native` 继续只构建 SQLite，未导入 `metal` 的应用不需要构建 Metal 资源。生成的 `.xulib` 不进入 Git；Git/file 依赖使用前须在本机准备原生资源。macOS 一步链接会读取原生对象中的 framework autolink 信息；其他平台目前使用 `xu build --emit-obj` 和外部链接流程，尚未完成应用真机运行验证。
+未导入 `metal` 的应用不需要构建 Metal 资源。dylib 不进入 Git。
 
 ```xu
 @main

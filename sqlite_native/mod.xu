@@ -1,0 +1,745 @@
+@"github.com/xulang-org/packages/sqlite_native"
+// Pure-Xu SQLite driver: dlopen libsqlite3 and keep integer handle tokens
+// only (former sqlite/native/bridge.c). Flip by removing sqlite_native from
+// xu.xun `native:` so this package resolves instead of the .xulib.
+
+#ffi
+#os
+#strconv
+
+const SLOT = 1 // process_ptr; 0=#internal/sdl, 2=metal_native
+
+const SQLITE_OK = 0
+const SQLITE_NOMEM = 7
+const SQLITE_MISMATCH = 20
+const SQLITE_MISUSE = 21
+const SQLITE_ROW = 100
+const SQLITE_DONE = 101
+const SQLITE_OPEN_READWRITE = 0x2
+const SQLITE_OPEN_CREATE = 0x4
+const SQLITE_OPEN_URI = 0x40
+const SQLITE_OPEN_FULLMUTEX = 0x10000
+const MAX_BUFFER = 16777216
+
+const KIND_BUFFER = 1
+const KIND_DATABASE = 2
+const KIND_STATEMENT = 3
+
+// Object record
+const O_ID = 0
+const O_OWNER = 8
+const O_KIND = 16
+const O_STATUS = 24
+const O_ROW = 32
+const O_LENGTH = 40
+const O_PTR = 48
+const O_NEXT = 56
+const O_SIZE = 64
+
+// State blob
+const S_LIBRARY = 0
+const S_LOADED = 8
+const S_SEQUENCE = 16
+const S_OBJECTS = 24
+const S_SYMS = 32
+const SYM_COUNT = 32
+const S_SIZE = 288
+
+const SYM_INITIALIZE = 0
+const SYM_OPEN_V2 = 1
+const SYM_CLOSE_V2 = 2
+const SYM_BUSY_TIMEOUT = 3
+const SYM_ERRMSG = 4
+const SYM_ERRCODE = 5
+const SYM_ERRSTR = 6
+const SYM_PREPARE_V2 = 7
+const SYM_FINALIZE = 8
+const SYM_BIND_NULL = 9
+const SYM_BIND_INT64 = 10
+const SYM_BIND_DOUBLE = 11
+const SYM_BIND_TEXT = 12
+const SYM_BIND_BLOB = 13
+const SYM_BIND_PARAM_COUNT = 14
+const SYM_BIND_PARAM_NAME = 15
+const SYM_STEP = 16
+const SYM_COLUMN_COUNT = 17
+const SYM_COLUMN_NAME = 18
+const SYM_COLUMN_TYPE = 19
+const SYM_COLUMN_INT64 = 20
+const SYM_COLUMN_DOUBLE = 21
+const SYM_COLUMN_TEXT = 22
+const SYM_COLUMN_BLOB = 23
+const SYM_COLUMN_BYTES = 24
+const SYM_DB_HANDLE = 25
+const SYM_LAST_INSERT = 26
+const SYM_TOTAL_CHANGES = 27
+const SYM_CHANGES = 28
+const SYM_MPRINTF = 29
+const SYM_FREE = 30
+const SYM_STRTOD = 31
+
+extern "C" fn sq_initialize(fn_ptr c_ptr) c_int = dynamic
+extern "C" fn sq_open_v2(fn_ptr c_ptr, path c_ptr, db_out c_ptr, flags c_int, vfs c_ptr) c_int = dynamic
+extern "C" fn sq_close_v2(fn_ptr c_ptr, db c_ptr) c_int = dynamic
+extern "C" fn sq_busy_timeout(fn_ptr c_ptr, db c_ptr, ms c_int) c_int = dynamic
+extern "C" fn sq_errmsg(fn_ptr c_ptr, db c_ptr) c_ptr = dynamic
+extern "C" fn sq_errcode(fn_ptr c_ptr, db c_ptr) c_int = dynamic
+extern "C" fn sq_errstr(fn_ptr c_ptr, rc c_int) c_ptr = dynamic
+extern "C" fn sq_prepare_v2(fn_ptr c_ptr, db c_ptr, sql c_ptr, n c_int, stmt_out c_ptr, tail_out c_ptr) c_int = dynamic
+extern "C" fn sq_finalize(fn_ptr c_ptr, stmt c_ptr) c_int = dynamic
+extern "C" fn sq_bind_null(fn_ptr c_ptr, stmt c_ptr, i c_int) c_int = dynamic
+extern "C" fn sq_bind_int64(fn_ptr c_ptr, stmt c_ptr, i c_int, v int) c_int = dynamic
+extern "C" fn sq_bind_double(fn_ptr c_ptr, stmt c_ptr, i c_int, v f64) c_int = dynamic
+extern "C" fn sq_bind_text(fn_ptr c_ptr, stmt c_ptr, i c_int, data c_ptr, n c_int, dtor c_ptr) c_int = dynamic
+extern "C" fn sq_bind_blob(fn_ptr c_ptr, stmt c_ptr, i c_int, data c_ptr, n c_int, dtor c_ptr) c_int = dynamic
+extern "C" fn sq_bind_parameter_count(fn_ptr c_ptr, stmt c_ptr) c_int = dynamic
+extern "C" fn sq_bind_parameter_name(fn_ptr c_ptr, stmt c_ptr, i c_int) c_ptr = dynamic
+extern "C" fn sq_step(fn_ptr c_ptr, stmt c_ptr) c_int = dynamic
+extern "C" fn sq_column_count(fn_ptr c_ptr, stmt c_ptr) c_int = dynamic
+extern "C" fn sq_column_name(fn_ptr c_ptr, stmt c_ptr, i c_int) c_ptr = dynamic
+extern "C" fn sq_column_type(fn_ptr c_ptr, stmt c_ptr, i c_int) c_int = dynamic
+extern "C" fn sq_column_int64(fn_ptr c_ptr, stmt c_ptr, i c_int) int = dynamic
+extern "C" fn sq_column_double(fn_ptr c_ptr, stmt c_ptr, i c_int) f64 = dynamic
+extern "C" fn sq_column_text(fn_ptr c_ptr, stmt c_ptr, i c_int) c_ptr = dynamic
+extern "C" fn sq_column_blob(fn_ptr c_ptr, stmt c_ptr, i c_int) c_ptr = dynamic
+extern "C" fn sq_column_bytes(fn_ptr c_ptr, stmt c_ptr, i c_int) c_int = dynamic
+extern "C" fn sq_db_handle(fn_ptr c_ptr, stmt c_ptr) c_ptr = dynamic
+extern "C" fn sq_last_insert_rowid(fn_ptr c_ptr, db c_ptr) int = dynamic
+extern "C" fn sq_total_changes64(fn_ptr c_ptr, db c_ptr) int = dynamic
+extern "C" fn sq_changes64(fn_ptr c_ptr, db c_ptr) int = dynamic
+extern "C" fn sq_mprintf(fn_ptr c_ptr, fmt c_ptr, v f64) c_ptr = dynamic
+extern "C" fn sq_free(fn_ptr c_ptr, p c_ptr) = dynamic
+extern "C" fn c_strtod(fn_ptr c_ptr, s c_ptr, end c_ptr) f64 = dynamic
+
+fn state() c_ptr {
+    unsafe {
+        $p := ffi.process_get(SLOT)
+        if !ffi.is_null(p) { << p }
+        p = ffi.calloc(S_SIZE)
+        if ffi.is_null(p) { << ffi.null() }
+        ffi.write_i64(p, S_SEQUENCE, 0)
+        ffi.process_set(SLOT, p)
+        << p
+    }
+}
+
+fn sym_name(i int) string {
+    if i == SYM_INITIALIZE { << "sqlite3_initialize" }
+    if i == SYM_OPEN_V2 { << "sqlite3_open_v2" }
+    if i == SYM_CLOSE_V2 { << "sqlite3_close_v2" }
+    if i == SYM_BUSY_TIMEOUT { << "sqlite3_busy_timeout" }
+    if i == SYM_ERRMSG { << "sqlite3_errmsg" }
+    if i == SYM_ERRCODE { << "sqlite3_errcode" }
+    if i == SYM_ERRSTR { << "sqlite3_errstr" }
+    if i == SYM_PREPARE_V2 { << "sqlite3_prepare_v2" }
+    if i == SYM_FINALIZE { << "sqlite3_finalize" }
+    if i == SYM_BIND_NULL { << "sqlite3_bind_null" }
+    if i == SYM_BIND_INT64 { << "sqlite3_bind_int64" }
+    if i == SYM_BIND_DOUBLE { << "sqlite3_bind_double" }
+    if i == SYM_BIND_TEXT { << "sqlite3_bind_text" }
+    if i == SYM_BIND_BLOB { << "sqlite3_bind_blob" }
+    if i == SYM_BIND_PARAM_COUNT { << "sqlite3_bind_parameter_count" }
+    if i == SYM_BIND_PARAM_NAME { << "sqlite3_bind_parameter_name" }
+    if i == SYM_STEP { << "sqlite3_step" }
+    if i == SYM_COLUMN_COUNT { << "sqlite3_column_count" }
+    if i == SYM_COLUMN_NAME { << "sqlite3_column_name" }
+    if i == SYM_COLUMN_TYPE { << "sqlite3_column_type" }
+    if i == SYM_COLUMN_INT64 { << "sqlite3_column_int64" }
+    if i == SYM_COLUMN_DOUBLE { << "sqlite3_column_double" }
+    if i == SYM_COLUMN_TEXT { << "sqlite3_column_text" }
+    if i == SYM_COLUMN_BLOB { << "sqlite3_column_blob" }
+    if i == SYM_COLUMN_BYTES { << "sqlite3_column_bytes" }
+    if i == SYM_DB_HANDLE { << "sqlite3_db_handle" }
+    if i == SYM_LAST_INSERT { << "sqlite3_last_insert_rowid" }
+    if i == SYM_TOTAL_CHANGES { << "sqlite3_total_changes64" }
+    if i == SYM_CHANGES { << "sqlite3_changes64" }
+    if i == SYM_MPRINTF { << "sqlite3_mprintf" }
+    if i == SYM_FREE { << "sqlite3_free" }
+    if i == SYM_STRTOD { << "strtod" }
+    << ""
+}
+
+fn sym(i int) c_ptr {
+    unsafe {
+        p := state()
+        if ffi.is_null(p) || i < 0 || i >= SYM_COUNT { << ffi.null() }
+        << ffi.read_ptr(p, S_SYMS + i * 8)
+    }
+}
+
+fn load_lib() bool {
+    unsafe {
+        p := state()
+        if ffi.is_null(p) { << false }
+        if ffi.read_i64(p, S_LOADED) != 0 { << true }
+        $lib := ffi.null()
+        override := os.getenv("XU_SQLITE_LIBRARY")
+        if override.len > 0 {
+            lib = ffi.dlopen(&override)
+        }
+        if ffi.is_null(lib) {
+            names := ["libsqlite3.dylib", "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib", "/usr/local/opt/sqlite/lib/libsqlite3.dylib", "libsqlite3.so.0", "libsqlite3.so", "sqlite3.dll"]
+            for i in 0:names.len {
+                n := names[i]
+                lib = ffi.dlopen(&n)
+                if !ffi.is_null(lib) { <- }
+            }
+        }
+        if ffi.is_null(lib) { << false }
+        for i in 0:SYM_COUNT {
+            name := sym_name(i)
+            $f := ffi.null()
+            if i == SYM_STRTOD {
+                // macOS/Linux RTLD_DEFAULT is (void*)-2.
+                f = ffi.dlsym(c_ptr(-2), &name)
+                if ffi.is_null(f) { f = ffi.dlsym(lib, &name) }
+            } else {
+                f = ffi.dlsym(lib, &name)
+            }
+            if ffi.is_null(f) {
+                ffi.dlclose(lib)
+                << false
+            }
+            ffi.write_ptr(p, S_SYMS + i * 8, f)
+        }
+        if int(sq_initialize(sym(SYM_INITIALIZE))) != SQLITE_OK {
+            ffi.dlclose(lib)
+            << false
+        }
+        ffi.write_ptr(p, S_LIBRARY, lib)
+        ffi.write_i64(p, S_LOADED, 1)
+        << true
+    }
+}
+
+fn objects_head() c_ptr {
+    unsafe {
+        p := state()
+        if ffi.is_null(p) { << ffi.null() }
+        << ffi.read_ptr(p, S_OBJECTS)
+    }
+}
+
+fn set_objects_head(h c_ptr) {
+    unsafe {
+        p := state()
+        if ffi.is_null(p) { << }
+        ffi.write_ptr(p, S_OBJECTS, h)
+    }
+}
+
+fn find(id int, kind int) c_ptr {
+    unsafe {
+        $o := objects_head()
+        while !ffi.is_null(o) {
+            if ffi.read_i64(o, O_ID) == id && ffi.read_i64(o, O_KIND) == kind { << o }
+            o = ffi.read_ptr(o, O_NEXT)
+        }
+        << ffi.null()
+    }
+}
+
+fn make(kind int, ptr c_ptr) c_ptr {
+    unsafe {
+        p := state()
+        if ffi.is_null(p) { << ffi.null() }
+        $seq := ffi.read_i64(p, S_SEQUENCE)
+        if seq < 0 { << ffi.null() }
+        o := ffi.calloc(O_SIZE)
+        if ffi.is_null(o) { << ffi.null() }
+        seq = seq + 1
+        ffi.write_i64(p, S_SEQUENCE, seq)
+        ffi.write_i64(o, O_ID, seq)
+        ffi.write_i64(o, O_KIND, kind)
+        ffi.write_ptr(o, O_PTR, ptr)
+        ffi.write_ptr(o, O_NEXT, objects_head())
+        set_objects_head(o)
+        << o
+    }
+}
+
+fn remove_object(target c_ptr) {
+    unsafe {
+        $prev := ffi.null()
+        $o := objects_head()
+        while !ffi.is_null(o) {
+            if o == target { <- }
+            prev = o
+            o = ffi.read_ptr(o, O_NEXT)
+        }
+        if ffi.is_null(o) { << }
+        next := ffi.read_ptr(o, O_NEXT)
+        if ffi.is_null(prev) {
+            set_objects_head(next)
+        } else {
+            ffi.write_ptr(prev, O_NEXT, next)
+        }
+        ffi.free(o)
+    }
+}
+
+fn copy_buffer(data c_ptr, length int) int {
+    unsafe {
+        if length < 0 || length > MAX_BUFFER { << 0 }
+        if ffi.is_null(data) && length != 0 { << 0 }
+        bytes := ffi.calloc(length + 1)
+        if ffi.is_null(bytes) { << 0 }
+        for i in 0:length { ffi.write_u8(bytes, i, ffi.read_u8(data, i)) }
+        o := make(KIND_BUFFER, bytes)
+        if ffi.is_null(o) {
+            ffi.free(bytes)
+            << 0
+        }
+        ffi.write_i64(o, O_LENGTH, length)
+        << ffi.read_i64(o, O_ID)
+    }
+}
+
+fn cstring_ok(o c_ptr) bool {
+    unsafe {
+        if ffi.is_null(o) { << false }
+        length := ffi.read_i64(o, O_LENGTH)
+        ptr := ffi.read_ptr(o, O_PTR)
+        for i in 0:length {
+            if ffi.read_u8(ptr, i) == u8(0) { << false }
+        }
+        << true
+    }
+}
+
+fn record(stmt c_ptr, rc int) int {
+    unsafe {
+        if !ffi.is_null(stmt) {
+            ffi.write_i64(stmt, O_STATUS, rc)
+            owner := find(ffi.read_i64(stmt, O_OWNER), KIND_DATABASE)
+            if !ffi.is_null(owner) { ffi.write_i64(owner, O_STATUS, rc) }
+        }
+        << rc
+    }
+}
+
+fn column_ok(stmt c_ptr, column int, need_row int) bool {
+    unsafe {
+        if ffi.is_null(stmt) { << false }
+        if need_row != 0 && ffi.read_i64(stmt, O_ROW) == 0 { << false }
+        if column < 0 { << false }
+        n := int(sq_column_count(sym(SYM_COLUMN_COUNT), ffi.read_ptr(stmt, O_PTR)))
+        << column < n
+    }
+}
+
+fn transient() c_ptr {
+    // SQLITE_TRANSIENT == (void(*)(void*))-1
+    << c_ptr(-1)
+}
+
+pub fn buffer_new(length int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        if length < 0 || length > MAX_BUFFER { << 0 }
+        bytes := ffi.calloc(length + 1)
+        if ffi.is_null(bytes) { << 0 }
+        o := make(KIND_BUFFER, bytes)
+        if ffi.is_null(o) {
+            ffi.free(bytes)
+            << 0
+        }
+        ffi.write_i64(o, O_LENGTH, length)
+        << ffi.read_i64(o, O_ID)
+    }
+}
+
+pub fn buffer_put(id int, offset int, word int, count int) int {
+    if !load_lib() { << SQLITE_MISUSE }
+    unsafe {
+        o := find(id, KIND_BUFFER)
+        $length := 0
+        if !ffi.is_null(o) { length = ffi.read_i64(o, O_LENGTH) }
+        if ffi.is_null(o) || offset < 0 || count < 0 || count > 8 || offset > length || count > length - offset {
+            << SQLITE_MISUSE
+        }
+        ptr := ffi.read_ptr(o, O_PTR)
+        bits := word
+        for i in 0:count {
+            ffi.write_u8(ptr, offset + i, u8((bits >> (8 * i)) & 255))
+        }
+        << SQLITE_OK
+    }
+}
+
+pub fn buffer_get(id int, offset int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_BUFFER)
+        if ffi.is_null(o) || offset < 0 { << 0 }
+        length := ffi.read_i64(o, O_LENGTH)
+        if offset >= length { << 0 }
+        ptr := ffi.read_ptr(o, O_PTR)
+        $bits := 0
+        $count := length - offset
+        if count > 8 { count = 8 }
+        for i in 0:count {
+            bits = bits | (int(ffi.read_u8(ptr, offset + i)) << (8 * i))
+        }
+        << bits
+    }
+}
+
+pub fn buffer_len(id int) int {
+    if !load_lib() { << -1 }
+    unsafe {
+        o := find(id, KIND_BUFFER)
+        if ffi.is_null(o) { << -1 }
+        << ffi.read_i64(o, O_LENGTH)
+    }
+}
+
+pub fn buffer_free(id int) {
+    if !load_lib() { << }
+    unsafe {
+        o := find(id, KIND_BUFFER)
+        if ffi.is_null(o) { << }
+        ffi.free(ffi.read_ptr(o, O_PTR))
+        remove_object(o)
+    }
+}
+
+pub fn open(path int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        b := find(path, KIND_BUFFER)
+        if !cstring_ok(b) { << 0 }
+        out := ffi.calloc(8)
+        if ffi.is_null(out) { << 0 }
+        flags := i32(SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI | SQLITE_OPEN_FULLMUTEX)
+        rc := int(sq_open_v2(sym(SYM_OPEN_V2), ffi.read_ptr(b, O_PTR), out, flags, ffi.null()))
+        db := ffi.read_ptr(out, 0)
+        ffi.free(out)
+        if ffi.is_null(db) { << 0 }
+        o := make(KIND_DATABASE, db)
+        if ffi.is_null(o) {
+            _ := sq_close_v2(sym(SYM_CLOSE_V2), db)
+            << 0
+        }
+        ffi.write_i64(o, O_STATUS, rc)
+        _ := sq_busy_timeout(sym(SYM_BUSY_TIMEOUT), db, i32(5000))
+        << ffi.read_i64(o, O_ID)
+    }
+}
+
+pub fn status(id int) int {
+    if !load_lib() { << SQLITE_MISUSE }
+    unsafe {
+        o := find(id, KIND_DATABASE)
+        if ffi.is_null(o) { << SQLITE_MISUSE }
+        << ffi.read_i64(o, O_STATUS)
+    }
+}
+
+pub fn error(id int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_DATABASE)
+        $msg := "invalid native database handle"
+        if !ffi.is_null(o) {
+            db := ffi.read_ptr(o, O_PTR)
+            st := ffi.read_i64(o, O_STATUS)
+            $s := ffi.string_from(sq_errmsg(sym(SYM_ERRMSG), db))
+            if st != SQLITE_OK && st != SQLITE_ROW && st != SQLITE_DONE && int(sq_errcode(sym(SYM_ERRCODE), db)) == SQLITE_OK {
+                s = ffi.string_from(sq_errstr(sym(SYM_ERRSTR), i32(st)))
+            }
+            msg = s
+        }
+        // copy_buffer needs C bytes
+        c := ffi.cstring(&msg)
+        if ffi.is_null(c) { << 0 }
+        id2 := copy_buffer(c, msg.len)
+        ffi.free(c)
+        << id2
+    }
+}
+
+pub fn close(id int) int {
+    if !load_lib() { << SQLITE_OK }
+    unsafe {
+        db := find(id, KIND_DATABASE)
+        if ffi.is_null(db) { << SQLITE_OK }
+        $o := objects_head()
+        while !ffi.is_null(o) {
+            next := ffi.read_ptr(o, O_NEXT)
+            if ffi.read_i64(o, O_KIND) == KIND_STATEMENT && ffi.read_i64(o, O_OWNER) == id {
+                _ := sq_finalize(sym(SYM_FINALIZE), ffi.read_ptr(o, O_PTR))
+                remove_object(o)
+            }
+            o = next
+        }
+        rc := int(sq_close_v2(sym(SYM_CLOSE_V2), ffi.read_ptr(db, O_PTR)))
+        if rc == SQLITE_OK { remove_object(db) }
+        << rc
+    }
+}
+
+pub fn prepare(id int, sql int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        db := find(id, KIND_DATABASE)
+        text := find(sql, KIND_BUFFER)
+        if ffi.is_null(db) || !cstring_ok(text) {
+            if !ffi.is_null(db) { ffi.write_i64(db, O_STATUS, SQLITE_MISUSE) }
+            << 0
+        }
+        stmt_out := ffi.calloc(8)
+        tail_out := ffi.calloc(8)
+        if ffi.is_null(stmt_out) || ffi.is_null(tail_out) {
+            ffi.free(stmt_out)
+            ffi.free(tail_out)
+            << 0
+        }
+        nbyte := i32(ffi.read_i64(text, O_LENGTH) + 1)
+        $rc := int(sq_prepare_v2(sym(SYM_PREPARE_V2), ffi.read_ptr(db, O_PTR), ffi.read_ptr(text, O_PTR), nbyte, stmt_out, tail_out))
+        $tail := ffi.read_ptr(tail_out, 0)
+        while rc == SQLITE_OK && !ffi.is_null(tail) && ffi.read_u8(tail, 0) != u8(0) {
+            extra_out := ffi.calloc(8)
+            next_out := ffi.calloc(8)
+            if ffi.is_null(extra_out) || ffi.is_null(next_out) {
+                ffi.free(extra_out)
+                ffi.free(next_out)
+                <-
+            }
+            rc = int(sq_prepare_v2(sym(SYM_PREPARE_V2), ffi.read_ptr(db, O_PTR), tail, i32(-1), extra_out, next_out))
+            extra := ffi.read_ptr(extra_out, 0)
+            next := ffi.read_ptr(next_out, 0)
+            if !ffi.is_null(extra) {
+                _ := sq_finalize(sym(SYM_FINALIZE), extra)
+                rc = SQLITE_MISUSE
+            }
+            ffi.free(extra_out)
+            ffi.free(next_out)
+            if ffi.is_null(next) || int(next) <= int(tail) { <- }
+            tail = next
+        }
+        ffi.write_i64(db, O_STATUS, rc)
+        stmt := ffi.read_ptr(stmt_out, 0)
+        ffi.free(stmt_out)
+        ffi.free(tail_out)
+        if rc != SQLITE_OK {
+            if !ffi.is_null(stmt) { _ := sq_finalize(sym(SYM_FINALIZE), stmt) }
+            << 0
+        }
+        if ffi.is_null(stmt) { << 0 }
+        o := make(KIND_STATEMENT, stmt)
+        if ffi.is_null(o) {
+            _ := sq_finalize(sym(SYM_FINALIZE), stmt)
+            ffi.write_i64(db, O_STATUS, SQLITE_NOMEM)
+            << 0
+        }
+        ffi.write_i64(o, O_OWNER, id)
+        << ffi.read_i64(o, O_ID)
+    }
+}
+
+pub fn parameter_count(id int) int {
+    if !load_lib() { << -1 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if ffi.is_null(o) { << -1 }
+        << int(sq_bind_parameter_count(sym(SYM_BIND_PARAM_COUNT), ffi.read_ptr(o, O_PTR)))
+    }
+}
+
+pub fn parameter_name(id int, index int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if ffi.is_null(o) || index < 1 { << 0 }
+        n := int(sq_bind_parameter_count(sym(SYM_BIND_PARAM_COUNT), ffi.read_ptr(o, O_PTR)))
+        if index > n { << 0 }
+        s := sq_bind_parameter_name(sym(SYM_BIND_PARAM_NAME), ffi.read_ptr(o, O_PTR), i32(index))
+        if ffi.is_null(s) { << 0 }
+        << copy_buffer(s, ffi.strlen(s))
+    }
+}
+
+pub fn bind_null(id int, index int) int {
+    if !load_lib() { << SQLITE_MISUSE }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if ffi.is_null(o) { << SQLITE_MISUSE }
+        << record(o, int(sq_bind_null(sym(SYM_BIND_NULL), ffi.read_ptr(o, O_PTR), i32(index))))
+    }
+}
+
+pub fn bind_int(id int, index int, value int) int {
+    if !load_lib() { << SQLITE_MISUSE }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if ffi.is_null(o) { << SQLITE_MISUSE }
+        << record(o, int(sq_bind_int64(sym(SYM_BIND_INT64), ffi.read_ptr(o, O_PTR), i32(index), value)))
+    }
+}
+
+pub fn bind_float(id int, index int, buffer int) int {
+    if !load_lib() { << SQLITE_MISUSE }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        b := find(buffer, KIND_BUFFER)
+        if ffi.is_null(o) || !cstring_ok(b) { << SQLITE_MISUSE }
+        end := ffi.calloc(8)
+        if ffi.is_null(end) { << record(o, SQLITE_NOMEM) }
+        value := c_strtod(sym(SYM_STRTOD), ffi.read_ptr(b, O_PTR), end)
+        endp := ffi.read_ptr(end, 0)
+        start := ffi.read_ptr(b, O_PTR)
+        length := ffi.read_i64(b, O_LENGTH)
+        ffi.free(end)
+        if endp == start || int(endp) != int(start) + length {
+            << record(o, SQLITE_MISMATCH)
+        }
+        << record(o, int(sq_bind_double(sym(SYM_BIND_DOUBLE), ffi.read_ptr(o, O_PTR), i32(index), value)))
+    }
+}
+
+pub fn bind_buffer(id int, index int, buffer int, blob int) int {
+    if !load_lib() { << SQLITE_MISUSE }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        b := find(buffer, KIND_BUFFER)
+        if ffi.is_null(o) || ffi.is_null(b) { << SQLITE_MISUSE }
+        ptr := ffi.read_ptr(b, O_PTR)
+        n := i32(ffi.read_i64(b, O_LENGTH))
+        $rc := 0
+        if blob != 0 {
+            rc = int(sq_bind_blob(sym(SYM_BIND_BLOB), ffi.read_ptr(o, O_PTR), i32(index), ptr, n, transient()))
+        } else {
+            rc = int(sq_bind_text(sym(SYM_BIND_TEXT), ffi.read_ptr(o, O_PTR), i32(index), ptr, n, transient()))
+        }
+        << record(o, rc)
+    }
+}
+
+pub fn step(id int) int {
+    if !load_lib() { << SQLITE_MISUSE }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if ffi.is_null(o) { << SQLITE_MISUSE }
+        rc := record(o, int(sq_step(sym(SYM_STEP), ffi.read_ptr(o, O_PTR))))
+        if rc == SQLITE_ROW { ffi.write_i64(o, O_ROW, 1) } else { ffi.write_i64(o, O_ROW, 0) }
+        << rc
+    }
+}
+
+pub fn finalize(id int) {
+    if !load_lib() { << }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if ffi.is_null(o) { << }
+        _ := sq_finalize(sym(SYM_FINALIZE), ffi.read_ptr(o, O_PTR))
+        remove_object(o)
+    }
+}
+
+pub fn column_count(id int) int {
+    if !load_lib() { << -1 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if ffi.is_null(o) { << -1 }
+        << int(sq_column_count(sym(SYM_COLUMN_COUNT), ffi.read_ptr(o, O_PTR)))
+    }
+}
+
+pub fn column_name(id int, column int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if !column_ok(o, column, 0) { << 0 }
+        s := sq_column_name(sym(SYM_COLUMN_NAME), ffi.read_ptr(o, O_PTR), i32(column))
+        if ffi.is_null(s) { << 0 }
+        << copy_buffer(s, ffi.strlen(s))
+    }
+}
+
+pub fn column_type(id int, column int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if !column_ok(o, column, 1) { << 0 }
+        << int(sq_column_type(sym(SYM_COLUMN_TYPE), ffi.read_ptr(o, O_PTR), i32(column)))
+    }
+}
+
+pub fn column_int(id int, column int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if !column_ok(o, column, 1) { << 0 }
+        << sq_column_int64(sym(SYM_COLUMN_INT64), ffi.read_ptr(o, O_PTR), i32(column))
+    }
+}
+
+pub fn column_float(id int, column int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if !column_ok(o, column, 1) { << 0 }
+        // Avoid variadic sqlite3_mprintf through the dynamic caller; match the
+        // bridge's 17-digit text transfer with Xu formatting.
+        // Conn methods must not throw: handle format_float's rare verb error.
+        v := sq_column_double(sym(SYM_COLUMN_DOUBLE), ffi.read_ptr(o, O_PTR), i32(column))
+        text := strconv.format_float(v, 103, 17) or (err) {
+            _ := err
+            << 0
+        }
+        c := ffi.cstring(&text)
+        if ffi.is_null(c) { << 0 }
+        result := copy_buffer(c, text.len)
+        ffi.free(c)
+        << result
+    }
+}
+
+pub fn column_buffer(id int, column int, blob int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_STATEMENT)
+        if !column_ok(o, column, 1) { << 0 }
+        stmt := ffi.read_ptr(o, O_PTR)
+        $data := ffi.null()
+        if blob != 0 {
+            data = sq_column_blob(sym(SYM_COLUMN_BLOB), stmt, i32(column))
+        } else {
+            data = sq_column_text(sym(SYM_COLUMN_TEXT), stmt, i32(column))
+        }
+        length := int(sq_column_bytes(sym(SYM_COLUMN_BYTES), stmt, i32(column)))
+        if ffi.is_null(data) {
+            db := sq_db_handle(sym(SYM_DB_HANDLE), stmt)
+            if int(sq_errcode(sym(SYM_ERRCODE), db)) == SQLITE_NOMEM { << 0 }
+        }
+        << copy_buffer(data, length)
+    }
+}
+
+pub fn last_id(id int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_DATABASE)
+        if ffi.is_null(o) { << 0 }
+        << sq_last_insert_rowid(sym(SYM_LAST_INSERT), ffi.read_ptr(o, O_PTR))
+    }
+}
+
+pub fn total_changes(id int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_DATABASE)
+        if ffi.is_null(o) { << 0 }
+        << sq_total_changes64(sym(SYM_TOTAL_CHANGES), ffi.read_ptr(o, O_PTR))
+    }
+}
+
+pub fn changes(id int) int {
+    if !load_lib() { << 0 }
+    unsafe {
+        o := find(id, KIND_DATABASE)
+        if ffi.is_null(o) { << 0 }
+        << sq_changes64(sym(SYM_CHANGES), ffi.read_ptr(o, O_PTR))
+    }
+}
