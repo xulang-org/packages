@@ -1,6 +1,6 @@
 @"github.com/xulang-org/packages/metal"
 
-#metal_native
+metal_native #"github.com/xulang-org/packages/metal_native"
 #errors
 
 // Host arrays hold canonical uint32 IEEE 754 binary32 bits in each Xu int.
