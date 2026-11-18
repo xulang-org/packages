@@ -190,8 +190,24 @@ fn load_lib() bool {
             name := sym_name(i)
             $f := ffi.null()
             if i == SYM_STRTOD {
-                // macOS/Linux RTLD_DEFAULT is (void*)-2.
-                f = ffi.dlsym(c_ptr(-2), &name)
+                // RTLD_DEFAULT differs across platforms: macOS uses (void*)-2,
+                // Linux glibc/musl uses NULL, and Windows needs CRT DLL lookup.
+                tos := xu_target_os()
+                if tos == 0 {
+                    f = ffi.dlsym(c_ptr(-2), &name)
+                } else if tos == 1 {
+                    f = ffi.dlsym(ffi.null(), &name)
+                } else if tos == 2 {
+                    crts := ["ucrtbase.dll", "msvcrt.dll"]
+                    for ci in 0:crts.len {
+                        cname := crts[ci]
+                        ch := ffi.dlopen(&cname)
+                        if !ffi.is_null(ch) {
+                            f = ffi.dlsym(ch, &name)
+                            if !ffi.is_null(f) { <- }
+                        }
+                    }
+                }
                 if ffi.is_null(f) { f = ffi.dlsym(lib, &name) }
             } else {
                 f = ffi.dlsym(lib, &name)
