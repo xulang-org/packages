@@ -57,9 +57,14 @@ def main():
         shutil.copyfile(out,staged);staged.replace(args.output)
         # Also emit the dlopen dylib used by the Xu metal_native FFI package.
         if sys.platform == 'darwin' and any(t.startswith('macos-') for t in targets):
-            host = 'arm64' if os.uname().machine == 'arm64' else 'x86_64'
             dylib = HERE / 'libxu_metal.dylib'
-            link = [cc, '-dynamiclib', '-fobjc-arc', '-fmodules', '-O2',
+            arch_flags = []
+            if 'macos-arm64' in targets:
+                arch_flags += ['-arch', 'arm64']
+            if 'macos-x64' in targets:
+                arch_flags += ['-arch', 'x86_64']
+            link = [cc, *arch_flags, '-dynamiclib', '-fobjc-arc', '-fmodules',
+                    '-fmodules-cache-path=' + str(work / 'modules-dylib'), '-O2',
                     '-I'+str(root/'include'), '-I'+str(HERE), '-isysroot', str(sdk),
                     '-framework', 'Metal', '-framework', 'MetalPerformanceShaders',
                     '-framework', 'Foundation',
