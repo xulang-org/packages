@@ -1468,19 +1468,20 @@ fn main() int {
 '''
         self.assertIn("preserved", self.run_xu(source, ["sqlite"]))
 
-    def test_native_symbol_collision_is_rejected(self):
-        with tempfile.TemporaryDirectory(prefix="xu-native-collision-") as path:
-            work = Path(path)
-            (work / "sqlite").mkdir()
-            (work / "main.xu").write_text("@main\n#sqlite_native\nfn main() {}\n")
-            (work / "sqlite/shadow.xu").write_text('@sqlite\nfn native_error(handle int) string { << "shadow" }\n')
-            result = subprocess.run([str(XU), "build", str(work / "main.xu"),
-                str(work / "sqlite/shadow.xu"), str(PACKAGES / "sqlite/native/sqlite.xulib"),
-                "-o", str(work / "probe")], cwd=REPO, env=compiler_env(work),
-                capture_output=True, text=True, timeout=45)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("native symbol collision: _xu_sqlite_native_error", result.stderr)
-            self.assertFalse((work / "probe").exists())
+    def test_sqlite_native_xu_ffi_package_checks(self):
+        # sqlite_native is pure Xu (dlopen libsqlite3); the old xulib symbol
+        # collision probe no longer applies once xu.xun drops the native map.
+        source = '''@main
+sqlite_native #"github.com/xulang-org/packages/sqlite_native"
+fn main() int {
+    buf := sqlite_native.buffer_new(0)
+    if buf == 0 { << 1 }
+    sqlite_native.buffer_free(buf)
+    println("sqlite_native xu ffi package preserved")
+    << 0
+}
+'''
+        self.assertIn("preserved", self.run_xu(source, []))
 
     def test_native_link_preserves_function_addresses(self):
         source = '''@main
@@ -1495,7 +1496,7 @@ fn main() int {
     << 0
 }
 '''
-        self.assertIn("preserved", self.run_xu(source, ["sqlite"], build_flags=("-O0",)))
+        self.assertIn("preserved", self.run_xu(source, ["sqlite"], build_flags=("--debug-build",)))
 
     def test_sqlite_native_rejects_multiple_statements_and_recovers(self):
         source = r'''@main

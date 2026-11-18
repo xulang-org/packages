@@ -1,6 +1,6 @@
 @"github.com/xulang-org/packages/metal"
 
-#metal_native
+metal_native #"github.com/xulang-org/packages/metal_native"
 #errors
 
 // Explicit i64 GPU buffers. Owners are non-Copy through their drop hooks.

@@ -55,6 +55,22 @@ def main():
         # Publish only after every requested slice has built and validated.
         staged=args.output.with_name(args.output.name+'.tmp')
         shutil.copyfile(out,staged);staged.replace(args.output)
+        # Also emit the dlopen dylib used by the Xu metal_native FFI package.
+        if sys.platform == 'darwin' and any(t.startswith('macos-') for t in targets):
+            dylib = HERE / 'libxu_metal.dylib'
+            arch_flags = []
+            if 'macos-arm64' in targets:
+                arch_flags += ['-arch', 'arm64']
+            if 'macos-x64' in targets:
+                arch_flags += ['-arch', 'x86_64']
+            link = [cc, *arch_flags, '-dynamiclib', '-fobjc-arc', '-fmodules',
+                    '-fmodules-cache-path=' + str(work / 'modules-dylib'), '-O2',
+                    '-I'+str(root/'include'), '-I'+str(HERE), '-isysroot', str(sdk),
+                    '-framework', 'Metal', '-framework', 'MetalPerformanceShaders',
+                    '-framework', 'Foundation',
+                    '-install_name', '@rpath/libxu_metal.dylib',
+                    '-o', str(dylib), str(HERE/'bridge.m')]
+            subprocess.run(link, check=True)
 
 
 if __name__=='__main__':main()
