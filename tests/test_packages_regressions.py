@@ -20,7 +20,7 @@ XU = Path(os.environ.get("XU", str(REPO / "bin/xu"))).resolve()
 
 
 def compiler_env(work):
-    env = dict(os.environ, XUPATH="", XU_CACHE=str(work / "cache"))
+    env = dict(os.environ, XUPATH="", XU_CACHE=str(work / "cache"), XU_ROOT=str(REPO), XU_STDLIB_ROOT=str(REPO / "src"))
     for key in ("XUOS", "XUARCH", "XU_HEAP_STATS"):
         env.pop(key, None)
     return env

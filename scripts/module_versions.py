@@ -12,7 +12,7 @@ FIELDS = re.compile(r'^(version|xu):[^\n]*(?:\n|$)', re.M)
 SEMVER = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
 
 def version(text, field='version'):
-    lines = re.findall(rf'^{field}:\s*!ver\s+([^\n]+)$', text, re.M)
+    lines = [line.strip() for line in re.findall(rf'^{field}:\s*!ver\s+([^\r\n]+)', text, re.M)]
     pattern = SEMVER + (r'(?:-(dev|rc)\.([1-9][0-9]*))?' if field == 'xu' else '')
     match = re.fullmatch(pattern, lines[0]) if len(lines) == 1 else None
     if not match:
