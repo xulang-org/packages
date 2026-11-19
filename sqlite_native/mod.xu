@@ -178,7 +178,7 @@ fn load_lib() bool {
             lib = ffi.dlopen(&override)
         }
         if ffi.is_null(lib) {
-            names := ["libsqlite3.dylib", "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib", "/usr/local/opt/sqlite/lib/libsqlite3.dylib", "libsqlite3.so.0", "libsqlite3.so", "sqlite3.dll"]
+            names := ["libsqlite3.dylib", "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib", "/usr/local/opt/sqlite/lib/libsqlite3.dylib", "libsqlite3.so.0", "libsqlite3.so", "sqlite3.dll", "winsqlite3.dll"]
             for i in 0:names.len {
                 n := names[i]
                 lib = ffi.dlopen(&n)

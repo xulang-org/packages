@@ -4,6 +4,7 @@ import os
 import hashlib
 import importlib.util
 from pathlib import Path
+import shutil
 import subprocess
 
 def main():
@@ -18,7 +19,18 @@ def main():
     resolver = root / 'scripts/xu_host_seed.sh'
     if not resolver.is_file():
         raise SystemExit(f"missing product compiler verifier: {resolver}")
-    verified = subprocess.run([str(resolver)], cwd=root,
+    cmd = [str(resolver)]
+    if os.name == 'nt':
+        bash = shutil.which('bash') or shutil.which('sh')
+        if not bash and Path(r"C:\Program Files\Git\bin\bash.exe").is_file():
+            bash = r"C:\Program Files\Git\bin\bash.exe"
+        if not bash and Path(r"C:\Program Files\Git\usr\bin\bash.exe").is_file():
+            bash = r"C:\Program Files\Git\usr\bin\bash.exe"
+        if bash:
+            cmd = [str(bash), str(resolver)]
+        else:
+            raise SystemExit("product compiler verifier requires bash on Windows; install Git for Windows")
+    verified = subprocess.run(cmd, cwd=root,
         env=dict(os.environ, XU_SEED=str(compiler)), capture_output=True, text=True)
     if verified.returncode != 0:
         raise SystemExit(verified.stderr.strip() or 'product compiler verification failed')
