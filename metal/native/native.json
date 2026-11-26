@@ -543,6 +543,136 @@
       "name": "batch_gemv_q4_0_f32",
       "params": ["int", "int", "int", "int"],
       "ret": "int"
+    },
+    {
+      "name": "matrix_f32_write_bytes",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f16_write_bytes",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q8_0_new",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q8_0_info",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q8_0_write",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q8_0_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q8_0_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemv_q8_0_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemv_q8_0_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_k_new",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_k_info",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_k_write",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_k_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_k_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemv_q4_k_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemv_q4_k_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "qk_norm_f32",
+      "params": ["int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_qk_norm_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "kv_cache_append_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_kv_cache_append_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "attention_decode_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_attention_decode_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "embedding_f32",
+      "params": ["int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_embedding_f32",
+      "params": ["int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "argmax_f32",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_argmax_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
     }
   ]
 }

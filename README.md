@@ -1,6 +1,6 @@
 # Xu 扩展模块仓库
 
-本仓库以根模块 `github.com/xulang-org/packages` 维护 31 个外部包，包括驱动、共享 `transport` 传输层和可选 `metal` 计算接口。编译器和标准库由兄弟 `xu` 仓库维护；标准库不依赖这里的具体服务驱动。根 `xu.xun` 统一管理模块版本；内部包不单独建立模块清单。
+本仓库以根模块 `github.com/xulang-org/packages` 维护 33 个外部包，包括驱动、共享 `transport` 传输层、可选 `metal` GPU AI 计算包，以及 `openai` 客户端与 `mcp`（Model Context Protocol）包。编译器和标准库由兄弟 `xu` 仓库维护；标准库不依赖这里的具体服务驱动。根 `xu.xun` 统一管理模块版本；内部包不单独建立模块清单。
 
 推荐本机目录：
 
@@ -140,10 +140,7 @@ fn main() int {
 上传时同时记录数值类别；未变化的输入可复用已验证事实。GPU 写入的结果使该事实失效，
 下次作为输入时重新检查；正常输入计算出的 Inf 或次正规数仍不能绕过准入。
 
-形状非负，每个维度最多 16384，每个矩阵最多 16777216 个逻辑元素，并检查设备 buffer
-上限与行跨度，超出时返回 `BOUNDS`。`rows()`/`columns()` 返回逻辑形状，`row_bytes()`
-用于诊断 MPS 选择的内部 padding；调用者不能传入任意 stride。零输出维度产生空快照，
-K=0 产生正零矩阵；两者返回已完成 Fence，不提交 GPU 命令。分配失败不形成有效 owner。
+形状非负，每个维度最多 262144，每个矩阵最多 536870912 个逻辑元素，并检查设备 `maxBufferLength` 上限与行跨度，超出时返回 `BOUNDS`。`v1.4.0` 还提供 `F32Matrix.write_bytes` / `F16Matrix.write_bytes`、`Q8Matrix`（`gemv_q8_0_f32`）、`Q4KMatrix`（`gemv_q4_k_f32`）、`qk_norm_f32`、`kv_cache_append_f32`、`attention_decode_f32`、`embedding_f32`、`argmax_f32` 及其 `Batch` 批量编码版本。`rows()`/`columns()` 返回逻辑形状，`row_bytes()` 用于诊断 MPS 选择的内部 padding；调用者不能传入任意 stride。零输出维度产生空快照，K=0 产生正零矩阵；两者返回已完成 Fence，不提交 GPU 命令。分配失败不形成有效 owner。
 
 `F32Matrix.copy_bits($&out)` 同步回读已完成矩阵，直接写入已有目标元素，省去临时快照。
 目标不足、句柄失效、未确认完成或输出失败时不改变目标；较长目标的尾部保持原值，数组
@@ -171,6 +168,11 @@ SQL 驱动接口、连接池和事务管理位于标准库，驱动实现位于�
 HTTP 驱动的 `https://` 与 gRPC 的 TLS 路径使用 `transport` 包和 Xu `crypto/tls`，默认启用系统根证书验证与 SNI；HTTP 响应解析支持分片、chunked trailers、严格长度限制和 EOF 语义。PostgreSQL 的 `sslmode=require|verify-ca|verify-full` 与 MySQL 的 `tls=true|required|verify` 都在原连接上完成 TLS 升级，证书失败不会回退到明文。WebSocket 的 `wss://` 使用随机握手 key。
 
 其余 TCP 协议包都提供同一形式的 `tls_connect(endpoint, default_port)`，返回带证书验证、SNI、读写超时和 close-notify 的 `TlsClient`；协议帧通过 `read_exact`、`write_all` 在该连接上收发，避免驱动各自绕过 TLS。SQLite 是本地原生驱动，没有网络 TLS 层。整数 fd 池接口继续只代表明文 socket，TLS 调用使用 `TlsClient` 或各驱动的安全业务入口。
+
+### `openai` 与 `mcp` 包（v1.4.0 新增）
+
+- **`openai`**（`github.com/xulang-org/packages/openai`）：基于 `transport` + `#encoding/json` 的纯 Xu OpenAI API 兼容客户端，提供 `new_client(base_url, api_key)`、`list_models()`、`chat(&req)`（支持 `tools` 与 `tool_calls` 解析和 `usage` 统计）、`chat_stream(&req, on_delta)`（支持 SSE 流式与 `include_usage`）及批量 `embeddings(&req)`，兼容 OpenAI 协议服务与 `xu/examples/llm_engine serve`。
+- **`mcp`**（`github.com/xulang-org/packages/mcp`）：纯 Xu Model Context Protocol (`2025-03-26`) JSON-RPC 2.0 服务端与客户端。`Server` 支持注册 tools/resources/prompts 及 `handle_json_line` / `serve_stdio()`；`Client` 支持通过 HTTP/SSE (`new_http_client`) 与 MCP 服务端交互（`initialize`、`ping`、`tools/*`、`resources/*`、`prompts/*`）。
 
 ## GitHub 来源
 

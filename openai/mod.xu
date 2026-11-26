@@ -1,0 +1,675 @@
+@"github.com/xulang-org/packages/openai"
+
+#encoding/json
+#errors
+#strconv
+#strings
+#crypto/tls
+transport #github.com/xulang-org/packages/transport
+
+pub const DEFAULT_TIMEOUT_NS = 60000000000
+
+pub struct Client {
+    pub base_url string
+    pub api_key string
+    pub timeout_ns int
+}
+
+pub struct ToolCall {
+    pub id string
+    pub kind string
+    pub name string
+    pub arguments string
+}
+
+pub struct Message {
+    pub role string
+    pub content string
+    pub tool_call_id string
+    pub tool_calls []ToolCall
+}
+
+pub struct ToolDef {
+    pub name string
+    pub description string
+    pub parameters_json string
+}
+
+pub struct ChatRequest {
+    pub model string
+    pub messages []Message
+    pub tools []ToolDef
+    pub temperature f64
+    pub has_temperature bool
+    pub max_tokens int
+    pub seed int
+    pub has_seed bool
+    pub stop []string
+    pub include_usage bool
+}
+
+pub struct Usage {
+    pub prompt_tokens int
+    pub completion_tokens int
+    pub total_tokens int
+}
+
+pub struct ChatResponse {
+    pub id string
+    pub model string
+    pub content string
+    pub finish_reason string
+    pub tool_calls []ToolCall
+    pub usage Usage
+}
+
+pub struct StreamDelta {
+    pub content string
+    pub finish_reason string
+    pub tool_calls []ToolCall
+    pub has_usage bool
+    pub usage Usage
+    pub done bool
+}
+
+pub struct EmbedRequest {
+    pub model string
+    pub inputs []string
+}
+
+pub struct EmbedResponse {
+    pub model string
+    pub embeddings [][]f64
+    pub usage Usage
+}
+
+pub struct ModelInfo {
+    pub id string
+    pub object string
+}
+
+pub fn new_client(base_url string, api_key string) Client {
+    $url := base_url + ""
+    if url.len > 0 && url[url.len - 1] == 47 {
+        url = url[0:url.len - 1]
+    }
+    if url.len == 0 {
+        url = "https://api.openai.com"
+    }
+    << Client{base_url: url, api_key: api_key, timeout_ns: DEFAULT_TIMEOUT_NS}
+}
+
+pub fn message(role string, content string) Message {
+    << Message{role: role, content: content, tool_call_id: "", tool_calls: []ToolCall{}}
+}
+
+pub fn tool_message(tool_call_id string, content string) Message {
+    << Message{role: "tool", content: content, tool_call_id: tool_call_id, tool_calls: []ToolCall{}}
+}
+
+pub fn tool(name string, description string, parameters_json string) ToolDef {
+    << ToolDef{name: name, description: description, parameters_json: parameters_json}
+}
+
+pub fn chat_request(model string, messages []Message) ChatRequest {
+    << ChatRequest{
+        model: model,
+        messages: ~messages,
+        tools: []ToolDef{},
+        temperature: 0.0,
+        has_temperature: false,
+        max_tokens: 0,
+        seed: 0,
+        has_seed: false,
+        stop: []string{},
+        include_usage: false
+    }
+}
+
+pub fn embed_request(model string, inputs []string) EmbedRequest {
+    << EmbedRequest{model: model, inputs: ~inputs}
+}
+
+fn join_endpoint_path(base_path string, suffix string) string {
+    if base_path.len == 0 || base_path == "/" {
+        << suffix
+    }
+    if base_path[base_path.len - 1] == 47 {
+        << base_path[0:base_path.len - 1] + suffix
+    }
+    // Avoid duplicating /v1 when caller passes http://host/v1
+    if strings.has_suffix(&base_path, "/v1") && strings.has_prefix(&suffix, "/v1/") {
+        << base_path[0:base_path.len - 3] + suffix
+    }
+    << base_path + suffix
+}
+
+fn default_port_for(raw &string) int {
+    if strings.has_prefix(raw, "https://") { << 443 }
+    << 80
+}
+
+fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_key &string, body &string) string {
+    full_path := join_endpoint_path(ep.path, suffix)
+    $raw := method + " " + full_path + " HTTP/1.1\r\n"
+    raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\n"
+    raw = raw + "Accept: application/json, text/event-stream\r\n"
+    if api_key.len > 0 {
+        raw = raw + "Authorization: Bearer " + *api_key + "\r\n"
+    }
+    if body.len > 0 || method == "POST" {
+        raw = raw + "Content-Type: application/json\r\n"
+        raw = raw + "Content-Length: " + str(body.len) + "\r\n"
+    }
+    raw = raw + "Connection: close\r\n\r\n"
+    if body.len > 0 {
+        raw = raw + *body
+    }
+    << raw
+}
+
+fn check_http_error(status int, body &string) int {
+    if status >= 200 && status < 300 { << 0 }
+    $msg := "openai: HTTP " + str(status)
+    doc := json.parse(body)
+    if doc.ok() && doc.is_dict(doc.root()) {
+        root := doc.root()
+        if doc.has(root, "error") {
+            enode := doc.get(root, "error") >>> (_) { << 0 }
+            if doc.is_dict(enode) && doc.has(enode, "message") {
+                mnode := doc.get(enode, "message") >>> (_) { << 0 }
+                if doc.is_string(mnode) {
+                    emsg := doc.as_string(mnode) >>> (_) { << 0 }
+                    if emsg.len > 0 { msg = emsg }
+                }
+            }
+        }
+    }
+    >>> errors.code(status, msg)
+}
+
+fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_int_or(doc &json.Doc, obj int, key string, def int) int {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_number(n) {
+        << doc.as_int(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn fmt_float_or(v f64, def string) string {
+    << strconv.format_float(v, 102, 4) >>> (_) { << def }
+}
+
+fn doc_get_or(doc &json.Doc, obj int, key string) int {
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn doc_at_or(doc &json.Doc, arr int, idx int) int {
+    << doc.at(arr, idx) >>> (_) { << -1 }
+}
+
+fn conn_read_or(conn $&transport.Conn, max int) string {
+    << conn.read(max) >>> (_) { << "" }
+}
+
+fn parse_usage(doc &json.Doc, root int) Usage {
+    $u := Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+    if doc.has(root, "usage") {
+        un := doc.get(root, "usage") >>> (_) { << u }
+        if doc.is_dict(un) {
+            u.prompt_tokens = json_int_or(doc, un, "prompt_tokens", 0)
+            u.completion_tokens = json_int_or(doc, un, "completion_tokens", 0)
+            u.total_tokens = json_int_or(doc, un, "total_tokens", 0)
+        }
+    }
+    << u
+}
+
+fn parse_tool_calls(doc &json.Doc, msg_obj int) []ToolCall {
+    $out := []ToolCall{}
+    if !doc.is_dict(msg_obj) || !doc.has(msg_obj, "tool_calls") { << out }
+    arr := doc.get(msg_obj, "tool_calls") >>> (_) { << out }
+    if !doc.is_list(arr) { << out }
+    cnt := doc.count(arr)
+    for i in 0:cnt {
+        tc := doc.at(arr, i) >>> (_) { -> }
+        if !doc.is_dict(tc) { -> }
+        id := json_str_or(doc, tc, "id", "")
+        kind := json_str_or(doc, tc, "type", "function")
+        $name := ""
+        $args := ""
+        if doc.has(tc, "function") {
+            fn_obj := doc.get(tc, "function") >>> (_) { -> }
+            name = json_str_or(doc, fn_obj, "name", "")
+            args = json_str_or(doc, fn_obj, "arguments", "")
+        }
+        out.push(ToolCall{id: id, kind: kind, name: name, arguments: args})
+    }
+    << out
+}
+
+fn encode_chat_body(req &ChatRequest, stream bool) string {
+    $s := "{\"model\":" + json.quote(&req.model) + ",\"messages\":["
+    for i in 0:req.messages.len {
+        if i > 0 { s = s + "," }
+        m := &req.messages[i]
+        s = s + "{\"role\":" + json.quote(&m.role) + ",\"content\":" + json.quote(&m.content)
+        if m.tool_call_id.len > 0 {
+            s = s + ",\"tool_call_id\":" + json.quote(&m.tool_call_id)
+        }
+        if m.tool_calls.len > 0 {
+            s = s + ",\"tool_calls\":["
+            for j in 0:m.tool_calls.len {
+                if j > 0 { s = s + "," }
+                tc := &m.tool_calls[j]
+                s = s + "{\"id\":" + json.quote(&tc.id) + ",\"type\":\"function\",\"function\":{\"name\":" +
+                    json.quote(&tc.name) + ",\"arguments\":" + json.quote(&tc.arguments) + "}}"
+            }
+            s = s + "]"
+        }
+        s = s + "}"
+    }
+    s = s + "]"
+    if req.tools.len > 0 {
+        s = s + ",\"tools\":["
+        for i in 0:req.tools.len {
+            if i > 0 { s = s + "," }
+            td := &req.tools[i]
+            $params := td.parameters_json + ""
+            if params.len == 0 { params = "{}" }
+            s = s + "{\"type\":\"function\",\"function\":{\"name\":" + json.quote(&td.name) +
+                ",\"description\":" + json.quote(&td.description) + ",\"parameters\":" + params + "}}"
+        }
+        s = s + "]"
+    }
+    if req.has_temperature {
+        tf := fmt_float_or(req.temperature, "0.0")
+        s = s + ",\"temperature\":" + tf
+    }
+    if req.max_tokens > 0 {
+        s = s + ",\"max_tokens\":" + str(req.max_tokens)
+    }
+    if req.has_seed {
+        s = s + ",\"seed\":" + str(req.seed)
+    }
+    if req.stop.len > 0 {
+        s = s + ",\"stop\":["
+        for i in 0:req.stop.len {
+            if i > 0 { s = s + "," }
+            s = s + json.quote(&req.stop[i])
+        }
+        s = s + "]"
+    }
+    if stream {
+        s = s + ",\"stream\":true"
+        if req.include_usage {
+            s = s + ",\"stream_options\":{\"include_usage\":true}"
+        }
+    }
+    << s + "}"
+}
+
+pub fn (c &Client) list_models() []ModelInfo {
+    bu := c.base_url + ""
+    ak := c.api_key + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    empty_body := ""
+    raw_req := build_http_request("GET", &ep, "/v1/models", &ak, &empty_body)
+    cfg := tls.new_config(ep.host + "")
+    resp := transport.request_raw(ep, cfg, raw_req, "GET") >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $out := []ModelInfo{}
+    if doc.has(root, "data") {
+        arr := doc.get(root, "data") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                if doc.is_dict(item) {
+                    out.push(ModelInfo{
+                        id: json_str_or(&doc, item, "id", ""),
+                        object: json_str_or(&doc, item, "object", "model")
+                    })
+                }
+            }
+        }
+    }
+    << out
+}
+
+pub fn (c &Client) chat(req &ChatRequest) ChatResponse {
+    bu := c.base_url + ""
+    ak := c.api_key + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    body := encode_chat_body(req, false)
+    raw_req := build_http_request("POST", &ep, "/v1/chat/completions", &ak, &body)
+    cfg := tls.new_config(ep.host + "")
+    resp := transport.request_raw(ep, cfg, raw_req, "POST") >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $out := ChatResponse{
+        id: json_str_or(&doc, root, "id", ""),
+        model: json_str_or(&doc, root, "model", req.model),
+        content: "",
+        finish_reason: "",
+        tool_calls: []ToolCall{},
+        usage: parse_usage(&doc, root)
+    }
+    if doc.has(root, "choices") {
+        choices := doc.get(root, "choices") >>>
+        if doc.is_list(choices) && doc.count(choices) > 0 {
+            ch0 := doc.at(choices, 0) >>>
+            out.finish_reason = json_str_or(&doc, ch0, "finish_reason", "")
+            if doc.has(ch0, "message") {
+                msg_obj := doc.get(ch0, "message") >>>
+                out.content = json_str_or(&doc, msg_obj, "content", "")
+                out.tool_calls = parse_tool_calls(&doc, msg_obj)
+            }
+        }
+    }
+    << out
+}
+
+fn find_substr_from(s &string, pat &string, start int) int {
+    if pat.len <= 0 || start < 0 || start + pat.len > s.len { << -1 }
+    limit := s.len - pat.len + 1
+    for i in start:limit {
+        $eq := true
+        for j in 0:pat.len {
+            if (*s)[i + j] != (*pat)[j] {
+                eq = false
+                <-
+            }
+        }
+        if eq { << i }
+    }
+    << -1
+}
+
+fn parse_status_line(head &string) int {
+    $sp := -1
+    for i in 0:head.len {
+        if (*head)[i] == 32 {
+            sp = i
+            <-
+        }
+        if (*head)[i] == 10 { <- }
+    }
+    if sp < 0 || sp + 4 > head.len { << 0 }
+    $end := sp + 1
+    while end < head.len && (*head)[end] >= 48 && (*head)[end] <= 57 {
+        end += 1
+    }
+    if end == sp + 1 { << 0 }
+    code_s := (*head)[sp + 1:end]
+    << strconv.atoi(&code_s) >>> (_) { << 0 }
+}
+
+fn copy_tcs(src &[]ToolCall) []ToolCall {
+    $out := []ToolCall{}
+    for i in 0:src.len {
+        out.push(ToolCall{
+            id: src[i].id + "",
+            kind: src[i].kind + "",
+            name: src[i].name + "",
+            arguments: src[i].arguments + ""
+        })
+    }
+    << out
+}
+
+fn close_conn(conn $&transport.Conn) int {
+    _ := conn.close() >>> (_) { << 0 }
+    << 0
+}
+
+fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(StreamDelta) bool,
+                    has_ch bool, delta_ch chan StreamDelta) ChatResponse {
+    bu := c.base_url + ""
+    ak := c.api_key + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    body := encode_chat_body(req, true)
+    raw_req := build_http_request("POST", &ep, "/v1/chat/completions", &ak, &body)
+    cfg := tls.new_config(ep.host + "")
+    $conn := transport.dial(ep, cfg, c.timeout_ns) >>>
+    _ := conn.write_all(raw_req) >>> (err) {
+        _ := close_conn($&conn)
+        >>> err
+    }
+
+    $buf := ""
+    crlf2 := "\r\n\r\n"
+    $hdr_end := -1
+    while hdr_end < 0 {
+        chunk := conn.read(8192) >>> (err) {
+            _ := close_conn($&conn)
+            >>> err
+        }
+        if chunk.len == 0 { <- }
+        buf = buf + chunk
+        hdr_end = find_substr_from(&buf, &crlf2, 0)
+    }
+    if hdr_end < 0 {
+        _ := close_conn($&conn)
+        >>> errors.new("openai: incomplete HTTP headers")
+    }
+    head := buf[0:hdr_end]
+    status := parse_status_line(&head)
+    $rest := buf[(hdr_end + 4):buf.len]
+    if status < 200 || status >= 300 {
+        for {
+            chunk := conn.read(8192) >>> (_) { <- }
+            if chunk.len == 0 { <- }
+            rest = rest + chunk
+        }
+        _ := close_conn($&conn)
+        _ := check_http_error(status, &rest) >>>
+    }
+
+    $out := ChatResponse{
+        id: "",
+        model: req.model,
+        content: "",
+        finish_reason: "",
+        tool_calls: []ToolCall{},
+        usage: Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+    }
+    $stopped := false
+    $line_buf := rest
+    for {
+        $processed := 0
+        for {
+            $nl := -1
+            for i in processed:line_buf.len {
+                if line_buf[i] == 10 {
+                    nl = i
+                    <-
+                }
+            }
+            if nl < 0 { <- }
+            $line := line_buf[processed:nl]
+            if line.len > 0 && line[line.len - 1] == 13 {
+                line = line[0:line.len - 1]
+            }
+            processed = nl + 1
+            if strings.has_prefix(&line, "data:") {
+                $payload := line[5:line.len]
+                payload = strings.trim_space(&payload)
+                if payload == "[DONE]" {
+                    if use_cb {
+                        sd_done := StreamDelta{
+                            content: "", finish_reason: out.finish_reason + "",
+                            tool_calls: []ToolCall{}, has_usage: false,
+                            usage: out.usage, done: true
+                        }
+                        _ := on_delta(sd_done)
+                    } else if has_ch {
+                        sd_done := StreamDelta{
+                            content: "", finish_reason: out.finish_reason + "",
+                            tool_calls: []ToolCall{}, has_usage: false,
+                            usage: out.usage, done: true
+                        }
+                        delta_ch <- sd_done
+                    }
+                    stopped = true
+                    <-
+                }
+                if payload.len > 0 {
+                    doc := json.parse(&payload)
+                    if doc.ok() && doc.is_dict(doc.root()) {
+                        root := doc.root()
+                        if out.id.len == 0 { out.id = json_str_or(&doc, root, "id", "") }
+                        mname := json_str_or(&doc, root, "model", "")
+                        if mname.len > 0 { out.model = mname }
+                        $delta_content := ""
+                        $delta_fr := ""
+                        $delta_tcs := []ToolCall{}
+                        if doc.has(root, "choices") {
+                            choices := doc_get_or(&doc, root, "choices")
+                            if doc.is_list(choices) && doc.count(choices) > 0 {
+                                ch0 := doc_at_or(&doc, choices, 0)
+                                $fr := json_str_or(&doc, ch0, "finish_reason", "")
+                                if fr.len > 0 {
+                                    out.finish_reason = fr
+                                    delta_fr = fr
+                                }
+                                if doc.has(ch0, "delta") {
+                                    dn := doc_get_or(&doc, ch0, "delta")
+                                    delta_content = json_str_or(&doc, dn, "content", "")
+                                    if delta_content.len > 0 {
+                                        out.content = out.content + delta_content
+                                    }
+                                    delta_tcs = parse_tool_calls(&doc, dn)
+                                    for ti in 0:delta_tcs.len {
+                                        out.tool_calls.push(delta_tcs[ti])
+                                    }
+                                }
+                            }
+                        }
+                        $has_u := false
+                        if doc.has(root, "usage") {
+                            un := doc_get_or(&doc, root, "usage")
+                            if doc.is_dict(un) {
+                                has_u = true
+                                out.usage = parse_usage(&doc, root)
+                            }
+                        }
+                        if use_cb {
+                            sd_cb := StreamDelta{
+                                content: delta_content + "", finish_reason: delta_fr + "",
+                                tool_calls: copy_tcs(&delta_tcs), has_usage: has_u,
+                                usage: out.usage, done: false
+                            }
+                            if !on_delta(sd_cb) {
+                                stopped = true
+                                <-
+                            }
+                        } else if has_ch {
+                            sd_ch := StreamDelta{
+                                content: delta_content + "", finish_reason: delta_fr + "",
+                                tool_calls: copy_tcs(&delta_tcs), has_usage: has_u,
+                                usage: out.usage, done: false
+                            }
+                            delta_ch <- sd_ch
+                        }
+                    }
+                }
+            }
+        }
+        if stopped { <- }
+        if processed > 0 {
+            line_buf = line_buf[processed:line_buf.len]
+        }
+        chunk := conn_read_or($&conn, 8192)
+        if chunk.len == 0 { <- }
+        line_buf = line_buf + chunk
+    }
+    _ := close_conn($&conn)
+    << out
+}
+
+pub fn (c &Client) chat_stream(req &ChatRequest, on_delta fn(StreamDelta) bool) ChatResponse {
+    dummy_ch := chan StreamDelta{cap: 1}
+    << chat_stream_impl(c, req, true, on_delta, false, dummy_ch) >>>
+}
+
+fn ignore_delta(d StreamDelta) bool {
+    << true
+}
+
+pub fn (c &Client) chat_stream_chan(req &ChatRequest, delta_ch chan StreamDelta) ChatResponse {
+    << chat_stream_impl(c, req, false, ignore_delta, true, delta_ch) >>>
+}
+
+pub fn (c &Client) embeddings(req &EmbedRequest) EmbedResponse {
+    bu := c.base_url + ""
+    ak := c.api_key + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    $body := "{\"model\":" + json.quote(&req.model) + ",\"input\":["
+    for i in 0:req.inputs.len {
+        if i > 0 { body = body + "," }
+        body = body + json.quote(&req.inputs[i])
+    }
+    body = body + "]}"
+    raw_req := build_http_request("POST", &ep, "/v1/embeddings", &ak, &body)
+    cfg := tls.new_config(ep.host + "")
+    resp := transport.request_raw(ep, cfg, raw_req, "POST") >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $embs := [][]f64{}
+    if doc.has(root, "data") {
+        arr := doc.get(root, "data") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                $vec := []f64{}
+                if doc.is_dict(item) && doc.has(item, "embedding") {
+                    en := doc.get(item, "embedding") >>>
+                    if doc.is_list(en) {
+                        vcnt := doc.count(en)
+                        for j in 0:vcnt {
+                            vn := doc.at(en, j) >>>
+                            if doc.is_number(vn) {
+                                vec.push(doc.as_f64(vn) >>>)
+                            }
+                        }
+                    }
+                }
+                embs.push(~vec)
+            }
+        }
+    }
+    << EmbedResponse{
+        model: json_str_or(&doc, root, "model", req.model),
+        embeddings: ~embs,
+        usage: parse_usage(&doc, root)
+    }
+}

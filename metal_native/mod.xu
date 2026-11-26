@@ -11,8 +11,8 @@ const SLOT = 2
 const OFF_LIBRARY = 0
 const OFF_LOADED = 8
 const OFF_SYMS = 16
-const SYM_COUNT = 81
-const BLOB_SIZE = 664
+const SYM_COUNT = 107
+const BLOB_SIZE = 872
 
 const XM_UNAVAILABLE = -1
 
@@ -97,6 +97,32 @@ extern "C" fn xm_matrix_q4_0_close(fn_ptr c_ptr, matrix int) int = dynamic
 extern "C" fn xm_matrix_q4_0_release(fn_ptr c_ptr, matrix int) int = dynamic
 extern "C" fn xm_gemv_q4_0_f32(fn_ptr c_ptr, dst int, x int, w int) int = dynamic
 extern "C" fn xm_batch_gemv_q4_0_f32(fn_ptr c_ptr, batch int, dst int, x int, w int) int = dynamic
+extern "C" fn xm_matrix_f32_write_bytes(fn_ptr c_ptr, matrix int, bytes c_ptr) int = dynamic
+extern "C" fn xm_matrix_f16_write_bytes(fn_ptr c_ptr, matrix int, bytes c_ptr) int = dynamic
+extern "C" fn xm_matrix_q8_0_new(fn_ptr c_ptr, device int, rows int, columns int) int = dynamic
+extern "C" fn xm_matrix_q8_0_info(fn_ptr c_ptr, matrix int, key int) int = dynamic
+extern "C" fn xm_matrix_q8_0_write(fn_ptr c_ptr, matrix int, bytes c_ptr) int = dynamic
+extern "C" fn xm_matrix_q8_0_close(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_matrix_q8_0_release(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_gemv_q8_0_f32(fn_ptr c_ptr, dst int, x int, w int) int = dynamic
+extern "C" fn xm_batch_gemv_q8_0_f32(fn_ptr c_ptr, batch int, dst int, x int, w int) int = dynamic
+extern "C" fn xm_matrix_q4_k_new(fn_ptr c_ptr, device int, rows int, columns int) int = dynamic
+extern "C" fn xm_matrix_q4_k_info(fn_ptr c_ptr, matrix int, key int) int = dynamic
+extern "C" fn xm_matrix_q4_k_write(fn_ptr c_ptr, matrix int, bytes c_ptr) int = dynamic
+extern "C" fn xm_matrix_q4_k_close(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_matrix_q4_k_release(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_gemv_q4_k_f32(fn_ptr c_ptr, dst int, x int, w int) int = dynamic
+extern "C" fn xm_batch_gemv_q4_k_f32(fn_ptr c_ptr, batch int, dst int, x int, w int) int = dynamic
+extern "C" fn xm_qk_norm_f32(fn_ptr c_ptr, dst int, x int, weight int, n_heads int, eps_bits int) int = dynamic
+extern "C" fn xm_batch_qk_norm_f32(fn_ptr c_ptr, batch int, dst int, x int, weight int, n_heads int, eps_bits int) int = dynamic
+extern "C" fn xm_kv_cache_append_f32(fn_ptr c_ptr, cache int, src int, pos_offset int) int = dynamic
+extern "C" fn xm_batch_kv_cache_append_f32(fn_ptr c_ptr, batch int, cache int, src int, pos_offset int) int = dynamic
+extern "C" fn xm_attention_decode_f32(fn_ptr c_ptr, dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int = dynamic
+extern "C" fn xm_batch_attention_decode_f32(fn_ptr c_ptr, batch int, dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int = dynamic
+extern "C" fn xm_embedding_f32(fn_ptr c_ptr, dst int, table int, ids c_ptr) int = dynamic
+extern "C" fn xm_batch_embedding_f32(fn_ptr c_ptr, batch int, dst int, table int, ids c_ptr) int = dynamic
+extern "C" fn xm_argmax_f32(fn_ptr c_ptr, dst int, x int) int = dynamic
+extern "C" fn xm_batch_argmax_f32(fn_ptr c_ptr, batch int, dst int, x int) int = dynamic
 
 fn sym_name(i int) string {
     if i == 0 { << "xu_metal_native_available" }
@@ -180,6 +206,32 @@ fn sym_name(i int) string {
     if i == 78 { << "xu_metal_native_matrix_q4_0_release" }
     if i == 79 { << "xu_metal_native_gemv_q4_0_f32" }
     if i == 80 { << "xu_metal_native_batch_gemv_q4_0_f32" }
+    if i == 81 { << "xu_metal_native_matrix_f32_write_bytes" }
+    if i == 82 { << "xu_metal_native_matrix_f16_write_bytes" }
+    if i == 83 { << "xu_metal_native_matrix_q8_0_new" }
+    if i == 84 { << "xu_metal_native_matrix_q8_0_info" }
+    if i == 85 { << "xu_metal_native_matrix_q8_0_write" }
+    if i == 86 { << "xu_metal_native_matrix_q8_0_close" }
+    if i == 87 { << "xu_metal_native_matrix_q8_0_release" }
+    if i == 88 { << "xu_metal_native_gemv_q8_0_f32" }
+    if i == 89 { << "xu_metal_native_batch_gemv_q8_0_f32" }
+    if i == 90 { << "xu_metal_native_matrix_q4_k_new" }
+    if i == 91 { << "xu_metal_native_matrix_q4_k_info" }
+    if i == 92 { << "xu_metal_native_matrix_q4_k_write" }
+    if i == 93 { << "xu_metal_native_matrix_q4_k_close" }
+    if i == 94 { << "xu_metal_native_matrix_q4_k_release" }
+    if i == 95 { << "xu_metal_native_gemv_q4_k_f32" }
+    if i == 96 { << "xu_metal_native_batch_gemv_q4_k_f32" }
+    if i == 97 { << "xu_metal_native_qk_norm_f32" }
+    if i == 98 { << "xu_metal_native_batch_qk_norm_f32" }
+    if i == 99 { << "xu_metal_native_kv_cache_append_f32" }
+    if i == 100 { << "xu_metal_native_batch_kv_cache_append_f32" }
+    if i == 101 { << "xu_metal_native_attention_decode_f32" }
+    if i == 102 { << "xu_metal_native_batch_attention_decode_f32" }
+    if i == 103 { << "xu_metal_native_embedding_f32" }
+    if i == 104 { << "xu_metal_native_batch_embedding_f32" }
+    if i == 105 { << "xu_metal_native_argmax_f32" }
+    if i == 106 { << "xu_metal_native_batch_argmax_f32" }
     << ""
 }
 
@@ -712,4 +764,144 @@ pub fn gemv_q4_0_f32(dst int, x int, w int) int {
 pub fn batch_gemv_q4_0_f32(batch int, dst int, x int, w int) int {
     if !ensure() { << XM_UNAVAILABLE }
     unsafe { << xm_batch_gemv_q4_0_f32(sym(80), batch, dst, x, w) }
+}
+pub fn matrix_f32_write_bytes(matrix int, bytes &string) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := u8_span_copy_in_str(bytes)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_f32_write_bytes(sym(81), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_f16_write_bytes(matrix int, bytes &string) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := u8_span_copy_in_str(bytes)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_f16_write_bytes(sym(82), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_q8_0_new(device int, rows int, columns int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q8_0_new(sym(83), device, rows, columns) }
+}
+pub fn matrix_q8_0_info(matrix int, key int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q8_0_info(sym(84), matrix, key) }
+}
+pub fn matrix_q8_0_write(matrix int, bytes &string) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := u8_span_copy_in_str(bytes)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_q8_0_write(sym(85), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_q8_0_close(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q8_0_close(sym(86), matrix) }
+}
+pub fn matrix_q8_0_release(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q8_0_release(sym(87), matrix) }
+}
+pub fn gemv_q8_0_f32(dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemv_q8_0_f32(sym(88), dst, x, w) }
+}
+pub fn batch_gemv_q8_0_f32(batch int, dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_gemv_q8_0_f32(sym(89), batch, dst, x, w) }
+}
+pub fn matrix_q4_k_new(device int, rows int, columns int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q4_k_new(sym(90), device, rows, columns) }
+}
+pub fn matrix_q4_k_info(matrix int, key int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q4_k_info(sym(91), matrix, key) }
+}
+pub fn matrix_q4_k_write(matrix int, bytes &string) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := u8_span_copy_in_str(bytes)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_q4_k_write(sym(92), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_q4_k_close(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q4_k_close(sym(93), matrix) }
+}
+pub fn matrix_q4_k_release(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q4_k_release(sym(94), matrix) }
+}
+pub fn gemv_q4_k_f32(dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemv_q4_k_f32(sym(95), dst, x, w) }
+}
+pub fn batch_gemv_q4_k_f32(batch int, dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_gemv_q4_k_f32(sym(96), batch, dst, x, w) }
+}
+pub fn qk_norm_f32(dst int, x int, weight int, n_heads int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_qk_norm_f32(sym(97), dst, x, weight, n_heads, eps_bits) }
+}
+pub fn batch_qk_norm_f32(batch int, dst int, x int, weight int, n_heads int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_qk_norm_f32(sym(98), batch, dst, x, weight, n_heads, eps_bits) }
+}
+pub fn kv_cache_append_f32(cache int, src int, pos_offset int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_kv_cache_append_f32(sym(99), cache, src, pos_offset) }
+}
+pub fn batch_kv_cache_append_f32(batch int, cache int, src int, pos_offset int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_kv_cache_append_f32(sym(100), batch, cache, src, pos_offset) }
+}
+pub fn attention_decode_f32(dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_attention_decode_f32(sym(101), dst, q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, scale_bits) }
+}
+pub fn batch_attention_decode_f32(batch int, dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_attention_decode_f32(sym(102), batch, dst, q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, scale_bits) }
+}
+pub fn embedding_f32(dst int, table int, ids &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(ids)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_embedding_f32(sym(103), dst, table, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn batch_embedding_f32(batch int, dst int, table int, ids &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(ids)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_batch_embedding_f32(sym(104), batch, dst, table, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn argmax_f32(dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_argmax_f32(sym(105), dst, x) }
+}
+pub fn batch_argmax_f32(batch int, dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_argmax_f32(sym(106), batch, dst, x) }
 }

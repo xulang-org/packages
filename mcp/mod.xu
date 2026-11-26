@@ -1,0 +1,625 @@
+@"github.com/xulang-org/packages/mcp"
+
+#encoding/json
+#errors
+#os
+#strconv
+#strings
+#crypto/tls
+transport #github.com/xulang-org/packages/transport
+
+pub const PROTOCOL_VERSION = "2025-03-26"
+
+pub struct ToolInfo {
+    pub name string
+    pub description string
+    pub input_schema_json string
+}
+
+pub struct ResourceInfo {
+    pub uri string
+    pub name string
+    pub description string
+    pub mime_type string
+}
+
+pub struct PromptInfo {
+    pub name string
+    pub description string
+    pub arguments_json string
+}
+
+pub struct ContentItem {
+    pub kind string
+    pub text string
+}
+
+pub struct ToolResult {
+    pub content []ContentItem
+    pub is_error bool
+}
+
+pub fn text_result(text string) ToolResult {
+    items := [ContentItem{kind: "text", text: text}]
+    << ToolResult{content: ~items, is_error: false}
+}
+
+pub fn error_result(text string) ToolResult {
+    items := [ContentItem{kind: "text", text: text}]
+    << ToolResult{content: ~items, is_error: true}
+}
+
+pub struct Server {
+    pub name string
+    pub version string
+    tools []ToolInfo
+    tool_handlers []fn(&string) ToolResult
+    resources []ResourceInfo
+    res_handlers []fn(&string) string
+    prompts []PromptInfo
+    prompt_handlers []fn(&string) string
+}
+
+pub fn new_server(name string, version string) Server {
+    << Server{
+        name: name,
+        version: version,
+        tools: []ToolInfo{},
+        tool_handlers: []fn(&string) ToolResult{},
+        resources: []ResourceInfo{},
+        res_handlers: []fn(&string) string{},
+        prompts: []PromptInfo{},
+        prompt_handlers: []fn(&string) string{}
+    }
+}
+
+pub fn (s $&Server) add_tool(name string, description string, input_schema_json string,
+                             handler fn(&string) ToolResult) {
+    $schema := input_schema_json + ""
+    if schema.len == 0 {
+        schema = "{\"type\":\"object\"}"
+    }
+    s.tools.push(ToolInfo{name: name, description: description, input_schema_json: schema})
+    s.tool_handlers.push(handler)
+}
+
+pub fn (s $&Server) add_resource(uri string, name string, description string, mime_type string,
+                                 handler fn(&string) string) {
+    $mt := mime_type + ""
+    if mt.len == 0 { mt = "text/plain" }
+    s.resources.push(ResourceInfo{uri: uri, name: name, description: description, mime_type: mt})
+    s.res_handlers.push(handler)
+}
+
+pub fn (s $&Server) add_prompt(name string, description string, arguments_json string,
+                               handler fn(&string) string) {
+    $args := arguments_json + ""
+    if args.len == 0 { args = "[]" }
+    s.prompts.push(PromptInfo{name: name, description: description, arguments_json: args})
+    s.prompt_handlers.push(handler)
+}
+
+fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn doc_get_or(doc &json.Doc, obj int, key string) int {
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn doc_encode_or(doc &json.Doc, node int, def string) string {
+    << doc.encode(node) >>> (_) { << def }
+}
+
+fn doc_bool_or(doc &json.Doc, node int, def bool) bool {
+    << doc.as_bool(node) >>> (_) { << def }
+}
+
+fn fin_read_or(fin &os.File, max int) string {
+    << fin.read(max) >>> (_) { << "" }
+}
+
+struct IdParse {
+    has_id bool
+    id_json string
+}
+
+struct RpcResult {
+    doc json.Doc
+    node int
+}
+
+fn extract_id_json(doc &json.Doc, root int) IdParse {
+    if !doc.is_dict(root) || !doc.has(root, "id") {
+        << IdParse{has_id: false, id_json: "null"}
+    }
+    idn := doc.get(root, "id") >>> (_) { << IdParse{has_id: false, id_json: "null"} }
+    if doc.is_null(idn) {
+        << IdParse{has_id: true, id_json: "null"}
+    }
+    encoded := doc.encode(idn) >>> (_) { << IdParse{has_id: true, id_json: "null"} }
+    << IdParse{has_id: true, id_json: encoded}
+}
+
+fn rpc_ok(id_json &string, result_json string) string {
+    << "{\"jsonrpc\":\"2.0\",\"id\":" + *id_json + ",\"result\":" + result_json + "}"
+}
+
+fn rpc_err(id_json &string, code int, msg string) string {
+    << "{\"jsonrpc\":\"2.0\",\"id\":" + *id_json + ",\"error\":{\"code\":" + str(code) +
+       ",\"message\":" + json.quote(&msg) + "}}"
+}
+
+fn encode_tool_result(res &ToolResult) string {
+    $s := "{\"content\":["
+    for i in 0:res.content.len {
+        if i > 0 { s = s + "," }
+        c := &res.content[i]
+        $k := c.kind + ""
+        if k.len == 0 { k = "text" }
+        s = s + "{\"type\":" + json.quote(&k) + ",\"text\":" + json.quote(&c.text) + "}"
+    }
+    s = s + "]"
+    if res.is_error {
+        s = s + ",\"isError\":true"
+    }
+    << s + "}"
+}
+
+pub fn (s &Server) handle_json_line(line &string) string {
+    $trimmed := line + ""
+    trimmed = strings.trim_space(&trimmed)
+    if trimmed.len == 0 { << "" }
+    doc := json.parse(&trimmed)
+    null_id := "null"
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        << rpc_err(&null_id, -32700, "Parse error")
+    }
+    root := doc.root()
+    idp := extract_id_json(&doc, root)
+    has_id := idp.has_id
+    id_json := idp.id_json
+    method := json_str_or(&doc, root, "method", "")
+    if method.len == 0 {
+        if !has_id { << "" }
+        << rpc_err(&id_json, -32600, "Invalid Request")
+    }
+    if strings.has_prefix(&method, "notifications/") && !has_id {
+        << ""
+    }
+    if !has_id {
+        << ""
+    }
+
+    if method == "initialize" {
+        res := "{\"protocolVersion\":" + json.quote(&PROTOCOL_VERSION) +
+               ",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"listChanged\":false},\"prompts\":{\"listChanged\":false}}," +
+               "\"serverInfo\":{\"name\":" + json.quote(&s.name) + ",\"version\":" + json.quote(&s.version) + "}}"
+        << rpc_ok(&id_json, res)
+    }
+    if method == "ping" {
+        << rpc_ok(&id_json, "{}")
+    }
+    if method == "tools/list" {
+        $arr := "["
+        for i in 0:s.tools.len {
+            if i > 0 { arr = arr + "," }
+            t := &s.tools[i]
+            arr = arr + "{\"name\":" + json.quote(&t.name) +
+                  ",\"description\":" + json.quote(&t.description) +
+                  ",\"inputSchema\":" + t.input_schema_json + "}"
+        }
+        arr = arr + "]"
+        << rpc_ok(&id_json, "{\"tools\":" + arr + "}")
+    }
+    if method == "tools/call" {
+        if !doc.has(root, "params") {
+            << rpc_err(&id_json, -32602, "missing params")
+        }
+        params := doc_get_or(&doc, root, "params")
+        tname := json_str_or(&doc, params, "name", "")
+        if tname.len == 0 {
+            << rpc_err(&id_json, -32602, "missing tool name")
+        }
+        $args_json := "{}"
+        if doc.is_dict(params) && doc.has(params, "arguments") {
+            an := doc_get_or(&doc, params, "arguments")
+            if an >= 0 { args_json = doc_encode_or(&doc, an, "{}") }
+        }
+        $idx := -1
+        for i in 0:s.tools.len {
+            if s.tools[i].name == tname {
+                idx = i
+                <-
+            }
+        }
+        if idx < 0 {
+            << rpc_err(&id_json, -32602, "unknown tool: " + tname)
+        }
+        handler := s.tool_handlers[idx]
+        res := handler(&args_json)
+        << rpc_ok(&id_json, encode_tool_result(&res))
+    }
+    if method == "resources/list" {
+        $arr := "["
+        for i in 0:s.resources.len {
+            if i > 0 { arr = arr + "," }
+            r := &s.resources[i]
+            arr = arr + "{\"uri\":" + json.quote(&r.uri) +
+                  ",\"name\":" + json.quote(&r.name) +
+                  ",\"description\":" + json.quote(&r.description) +
+                  ",\"mimeType\":" + json.quote(&r.mime_type) + "}"
+        }
+        arr = arr + "]"
+        << rpc_ok(&id_json, "{\"resources\":" + arr + "}")
+    }
+    if method == "resources/read" {
+        if !doc.has(root, "params") {
+            << rpc_err(&id_json, -32602, "missing params")
+        }
+        params := doc_get_or(&doc, root, "params")
+        uri := json_str_or(&doc, params, "uri", "")
+        $idx := -1
+        for i in 0:s.resources.len {
+            if s.resources[i].uri == uri {
+                idx = i
+                <-
+            }
+        }
+        if idx < 0 {
+            << rpc_err(&id_json, -32602, "resource not found: " + uri)
+        }
+        handler := s.res_handlers[idx]
+        text := handler(&uri)
+        mt := &s.resources[idx].mime_type
+        << rpc_ok(&id_json, "{\"contents\":[{\"uri\":" + json.quote(&uri) + ",\"mimeType\":" +
+                          json.quote(mt) + ",\"text\":" + json.quote(&text) + "}]}")
+    }
+    if method == "prompts/list" {
+        $arr := "["
+        for i in 0:s.prompts.len {
+            if i > 0 { arr = arr + "," }
+            p := &s.prompts[i]
+            arr = arr + "{\"name\":" + json.quote(&p.name) +
+                  ",\"description\":" + json.quote(&p.description) +
+                  ",\"arguments\":" + p.arguments_json + "}"
+        }
+        arr = arr + "]"
+        << rpc_ok(&id_json, "{\"prompts\":" + arr + "}")
+    }
+    if method == "prompts/get" {
+        if !doc.has(root, "params") {
+            << rpc_err(&id_json, -32602, "missing params")
+        }
+        params := doc_get_or(&doc, root, "params")
+        pname := json_str_or(&doc, params, "name", "")
+        $args_json := "{}"
+        if doc.is_dict(params) && doc.has(params, "arguments") {
+            an := doc_get_or(&doc, params, "arguments")
+            if an >= 0 { args_json = doc_encode_or(&doc, an, "{}") }
+        }
+        $idx := -1
+        for i in 0:s.prompts.len {
+            if s.prompts[i].name == pname {
+                idx = i
+                <-
+            }
+        }
+        if idx < 0 {
+            << rpc_err(&id_json, -32602, "prompt not found: " + pname)
+        }
+        handler := s.prompt_handlers[idx]
+        text := handler(&args_json)
+        << rpc_ok(&id_json, "{\"messages\":[{\"role\":\"user\",\"content\":{\"type\":\"text\",\"text\":" +
+                          json.quote(&text) + "}}]}")
+    }
+    << rpc_err(&id_json, -32601, "Method not found: " + method)
+}
+
+pub fn (s &Server) serve_stdio() int {
+    $fin := os.open("/dev/stdin") >>>
+    $buf := ""
+    for {
+        $consumed := 0
+        for {
+            $nl := -1
+            for i in consumed:buf.len {
+                if buf[i] == 10 {
+                    nl = i
+                    <-
+                }
+            }
+            if nl < 0 { <- }
+            $line := buf[consumed:nl]
+            if line.len > 0 && line[line.len - 1] == 13 {
+                line = line[0:line.len - 1]
+            }
+            consumed = nl + 1
+            resp := s.handle_json_line(&line)
+            if resp.len > 0 {
+                println(resp)
+            }
+        }
+        if consumed > 0 {
+            buf = buf[consumed:buf.len]
+        }
+        chunk := fin_read_or(&fin, 8192)
+        if chunk.len == 0 {
+            if buf.len > 0 {
+                resp := s.handle_json_line(&buf)
+                if resp.len > 0 {
+                    println(resp)
+                }
+            }
+            <-
+        }
+        buf = buf + chunk
+    }
+    _ := fin.close() >>> (_) { << 0 }
+    << 0
+}
+
+pub struct Client {
+    pub base_url string
+    pub session_id string
+    pub server_name string
+    pub server_version string
+    next_id int
+}
+
+pub fn new_http_client(base_url string) Client {
+    << Client{
+        base_url: base_url,
+        session_id: "",
+        server_name: "",
+        server_version: "",
+        next_id: 1
+    }
+}
+
+fn default_port_for(raw &string) int {
+    if strings.has_prefix(raw, "https://") { << 443 }
+    << 80
+}
+
+fn parse_rpc_payload(ctype &string, body &string) string {
+    if strings.has_prefix(ctype, "text/event-stream") || strings.has_prefix(body, "data:") || strings.has_prefix(body, "event:") {
+        lines := strings.split(body, "\n")
+        for i in 0:lines.len {
+            $l := lines[i] + ""
+            l = strings.trim_space(&l)
+            if strings.has_prefix(&l, "data:") {
+                $p := l[5:l.len]
+                p = strings.trim_space(&p)
+                if p.len > 0 { << p }
+            }
+        }
+    }
+    << *body
+}
+
+fn (c $&Client) rpc_call(method string, params_json string, is_notif bool) RpcResult {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    $req_json := "{\"jsonrpc\":\"2.0\""
+    if !is_notif {
+        id := c.next_id
+        c.next_id += 1
+        req_json = req_json + ",\"id\":" + str(id)
+    }
+    req_json = req_json + ",\"method\":" + json.quote(&method)
+    if params_json.len > 0 {
+        req_json = req_json + ",\"params\":" + params_json
+    }
+    req_json = req_json + "}"
+
+    $path := ep.path + ""
+    if path.len == 0 { path = "/" }
+    $raw := "POST " + path + " HTTP/1.1\r\n" +
+            "Host: " + ep.host + ":" + str(ep.port) + "\r\n" +
+            "Content-Type: application/json\r\n" +
+            "Accept: application/json, text/event-stream\r\n"
+    if c.session_id.len > 0 {
+        raw = raw + "Mcp-Session-Id: " + c.session_id + "\r\n"
+    }
+    raw = raw + "Content-Length: " + str(req_json.len) + "\r\nConnection: close\r\n\r\n" + req_json
+    cfg := tls.new_config(ep.host + "")
+    resp := transport.request_raw(ep, cfg, raw, "POST") >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, "mcp: HTTP " + str(resp.status_code) + " " + resp.body)
+    }
+    sid := resp.header("Mcp-Session-Id")
+    if sid.len > 0 { c.session_id = sid }
+    if is_notif || resp.status_code == 202 || resp.body.len == 0 {
+        empty := "{}"
+        doc := json.parse(&empty)
+        rt := doc.root()
+        << RpcResult{doc: ~doc, node: rt}
+    }
+    ctype := resp.header("Content-Type")
+    payload := parse_rpc_payload(&ctype, &resp.body)
+    doc := json.parse(&payload)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("mcp: invalid JSON-RPC response")
+    }
+    root := doc.root()
+    if doc.has(root, "error") {
+        en := doc.get(root, "error") >>>
+        emsg := json_str_or(&doc, en, "message", "RPC error")
+        >>> errors.new("mcp: " + emsg)
+    }
+    if !doc.has(root, "result") {
+        >>> errors.new("mcp: missing result")
+    }
+    res_node := doc.get(root, "result") >>>
+    << RpcResult{doc: ~doc, node: res_node}
+}
+
+pub fn (c $&Client) initialize() int {
+    params := "{\"protocolVersion\":" + json.quote(&PROTOCOL_VERSION) +
+              ",\"capabilities\":{},\"clientInfo\":{\"name\":\"xu-mcp\",\"version\":\"1.4.0\"}}"
+    rr := c.rpc_call("initialize", params, false) >>>
+    doc := &rr.doc
+    res := rr.node
+    if doc.is_dict(res) && doc.has(res, "serverInfo") {
+        si := doc_get_or(doc, res, "serverInfo")
+        c.server_name = json_str_or(doc, si, "name", "")
+        c.server_version = json_str_or(doc, si, "version", "")
+    }
+    _ := c.rpc_call("notifications/initialized", "", true) >>>
+    << 0
+}
+
+pub fn (c $&Client) ping() bool {
+    _ := c.rpc_call("ping", "", false) >>> (_) { << false }
+    << true
+}
+
+pub fn (c $&Client) list_tools() []ToolInfo {
+    rr := c.rpc_call("tools/list", "{}", false) >>>
+    doc := &rr.doc
+    res := rr.node
+    $out := []ToolInfo{}
+    if doc.is_dict(res) && doc.has(res, "tools") {
+        arr := doc.get(res, "tools") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                $schema := "{}"
+                if doc.is_dict(item) && doc.has(item, "inputSchema") {
+                    sn := doc.get(item, "inputSchema") >>>
+                    schema = doc.encode(sn) >>>
+                }
+                out.push(ToolInfo{
+                    name: json_str_or(doc, item, "name", ""),
+                    description: json_str_or(doc, item, "description", ""),
+                    input_schema_json: schema
+                })
+            }
+        }
+    }
+    << out
+}
+
+pub fn (c $&Client) call_tool(name string, arguments_json string) ToolResult {
+    $args := arguments_json + ""
+    if args.len == 0 { args = "{}" }
+    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
+    rr := c.rpc_call("tools/call", params, false) >>>
+    doc := &rr.doc
+    res := rr.node
+    $items := []ContentItem{}
+    if doc.is_dict(res) && doc.has(res, "content") {
+        arr := doc.get(res, "content") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                items.push(ContentItem{
+                    kind: json_str_or(doc, item, "type", "text"),
+                    text: json_str_or(doc, item, "text", "")
+                })
+            }
+        }
+    }
+    $is_err := false
+    if doc.is_dict(res) && doc.has(res, "isError") {
+        en := doc_get_or(doc, res, "isError")
+        if en >= 0 && doc.is_bool(en) {
+            is_err = doc_bool_or(doc, en, false)
+        }
+    }
+    << ToolResult{content: ~items, is_error: is_err}
+}
+
+pub fn (c $&Client) list_resources() []ResourceInfo {
+    rr := c.rpc_call("resources/list", "{}", false) >>>
+    doc := &rr.doc
+    res := rr.node
+    $out := []ResourceInfo{}
+    if doc.is_dict(res) && doc.has(res, "resources") {
+        arr := doc.get(res, "resources") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                out.push(ResourceInfo{
+                    uri: json_str_or(doc, item, "uri", ""),
+                    name: json_str_or(doc, item, "name", ""),
+                    description: json_str_or(doc, item, "description", ""),
+                    mime_type: json_str_or(doc, item, "mimeType", "text/plain")
+                })
+            }
+        }
+    }
+    << out
+}
+
+pub fn (c $&Client) read_resource(uri string) string {
+    params := "{\"uri\":" + json.quote(&uri) + "}"
+    rr := c.rpc_call("resources/read", params, false) >>>
+    doc := &rr.doc
+    res := rr.node
+    if doc.is_dict(res) && doc.has(res, "contents") {
+        arr := doc.get(res, "contents") >>>
+        if doc.is_list(arr) && doc.count(arr) > 0 {
+            c0 := doc.at(arr, 0) >>>
+            << json_str_or(doc, c0, "text", "")
+        }
+    }
+    << ""
+}
+
+pub fn (c $&Client) list_prompts() []PromptInfo {
+    rr := c.rpc_call("prompts/list", "{}", false) >>>
+    doc := &rr.doc
+    res := rr.node
+    $out := []PromptInfo{}
+    if doc.is_dict(res) && doc.has(res, "prompts") {
+        arr := doc.get(res, "prompts") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                $args := "[]"
+                if doc.is_dict(item) && doc.has(item, "arguments") {
+                    an := doc.get(item, "arguments") >>>
+                    args = doc.encode(an) >>>
+                }
+                out.push(PromptInfo{
+                    name: json_str_or(doc, item, "name", ""),
+                    description: json_str_or(doc, item, "description", ""),
+                    arguments_json: args
+                })
+            }
+        }
+    }
+    << out
+}
+
+pub fn (c $&Client) get_prompt(name string, arguments_json string) string {
+    $args := arguments_json + ""
+    if args.len == 0 { args = "{}" }
+    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
+    rr := c.rpc_call("prompts/get", params, false) >>>
+    doc := &rr.doc
+    res := rr.node
+    if doc.is_dict(res) && doc.has(res, "messages") {
+        arr := doc.get(res, "messages") >>>
+        if doc.is_list(arr) && doc.count(arr) > 0 {
+            m0 := doc.at(arr, 0) >>>
+            if doc.is_dict(m0) && doc.has(m0, "content") {
+                cn := doc.get(m0, "content") >>>
+                << json_str_or(doc, cn, "text", "")
+            }
+        }
+    }
+    << ""
+}

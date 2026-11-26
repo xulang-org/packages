@@ -903,6 +903,409 @@ class TestMetalAI(unittest.TestCase):
         for i, (gv, rv) in enumerate(zip(got, ref_out)):
             self.assertLess(abs(gv - rv), 1e-3, f"batch_layer[{i}]: gpu={gv} cpu={rv}")
 
+    def test_v14_ops_and_quant_parity(self):
+        # Pack Q8_0 (rows=4, cols=64) and Q4_K (rows=3, cols=256)
+        x_q8 = [f32(((i * 5 + 3) % 17 - 8) * 0.25) for i in range(2 * 64)]
+        w_q8_src = [f32(((i * 7 + 1) % 21 - 10) * 0.125) for i in range(4 * 64)]
+        q8_bytes = bytearray()
+        w_q8_dq = []
+        for blk in range(len(w_q8_src) // 32):
+            seg = w_q8_src[blk * 32:(blk + 1) * 32]
+            amax = max(abs(v) for v in seg)
+            d = f32(amax / 127.0) if amax > 0 else 0.0
+            d16_b = struct.pack("<e", d)
+            d16 = f32(struct.unpack("<e", d16_b)[0])
+            q8_bytes.extend(d16_b)
+            inv_d = 1.0 / d16 if d16 != 0 else 0.0
+            for v in seg:
+                q = max(-127, min(127, int(round(v * inv_d))))
+                q8_bytes.append(q & 0xFF)
+                w_q8_dq.append(f32(q * d16))
+        ref_q8 = [
+            f32(sum(x_q8[m * 64 + k] * w_q8_dq[r * 64 + k] for k in range(64)))
+            for m in range(2) for r in range(4)
+        ]
+
+        x_q4k = [f32(((i * 3 + 2) % 15 - 7) * 0.125) for i in range(256)]
+        w_q4k_src = [f32(((i * 11 + 5) % 19 - 9) * 0.125) for i in range(3 * 256)]
+        q4k_bytes = bytearray()
+        w_q4k_dq = []
+        for r in range(3):
+            blk = w_q4k_src[r * 256:(r + 1) * 256]
+            sub_sc, sub_mn = [], []
+            for s in range(8):
+                sub = blk[s * 32:(s + 1) * 32]
+                lo, hi = min(0.0, min(sub)), max(sub)
+                rng = max(hi - lo, 0.0)
+                sub_sc.append(rng / 15.0 if rng > 0.0 else 0.0)
+                sub_mn.append(-lo)
+            max_sc, max_mn = max(sub_sc), max(sub_mn)
+            d16_b = struct.pack("<e", f32(max_sc / 63.0) if max_sc > 0 else 0.0)
+            dm16_b = struct.pack("<e", f32(max_mn / 63.0) if max_mn > 0 else 0.0)
+            d16 = f32(struct.unpack("<e", d16_b)[0])
+            dm16 = f32(struct.unpack("<e", dm16_b)[0])
+            q4k_bytes.extend(d16_b + dm16_b)
+            sc_q = [min(63, max(0, int(round(s / d16)))) if d16 > 0 else 0 for s in sub_sc]
+            mn_q = [min(63, max(0, int(round(m / dm16)))) if dm16 > 0 else 0 for m in sub_mn]
+            scales_b = bytearray(12)
+            for j in range(4):
+                scales_b[j] = sc_q[j] & 63
+                scales_b[j + 4] = mn_q[j] & 63
+            for j in range(4, 8):
+                scales_b[j + 4] = (sc_q[j] & 15) | ((mn_q[j] & 15) << 4)
+                scales_b[j - 4] |= ((sc_q[j] >> 4) & 3) << 6
+                scales_b[j] |= ((mn_q[j] >> 4) & 3) << 6
+            q4k_bytes.extend(scales_b)
+            qs_b = bytearray(128)
+            for ch in range(4):
+                s0, s1 = ch * 2, ch * 2 + 1
+                d1, m1 = f32(d16 * sc_q[s0]), f32(dm16 * mn_q[s0])
+                d2, m2 = f32(d16 * sc_q[s1]), f32(dm16 * mn_q[s1])
+                sub0, sub1 = blk[s0 * 32:(s0 + 1) * 32], blk[s1 * 32:(s1 + 1) * 32]
+                dq0, dq1 = [], []
+                for l in range(32):
+                    q0 = min(15, max(0, int(round((sub0[l] + m1) / d1)))) if d1 > 0 else 0
+                    q1 = min(15, max(0, int(round((sub1[l] + m2) / d2)))) if d2 > 0 else 0
+                    qs_b[ch * 32 + l] = (q0 & 15) | ((q1 & 15) << 4)
+                    dq0.append(f32(f32(d1 * q0) - m1))
+                    dq1.append(f32(f32(d2 * q1) - m2))
+                w_q4k_dq.extend(dq0)
+                w_q4k_dq.extend(dq1)
+            q4k_bytes.extend(qs_b)
+        ref_q4k = [f32(sum(x_q4k[k] * w_q4k_dq[r * 256 + k] for k in range(256))) for r in range(3)]
+
+        # Reference qk_norm_f32 on [2, 8] with n_heads=2, head_dim=4, eps=1e-5
+        qk_x = [f32(v) for v in [1.0, -2.0, 3.0, 0.5, 0.25, -1.5, 2.5, 1.0,
+                                  -1.0, 0.5, 1.5, -2.0, 2.0, 1.0, -0.5, 0.25]]
+        qk_w = [f32(1.25), f32(0.75), f32(1.5), f32(0.5)]
+        ref_qkn = []
+        for r in range(2):
+            for h in range(2):
+                seg = qk_x[r * 8 + h * 4:r * 8 + (h + 1) * 4]
+                ms = f32(sum(v * v for v in seg) / 4.0)
+                inv = f32(1.0 / math.sqrt(ms + 1e-5))
+                ref_qkn.extend(f32(v * inv * wv) for v, wv in zip(seg, qk_w))
+
+        # Reference attention_decode_f32 (kv_len=3 of 8-row cache, n_heads=4, n_kv_heads=2, head_dim=4, scale=0.5)
+        dec_q = [f32(((i * 5) % 9 - 4) * 0.25) for i in range(16)]
+        kc = [f32(((i * 7 + 1) % 11 - 5) * 0.25) for i in range(8 * 8)]
+        vc = [f32(((i * 3 + 2) % 13 - 6) * 0.25) for i in range(8 * 8)]
+        ref_dec = []
+        for h in range(4):
+            kvh = h // 2
+            qv = dec_q[h * 4:(h + 1) * 4]
+            scores = [sum(qv[d] * kc[t * 8 + kvh * 4 + d] for d in range(4)) * 0.5 for t in range(3)]
+            mx = max(scores)
+            ex = [math.exp(s - mx) for s in scores]
+            sm = sum(ex)
+            for d in range(4):
+                ref_dec.append(f32(sum((ex[t] / sm) * vc[t * 8 + kvh * 4 + d] for t in range(3))))
+
+        # Reference embedding_f32 & argmax_f32 (with tie)
+        emb_tbl = [f32(r * 10 + c + 0.5) for r in range(5) for c in range(4)]
+        emb_ids = [3, 0, 4]
+        ref_emb = [emb_tbl[idx * 4 + c] for idx in emb_ids for c in range(4)]
+        am_x = [f32(1.0), f32(5.0), f32(5.0), f32(2.0),  -3.0, -1.0, -2.0, -4.0]
+        ref_am = [1.0, 1.0]
+
+        def bstr_lit(raw):
+            return '"' + "".join(f"\\{b:03o}" for b in raw) + '"'
+
+        def xu_arr(name, vals):
+            bits = ", ".join(str(f32_bits(v)) for v in vals)
+            return f"    {name}_b := [{bits}]\n"
+
+        q8_hex = ", ".join(str(b) for b in q8_bytes)
+        q4k_hex = ", ".join(str(b) for b in q4k_bytes)
+        wb_src = struct.pack("<4f", 1.5, -2.5, 3.25, 0.0)
+        wb_ints = ", ".join(str(b) for b in wb_src)
+        f16b_raw = struct.pack("<4e", 1.5, -2.5, 3.25, 0.0)
+        f16b_ints = ", ".join(str(b) for b in f16b_raw)
+
+        xu_src = (
+            '@main\nmetal #"github.com/xulang-org/packages/metal"\n#errors\n'
+            'fn to_bytes(vals &[]int) string {\n'
+            '    $out := ""\n    for i in 0:vals.len { out.push_str(string_from_byte(vals[i] & 255)) }\n'
+            '    << out\n}\n'
+            'fn dump(tag string, bits &[]int) {\n'
+            '    $s := tag + ":"\n    for i in 0:bits.len { if i > 0 { s = s + "," }\n s = s + str(bits[i]) }\n    println(s)\n}\n'
+            'fn mat(d &metal.Device, r int, c int, b &[]int) metal.F32Matrix {\n'
+            '    $m := d.matrix_f32(r, c) >>>\n    _ := m.write_bits(b) >>>\n    << m\n}\n'
+            'fn guard_emb(d &metal.Device, tbl &metal.F32Matrix) bool {\n'
+            '    $dst := d.matrix_f32(1, 4) >>>\n    bad := [99]\n'
+            '    _ := metal.embedding_f32($&dst, tbl, &bad) >>> (_) { _ := dst.close() >>>\n << true }\n'
+            '    _ := dst.close() >>>\n    << false\n}\n'
+            'fn run_v14() int {\n'
+            '    if !metal.available() { println("SKIP:NO_METAL")\n << 0 }\n'
+            '    $d := metal.open() >>>\n'
+            '    // 1. MATRIX_MAX_DIM raised (>16384): allocate 32768 x 64 F32Matrix\n'
+            '    $big := d.matrix_f32(32768, 64) >>>\n'
+            '    println("BIG:" + str(big.rows()) + "x" + str(big.columns()))\n'
+            '    _ := big.close() >>>\n'
+            f'    wbf_arr := [{wb_ints}]\n    wbf := to_bytes(&wbf_arr)\n'
+            '    $mf32b := d.matrix_f32(2, 2) >>>\n    _ := mf32b.write_bytes(&wbf) >>>\n'
+            '    b_wb32 := mf32b.bits() >>>\n    dump("WB32", &b_wb32)\n    _ := mf32b.close() >>>\n'
+            f'    wbf16_arr := [{f16b_ints}]\n    wbf16 := to_bytes(&wbf16_arr)\n'
+            '    $mf16b := d.matrix_f16(2, 2) >>>\n    _ := mf16b.write_bytes(&wbf16) >>>\n'
+            '    b_wb16 := mf16b.bits() >>>\n    dump("WB16", &b_wb16)\n    _ := mf16b.close() >>>\n'
+            + xu_arr("xq8", x_q8)
+            + f'    q8_arr := [{q8_hex}]\n    q8_bytes := to_bytes(&q8_arr)\n'
+            + '    $mxq8 := mat(&d, 2, 64, &xq8_b) >>>\n'
+            + '    $mwq8 := d.matrix_q8_0(4, 64) >>>\n    _ := mwq8.write_bytes(&q8_bytes) >>>\n'
+            + '    $mdq8 := d.matrix_f32(2, 4) >>>\n'
+            + '    $fq8 := metal.gemv_q8_0_f32($&mdq8, &mxq8, &mwq8) >>>\n    _ := fq8.wait() >>>\n    _ := fq8.close() >>>\n'
+            + '    b_q8 := mdq8.bits() >>>\n    dump("Q8", &b_q8)\n'
+            + xu_arr("xq4k", x_q4k)
+            + f'    q4k_arr := [{q4k_hex}]\n    q4k_bytes := to_bytes(&q4k_arr)\n'
+            + '    $mxq4k := mat(&d, 1, 256, &xq4k_b) >>>\n'
+            + '    $mwq4k := d.matrix_q4_k(3, 256) >>>\n    _ := mwq4k.write_bytes(&q4k_bytes) >>>\n'
+            + '    $mdq4k := d.matrix_f32(1, 3) >>>\n'
+            + '    $fq4k := metal.gemv_q4_k_f32($&mdq4k, &mxq4k, &mwq4k) >>>\n    _ := fq4k.wait() >>>\n    _ := fq4k.close() >>>\n'
+            + '    b_q4k := mdq4k.bits() >>>\n    dump("Q4K", &b_q4k)\n'
+            + xu_arr("qkx", qk_x) + xu_arr("qkw", qk_w)
+            + '    $mqkx := mat(&d, 2, 8, &qkx_b) >>>\n    $mqkw := mat(&d, 1, 4, &qkw_b) >>>\n'
+            + '    $mqkn := d.matrix_f32(2, 8) >>>\n'
+            + '    $fqkn := metal.qk_norm_f32($&mqkn, &mqkx, &mqkw, 2, 0.00001) >>>\n    _ := fqkn.wait() >>>\n    _ := fqkn.close() >>>\n'
+            + '    b_qkn := mqkn.bits() >>>\n    dump("QKN", &b_qkn)\n'
+            + xu_arr("dq", dec_q) + xu_arr("kc", kc) + xu_arr("vc", vc)
+            + '    $mdq := mat(&d, 1, 16, &dq_b) >>>\n    $mkc := mat(&d, 8, 8, &kc_b) >>>\n    $mvc := mat(&d, 8, 8, &vc_b) >>>\n'
+            + '    $mdec := d.matrix_f32(1, 16) >>>\n'
+            + '    $fdec := metal.attention_decode_f32($&mdec, &mdq, &mkc, &mvc, 3, 4, 2, 0.5) >>>\n    _ := fdec.wait() >>>\n    _ := fdec.close() >>>\n'
+            + '    b_dec := mdec.bits() >>>\n    dump("DEC", &b_dec)\n'
+            + xu_arr("tbl", emb_tbl)
+            + '    $mtbl := mat(&d, 5, 4, &tbl_b) >>>\n'
+            + '    if !guard_emb(&d, &mtbl) { << 9 }\n'
+            + '    $memb := d.matrix_f32(3, 4) >>>\n    eids := [3, 0, 4]\n'
+            + '    $femb := metal.embedding_f32($&memb, &mtbl, &eids) >>>\n    _ := femb.wait() >>>\n    _ := femb.close() >>>\n'
+            + '    b_emb := memb.bits() >>>\n    dump("EMB", &b_emb)\n'
+            + xu_arr("amx", am_x)
+            + '    $mamx := mat(&d, 2, 4, &amx_b) >>>\n    $mam := d.matrix_f32(2, 1) >>>\n'
+            + '    $fam := metal.argmax_f32($&mam, &mamx) >>>\n    _ := fam.wait() >>>\n    _ := fam.close() >>>\n'
+            + '    b_am := mam.bits() >>>\n    dump("AM", &b_am)\n'
+            + '    _ := mxq8.close() >>>\n    _ := mwq8.close() >>>\n    _ := mdq8.close() >>>\n'
+            + '    _ := mxq4k.close() >>>\n    _ := mwq4k.close() >>>\n    _ := mdq4k.close() >>>\n'
+            + '    _ := mqkx.close() >>>\n    _ := mqkw.close() >>>\n    _ := mqkn.close() >>>\n'
+            + '    _ := mdq.close() >>>\n    _ := mkc.close() >>>\n    _ := mvc.close() >>>\n    _ := mdec.close() >>>\n'
+            + '    _ := mtbl.close() >>>\n    _ := memb.close() >>>\n    _ := mamx.close() >>>\n    _ := mam.close() >>>\n'
+            + '    _ := d.close() >>>\n'
+            + '    println("LIVE:" + str(metal.live_handles()))\n    << 0\n}\n'
+            + 'fn main() int { << run_v14() >>> (err) { eprintln(err.msg())\n << 1 } }\n'
+        )
+        with tempfile.TemporaryDirectory() as td:
+            out = run_xu(Path(td), xu_src)
+        if "SKIP:NO_METAL" in out:
+            self.skipTest("Metal device unavailable on host")
+        kv = dict(line.split(":", 1) for line in out.splitlines() if ":" in line)
+        self.assertEqual(kv.get("LIVE"), "0")
+        self.assertEqual(kv.get("BIG"), "32768x64")
+        wb32 = [bits_to_f32(int(x)) for x in kv["WB32"].split(",")]
+        self.assertEqual(wb32, [1.5, -2.5, 3.25, 0.0])
+        wb16 = [int(x) for x in kv["WB16"].split(",")]
+        self.assertEqual(wb16, list(struct.unpack("<4H", f16b_raw)))
+        for key, ref in (("Q8", ref_q8), ("Q4K", ref_q4k), ("QKN", ref_qkn), ("DEC", ref_dec), ("EMB", ref_emb), ("AM", ref_am)):
+            got = [bits_to_f32(int(x)) for x in kv[key].split(",")]
+            self.assertEqual(len(got), len(ref), key)
+            for i, (gv, rv) in enumerate(zip(got, ref)):
+                self.assertLess(abs(gv - rv), 1e-3, f"{key}[{i}]: gpu={gv} cpu={rv}")
+
+    def test_v14_end_to_end_gpu_llm_decode(self):
+        # End-to-end 3-step autoregressive 1-layer GQA decode loop in a Metal Batch with KV cache append
+        dim, kv_dim, hidden, vocab = 32, 16, 32, 16
+        n_heads, n_kv_heads, head_dim = 4, 2, 8
+
+        def pack_q8(rows, cols, scale):
+            src = [f32(((i * 7 + 3) % 15 - 7) * scale) for i in range(rows * cols)]
+            raw = bytearray()
+            dq = []
+            for blk in range(len(src) // 32):
+                seg = src[blk * 32:(blk + 1) * 32]
+                amax = max(abs(v) for v in seg)
+                d = f32(amax / 127.0) if amax > 0 else 0.0
+                d16_b = struct.pack("<e", d)
+                d16 = f32(struct.unpack("<e", d16_b)[0])
+                raw.extend(d16_b)
+                inv_d = 1.0 / d16 if d16 != 0 else 0.0
+                for v in seg:
+                    q = max(-127, min(127, int(round(v * inv_d))))
+                    raw.append(q & 0xFF)
+                    dq.append(f32(q * d16))
+            return raw, dq
+
+        embed_tbl = [f32(((i * 11 + 1) % 13 - 6) * 0.125) for i in range(vocab * dim)]
+        wn1 = [f32(1.0 + (i % 5) * 0.05) for i in range(dim)]
+        wn2 = [f32(1.0 - (i % 4) * 0.05) for i in range(dim)]
+        wn_f = [f32(1.0) for _ in range(dim)]
+        qnorm_w = [f32(1.1) for _ in range(head_dim)]
+        knorm_w = [f32(0.9) for _ in range(head_dim)]
+
+        wq_b, wq_dq = pack_q8(dim, dim, 0.05)
+        wk_b, wk_dq = pack_q8(kv_dim, dim, 0.04)
+        wv_b, wv_dq = pack_q8(kv_dim, dim, 0.05)
+        wo_b, wo_dq = pack_q8(dim, dim, 0.05)
+        wg_b, wg_dq = pack_q8(hidden, dim, 0.05)
+        wu_b, wu_dq = pack_q8(hidden, dim, 0.04)
+        wd_b, wd_dq = pack_q8(dim, hidden, 0.05)
+        whead_b, whead_dq = pack_q8(vocab, dim, 0.15)
+
+        def cpu_rmsnorm(v, w):
+            inv = 1.0 / math.sqrt(sum(x * x for x in v) / len(v) + 1e-5)
+            return [v[i] * inv * w[i] for i in range(len(v))]
+
+        def cpu_qknorm(v, w, nh):
+            out = []
+            for h in range(nh):
+                out.extend(cpu_rmsnorm(v[h * head_dim:(h + 1) * head_dim], w))
+            return out
+
+        def cpu_rope(v, nh, pos):
+            out = list(v)
+            half = head_dim // 2
+            lt = math.log(10000.0)
+            for h in range(nh):
+                base = h * head_dim
+                for j in range(half):
+                    ang = pos * math.exp(-lt * (2.0 * j) / head_dim)
+                    c, s = math.cos(ang), math.sin(ang)
+                    v0, v1 = out[base + j], out[base + half + j]
+                    out[base + j] = v0 * c - v1 * s
+                    out[base + half + j] = v0 * s + v1 * c
+            return out
+
+        def cpu_matvec(x, w_dq, rows, cols):
+            return [sum(x[c] * w_dq[r * cols + c] for c in range(cols)) for r in range(rows)]
+
+        k_hist, v_hist = [], []
+        cur_tok = 2
+        cpu_tokens = []
+        for pos in range(3):
+            x = embed_tbl[cur_tok * dim:(cur_tok + 1) * dim]
+            n1 = cpu_rmsnorm(x, wn1)
+            q = cpu_rope(cpu_qknorm(cpu_matvec(n1, wq_dq, dim, dim), qnorm_w, n_heads), n_heads, pos)
+            k = cpu_rope(cpu_qknorm(cpu_matvec(n1, wk_dq, kv_dim, dim), knorm_w, n_kv_heads), n_kv_heads, pos)
+            v = cpu_matvec(n1, wv_dq, kv_dim, dim)
+            k_hist.append(k)
+            v_hist.append(v)
+            att = []
+            sc = 1.0 / math.sqrt(head_dim)
+            for h in range(n_heads):
+                kvh = h // 2
+                qh = q[h * head_dim:(h + 1) * head_dim]
+                scores = [sum(qh[d] * k_hist[t][kvh * head_dim + d] for d in range(head_dim)) * sc for t in range(pos + 1)]
+                mx = max(scores)
+                ex = [math.exp(sv - mx) for sv in scores]
+                sm = sum(ex)
+                for d in range(head_dim):
+                    att.append(sum((ex[t] / sm) * v_hist[t][kvh * head_dim + d] for t in range(pos + 1)))
+            h_att = [x[i] + o for i, o in enumerate(cpu_matvec(att, wo_dq, dim, dim))]
+            n2 = cpu_rmsnorm(h_att, wn2)
+            g = cpu_matvec(n2, wg_dq, hidden, dim)
+            u = cpu_matvec(n2, wu_dq, hidden, dim)
+            sw = [(gv / (1.0 + math.exp(-gv))) * uv for gv, uv in zip(g, u)]
+            hout = [h_att[i] + o for i, o in enumerate(cpu_matvec(sw, wd_dq, dim, hidden))]
+            nf = cpu_rmsnorm(hout, wn_f)
+            logits = cpu_matvec(nf, whead_dq, vocab, dim)
+            nxt = max(range(vocab), key=lambda idx: logits[idx])
+            cpu_tokens.append(nxt)
+            cur_tok = nxt
+
+        def xu_f32_arr(name, vals):
+            return f"    {name}_b := [{', '.join(str(f32_bits(v)) for v in vals)}]\n"
+
+        def xu_bytes_def(name, raw):
+            ints = ", ".join(str(b) for b in raw)
+            return f"    {name}_arr := [{ints}]\n    {name}_bs := to_bytes(&{name}_arr)\n"
+
+        xu_src = (
+            '@main\nmetal #"github.com/xulang-org/packages/metal"\n#errors\n#math\n'
+            'fn to_bytes(vals &[]int) string {\n'
+            '    $out := ""\n    for i in 0:vals.len { out.push_str(string_from_byte(vals[i] & 255)) }\n'
+            '    << out\n}\n'
+            'fn mat(d &metal.Device, r int, c int, b &[]int) metal.F32Matrix {\n'
+            '    $m := d.matrix_f32(r, c) >>>\n    _ := m.write_bits(b) >>>\n    << m\n}\n'
+            'fn q8(d &metal.Device, r int, c int, bs &string) metal.Q8Matrix {\n'
+            '    $m := d.matrix_q8_0(r, c) >>>\n    _ := m.write_bytes(bs) >>>\n    << m\n}\n'
+            'fn run_decode() int {\n'
+            '    if !metal.available() { println("SKIP:NO_METAL")\n << 0 }\n'
+            '    $d := metal.open() >>>\n'
+            + xu_f32_arr("et", embed_tbl) + xu_f32_arr("wn1", wn1) + xu_f32_arr("wn2", wn2)
+            + xu_f32_arr("wnf", wn_f) + xu_f32_arr("qnw", qnorm_w) + xu_f32_arr("knw", knorm_w)
+            + xu_bytes_def("wq", wq_b) + xu_bytes_def("wk", wk_b) + xu_bytes_def("wv", wv_b)
+            + xu_bytes_def("wo", wo_b) + xu_bytes_def("wg", wg_b) + xu_bytes_def("wu", wu_b)
+            + xu_bytes_def("wd", wd_b) + xu_bytes_def("wh", whead_b)
+            + '    $met := mat(&d, 16, 32, &et_b) >>>\n'
+            + '    $mwn1 := mat(&d, 1, 32, &wn1_b) >>>\n    $mwn2 := mat(&d, 1, 32, &wn2_b) >>>\n'
+            + '    $mwnf := mat(&d, 1, 32, &wnf_b) >>>\n    $mqnw := mat(&d, 1, 8, &qnw_b) >>>\n    $mknw := mat(&d, 1, 8, &knw_b) >>>\n'
+            + '    $mwq := q8(&d, 32, 32, &wq_bs) >>>\n    $mwk := q8(&d, 16, 32, &wk_bs) >>>\n    $mwv := q8(&d, 16, 32, &wv_bs) >>>\n'
+            + '    $mwo := q8(&d, 32, 32, &wo_bs) >>>\n    $mwg := q8(&d, 32, 32, &wg_bs) >>>\n    $mwu := q8(&d, 32, 32, &wu_bs) >>>\n'
+            + '    $mwd := q8(&d, 32, 32, &wd_bs) >>>\n    $mwh := q8(&d, 16, 32, &wh_bs) >>>\n'
+            + '    $k_cache := d.matrix_f32(8, 16) >>>\n    $v_cache := d.matrix_f32(8, 16) >>>\n'
+            + '    $x := d.matrix_f32(1, 32) >>>\n    $n1 := d.matrix_f32(1, 32) >>>\n'
+            + '    $qr := d.matrix_f32(1, 32) >>>\n    $qn := d.matrix_f32(1, 32) >>>\n    $q := d.matrix_f32(1, 32) >>>\n'
+            + '    $kr := d.matrix_f32(1, 16) >>>\n    $kn := d.matrix_f32(1, 16) >>>\n    $k := d.matrix_f32(1, 16) >>>\n'
+            + '    $v := d.matrix_f32(1, 16) >>>\n    $att := d.matrix_f32(1, 32) >>>\n    $oproj := d.matrix_f32(1, 32) >>>\n'
+            + '    $hatt := d.matrix_f32(1, 32) >>>\n    $n2 := d.matrix_f32(1, 32) >>>\n'
+            + '    $fg := d.matrix_f32(1, 32) >>>\n    $fu := d.matrix_f32(1, 32) >>>\n    $fsw := d.matrix_f32(1, 32) >>>\n'
+            + '    $ffn := d.matrix_f32(1, 32) >>>\n    $hout := d.matrix_f32(1, 32) >>>\n'
+            + '    $nf := d.matrix_f32(1, 32) >>>\n    $logits := d.matrix_f32(1, 16) >>>\n    $idxm := d.matrix_f32(1, 1) >>>\n'
+            + '    $tok := 2\n    $out_toks := []int{}\n'
+            + '    scale := 1.0 / math.sqrt(8.0)\n'
+            + '    for pos in 0:3 {\n'
+            + '        ids := [tok]\n'
+            + '        $b := d.begin_batch() >>>\n'
+            + '        _ := b.embedding_f32($&x, &met, &ids) >>>\n'
+            + '        _ := b.rmsnorm_f32($&n1, &x, &mwn1, 0.00001) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&qr, &n1, &mwq) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&kr, &n1, &mwk) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&v, &n1, &mwv) >>>\n'
+            + '        _ := b.qk_norm_f32($&qn, &qr, &mqnw, 4, 0.00001) >>>\n'
+            + '        _ := b.qk_norm_f32($&kn, &kr, &mknw, 2, 0.00001) >>>\n'
+            + '        _ := b.rope_f32($&q, &qn, pos, 8, 10000.0) >>>\n'
+            + '        _ := b.rope_f32($&k, &kn, pos, 8, 10000.0) >>>\n'
+            + '        _ := b.kv_cache_append_f32($&k_cache, &k, pos) >>>\n'
+            + '        _ := b.kv_cache_append_f32($&v_cache, &v, pos) >>>\n'
+            + '        _ := b.attention_decode_f32($&att, &q, &k_cache, &v_cache, pos + 1, 4, 2, scale) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&oproj, &att, &mwo) >>>\n'
+            + '        _ := b.add_f32($&hatt, &x, &oproj) >>>\n'
+            + '        _ := b.rmsnorm_f32($&n2, &hatt, &mwn2, 0.00001) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&fg, &n2, &mwg) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&fu, &n2, &mwu) >>>\n'
+            + '        _ := b.swiglu_f32($&fsw, &fg, &fu) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&ffn, &fsw, &mwd) >>>\n'
+            + '        _ := b.add_f32($&hout, &hatt, &ffn) >>>\n'
+            + '        _ := b.rmsnorm_f32($&nf, &hout, &mwnf, 0.00001) >>>\n'
+            + '        _ := b.gemv_q8_0_f32($&logits, &nf, &mwh) >>>\n'
+            + '        _ := b.argmax_f32($&idxm, &logits) >>>\n'
+            + '        $f := b.commit() >>>\n'
+            + '        _ := f.wait() >>>\n'
+            + '        _ := f.close() >>>\n'
+            + '        b0 := idxm.bits() >>>\n'
+            + '        tok = int(math.float32_from_bits(b0[0]) + 0.5)\n'
+            + '        out_toks.push(tok)\n'
+            + '    }\n'
+            + '    $ts := "TOKS:"\n    for i in 0:out_toks.len { if i > 0 { ts = ts + "," }\n ts = ts + str(out_toks[i]) }\n    println(ts)\n'
+            + '    _ := met.close() >>>\n    _ := mwn1.close() >>>\n    _ := mwn2.close() >>>\n    _ := mwnf.close() >>>\n'
+            + '    _ := mqnw.close() >>>\n    _ := mknw.close() >>>\n'
+            + '    _ := mwq.close() >>>\n    _ := mwk.close() >>>\n    _ := mwv.close() >>>\n    _ := mwo.close() >>>\n'
+            + '    _ := mwg.close() >>>\n    _ := mwu.close() >>>\n    _ := mwd.close() >>>\n    _ := mwh.close() >>>\n'
+            + '    _ := k_cache.close() >>>\n    _ := v_cache.close() >>>\n'
+            + '    _ := x.close() >>>\n    _ := n1.close() >>>\n    _ := qr.close() >>>\n    _ := qn.close() >>>\n    _ := q.close() >>>\n'
+            + '    _ := kr.close() >>>\n    _ := kn.close() >>>\n    _ := k.close() >>>\n    _ := v.close() >>>\n'
+            + '    _ := att.close() >>>\n    _ := oproj.close() >>>\n    _ := hatt.close() >>>\n    _ := n2.close() >>>\n'
+            + '    _ := fg.close() >>>\n    _ := fu.close() >>>\n    _ := fsw.close() >>>\n    _ := ffn.close() >>>\n    _ := hout.close() >>>\n'
+            + '    _ := nf.close() >>>\n    _ := logits.close() >>>\n    _ := idxm.close() >>>\n'
+            + '    _ := d.close() >>>\n'
+            + '    println("LIVE:" + str(metal.live_handles()))\n    << 0\n}\n'
+            + 'fn main() int { << run_decode() >>> (err) { eprintln(err.msg())\n << 1 } }\n'
+        )
+        with tempfile.TemporaryDirectory() as td:
+            out = run_xu(Path(td), xu_src)
+        if "SKIP:NO_METAL" in out:
+            self.skipTest("Metal device unavailable on host")
+        kv = dict(line.split(":", 1) for line in out.splitlines() if ":" in line)
+        self.assertEqual(kv.get("LIVE"), "0")
+        gpu_toks = [int(x) for x in kv["TOKS"].split(",")]
+        self.assertEqual(gpu_toks, cpu_tokens)
+
 
 if __name__ == "__main__":
     unittest.main()

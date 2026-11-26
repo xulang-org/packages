@@ -82,3 +82,25 @@ pub fn (b $&Batch) f32_to_f16(dst $&F16Matrix, src &F32Matrix) int {
 pub fn (b $&Batch) gemv_q4_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q4Matrix) int {
     << checked(metal_native.batch_gemv_q4_0_f32(b.handle, dst.handle, x.handle, w.handle)) >>>
 }
+pub fn (b $&Batch) gemv_q8_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q8Matrix) int {
+    << checked(metal_native.batch_gemv_q8_0_f32(b.handle, dst.handle, x.handle, w.handle)) >>>
+}
+pub fn (b $&Batch) gemv_q4_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q4KMatrix) int {
+    << checked(metal_native.batch_gemv_q4_k_f32(b.handle, dst.handle, x.handle, w.handle)) >>>
+}
+pub fn (b $&Batch) qk_norm_f32(dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, n_heads int, eps f64) int {
+    << checked(metal_native.batch_qk_norm_f32(b.handle, dst.handle, x.handle, weight.handle, n_heads, math.float32_bits(eps))) >>>
+}
+pub fn (b $&Batch) kv_cache_append_f32(cache $&F32Matrix, src &F32Matrix, pos_offset int) int {
+    << checked(metal_native.batch_kv_cache_append_f32(b.handle, cache.handle, src.handle, pos_offset)) >>>
+}
+pub fn (b $&Batch) attention_decode_f32(dst $&F32Matrix, q &F32Matrix, k_cache &F32Matrix, v_cache &F32Matrix,
+                                        kv_len int, n_heads int, n_kv_heads int, scale f64) int {
+    << checked(metal_native.batch_attention_decode_f32(b.handle, dst.handle, q.handle, k_cache.handle, v_cache.handle, kv_len, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+}
+pub fn (b $&Batch) embedding_f32(dst $&F32Matrix, table &F32Matrix, ids &[]int) int {
+    << checked(metal_native.batch_embedding_f32(b.handle, dst.handle, table.handle, ids)) >>>
+}
+pub fn (b $&Batch) argmax_f32(dst $&F32Matrix, x &F32Matrix) int {
+    << checked(metal_native.batch_argmax_f32(b.handle, dst.handle, x.handle)) >>>
+}

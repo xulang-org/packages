@@ -3,9 +3,11 @@
 metal_native #"github.com/xulang-org/packages/metal_native"
 #errors
 
-// Row-major binary16 matrix (MPSDataTypeFloat16) and raw GGML Q4_0 weights.
+// Row-major binary16 matrix (MPSDataTypeFloat16) and raw GGML Q4_0 / Q8_0 / Q4_K weights.
 pub struct F16Matrix { handle int }
 pub struct Q4Matrix { handle int }
+pub struct Q8Matrix { handle int }
+pub struct Q4KMatrix { handle int }
 
 pub fn (d &Device) matrix_f16(rows int, columns int) F16Matrix {
     handle := checked(metal_native.matrix_f16_new(d.handle, rows, columns)) >>>
@@ -17,6 +19,9 @@ pub fn (m &F16Matrix) row_bytes() int { << checked(metal_native.matrix_f16_info(
 
 pub fn (m $&F16Matrix) write_bits(values &[]int) int {
     << checked(metal_native.matrix_f16_write(m.handle, values)) >>>
+}
+pub fn (m $&F16Matrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_f16_write_bytes(m.handle, bytes)) >>>
 }
 pub fn (m &F16Matrix) bits() []int {
     count := checked(metal_native.matrix_f16_info(m.handle, 4)) >>>
@@ -79,5 +84,57 @@ fn (m $&Q4Matrix) drop() {
 // Fused Q4_0 dequantize+dot computing dst = x @ dequant(w)^T in GPU registers.
 pub fn gemv_q4_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q4Matrix) Fence {
     handle := checked(metal_native.gemv_q4_0_f32(dst.handle, x.handle, w.handle)) >>>
+    << Fence{handle: handle}
+}
+
+pub fn (d &Device) matrix_q8_0(rows int, columns int) Q8Matrix {
+    handle := checked(metal_native.matrix_q8_0_new(d.handle, rows, columns)) >>>
+    << Q8Matrix{handle: handle}
+}
+pub fn (m &Q8Matrix) rows() int { << checked(metal_native.matrix_q8_0_info(m.handle, 1)) >>> }
+pub fn (m &Q8Matrix) columns() int { << checked(metal_native.matrix_q8_0_info(m.handle, 2)) >>> }
+pub fn (m &Q8Matrix) byte_len() int { << checked(metal_native.matrix_q8_0_info(m.handle, 3)) >>> }
+pub fn (m $&Q8Matrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_q8_0_write(m.handle, bytes)) >>>
+}
+pub fn (m $&Q8Matrix) close() int {
+    if m.handle == 0 { << 0 }
+    checked(metal_native.matrix_q8_0_close(m.handle)) >>>
+    m.handle = 0
+    << 0
+}
+fn (m $&Q8Matrix) drop() {
+    if m.handle > 0 { metal_native.matrix_q8_0_release(m.handle) m.handle = 0 }
+}
+
+// Fused Q8_0 dequantize+dot computing dst = x @ dequant(w)^T in GPU registers.
+pub fn gemv_q8_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q8Matrix) Fence {
+    handle := checked(metal_native.gemv_q8_0_f32(dst.handle, x.handle, w.handle)) >>>
+    << Fence{handle: handle}
+}
+
+pub fn (d &Device) matrix_q4_k(rows int, columns int) Q4KMatrix {
+    handle := checked(metal_native.matrix_q4_k_new(d.handle, rows, columns)) >>>
+    << Q4KMatrix{handle: handle}
+}
+pub fn (m &Q4KMatrix) rows() int { << checked(metal_native.matrix_q4_k_info(m.handle, 1)) >>> }
+pub fn (m &Q4KMatrix) columns() int { << checked(metal_native.matrix_q4_k_info(m.handle, 2)) >>> }
+pub fn (m &Q4KMatrix) byte_len() int { << checked(metal_native.matrix_q4_k_info(m.handle, 3)) >>> }
+pub fn (m $&Q4KMatrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_q4_k_write(m.handle, bytes)) >>>
+}
+pub fn (m $&Q4KMatrix) close() int {
+    if m.handle == 0 { << 0 }
+    checked(metal_native.matrix_q4_k_close(m.handle)) >>>
+    m.handle = 0
+    << 0
+}
+fn (m $&Q4KMatrix) drop() {
+    if m.handle > 0 { metal_native.matrix_q4_k_release(m.handle) m.handle = 0 }
+}
+
+// Fused Q4_K dequantize+dot computing dst = x @ dequant(w)^T in GPU registers.
+pub fn gemv_q4_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q4KMatrix) Fence {
+    handle := checked(metal_native.gemv_q4_k_f32(dst.handle, x.handle, w.handle)) >>>
     << Fence{handle: handle}
 }

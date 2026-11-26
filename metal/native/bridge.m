@@ -8,7 +8,7 @@
 #include <string.h>
 #include "api.h"
 
-enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, MATRIX_F32, BATCH, MATRIX_F16, MATRIX_Q4_0, SLOT_BITS = 12, SLOT_COUNT = 4096 };
+enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, MATRIX_F32, BATCH, MATRIX_F16, MATRIX_Q4_0, MATRIX_Q8_0, MATRIX_Q4_K, SLOT_BITS = 12, SLOT_COUNT = 4096 };
 // Rounded dispatches use at most 256 threads and must not wrap a uint gid.
 static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 
@@ -26,9 +26,16 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) id<MTLComputePipelineState> scalePipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> ropePipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> causalAttnPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> qkNormPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> kvAppendPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> attnDecodePipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> embeddingPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> argmaxPipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> f16ToF32Pipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> f32ToF16Pipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> gemvQ40Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> gemvQ80Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> gemvQ4KPipeline;
 @property(nonatomic) xu_int children;
 @property(nonatomic) xu_int dispatches;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, MPSMatrixMultiplication *> *matrixKernels;

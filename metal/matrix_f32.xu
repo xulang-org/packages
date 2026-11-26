@@ -17,7 +17,7 @@ pub fn (d &Device) matrix_kernel_count() int { << checked(metal_native.device_in
 pub fn (d &Device) matrix_cache_size() int { << checked(metal_native.device_info(d.handle, 6)) >>> }
 
 // Row-major logical shape; MPS row padding is owned by the runtime.
-// Dimensions <=16384; at most 16777216 logical elements per matrix.
+// Dimensions <=262144; at most 536870912 logical elements per matrix.
 pub fn (d &Device) matrix_f32(rows int, columns int) F32Matrix {
     handle := checked(metal_native.matrix_f32_new(d.handle, rows, columns)) >>>
     << F32Matrix{handle: handle}
@@ -30,6 +30,9 @@ pub fn (m &F32Matrix) row_bytes() int { << checked(metal_native.matrix_f32_info(
 // bits and mismatched lengths before any write; storage is never retained.
 pub fn (m $&F32Matrix) write_bits(values &[]int) int {
     << checked(metal_native.matrix_f32_write(m.handle, values)) >>>
+}
+pub fn (m $&F32Matrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_f32_write_bytes(m.handle, bytes)) >>>
 }
 pub fn (m &F32Matrix) snapshot() F32Snapshot {
     handle := checked(metal_native.matrix_f32_snapshot(m.handle)) >>>
@@ -154,5 +157,36 @@ pub fn rope_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, the
 pub fn causal_attention_f32(dst $&F32Matrix, q &F32Matrix, k &F32Matrix, v &F32Matrix,
                             n_heads int, n_kv_heads int, scale f64) Fence {
     handle := checked(metal_native.causal_attention_f32(dst.handle, q.handle, k.handle, v.handle, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+    << Fence{handle: handle}
+}
+
+// qk_norm_f32 applies per-head RMSNorm across x [seq_len, n_heads * head_dim] with weight [1, head_dim].
+pub fn qk_norm_f32(dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, n_heads int, eps f64) Fence {
+    handle := checked(metal_native.qk_norm_f32(dst.handle, x.handle, weight.handle, n_heads, math.float32_bits(eps))) >>>
+    << Fence{handle: handle}
+}
+
+// kv_cache_append_f32 writes src [n, kv_dim] into cache [max_seq, kv_dim] starting at row pos_offset.
+pub fn kv_cache_append_f32(cache $&F32Matrix, src &F32Matrix, pos_offset int) Fence {
+    handle := checked(metal_native.kv_cache_append_f32(cache.handle, src.handle, pos_offset)) >>>
+    << Fence{handle: handle}
+}
+
+// attention_decode_f32 computes single-token GQA decode attention reading kv_len cached rows from k_cache/v_cache.
+pub fn attention_decode_f32(dst $&F32Matrix, q &F32Matrix, k_cache &F32Matrix, v_cache &F32Matrix,
+                              kv_len int, n_heads int, n_kv_heads int, scale f64) Fence {
+    handle := checked(metal_native.attention_decode_f32(dst.handle, q.handle, k_cache.handle, v_cache.handle, kv_len, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+    << Fence{handle: handle}
+}
+
+// embedding_f32 gathers rows by index from table [vocab, dim] into dst [ids.len, dim].
+pub fn embedding_f32(dst $&F32Matrix, table &F32Matrix, ids &[]int) Fence {
+    handle := checked(metal_native.embedding_f32(dst.handle, table.handle, ids)) >>>
+    << Fence{handle: handle}
+}
+
+// argmax_f32 writes the per-row argmax column index (as float32) of x [M, N] into dst [M, 1].
+pub fn argmax_f32(dst $&F32Matrix, x &F32Matrix) Fence {
+    handle := checked(metal_native.argmax_f32(dst.handle, x.handle)) >>>
     << Fence{handle: handle}
 }
