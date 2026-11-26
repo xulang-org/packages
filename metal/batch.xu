@@ -104,3 +104,111 @@ pub fn (b $&Batch) embedding_f32(dst $&F32Matrix, table &F32Matrix, ids &[]int) 
 pub fn (b $&Batch) argmax_f32(dst $&F32Matrix, x &F32Matrix) int {
     << checked(metal_native.batch_argmax_f32(b.handle, dst.handle, x.handle)) >>>
 }
+pub fn (b $&Batch) rope_interleaved_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, theta f64) int {
+    << checked(metal_native.batch_rope_interleaved_f32(b.handle, dst.handle, x.handle, pos_offset, head_dim, math.float32_bits(theta))) >>>
+}
+pub fn (b $&Batch) gemv_q5_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q5Matrix) int {
+    << checked(metal_native.batch_gemv_q5_0_f32(b.handle, dst.handle, x.handle, w.handle)) >>>
+}
+pub fn (b $&Batch) gemv_q6_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q6KMatrix) int {
+    << checked(metal_native.batch_gemv_q6_k_f32(b.handle, dst.handle, x.handle, w.handle)) >>>
+}
+pub fn (b $&Batch) kv_cache_append_f16(cache $&F16Matrix, src &F32Matrix, pos_offset int) int {
+    << checked(metal_native.batch_kv_cache_append_f16(b.handle, cache.handle, src.handle, pos_offset)) >>>
+}
+pub fn (b $&Batch) attention_decode_f16(dst $&F32Matrix, q &F32Matrix, k_cache &F16Matrix, v_cache &F16Matrix,
+                                        kv_len int, n_heads int, n_kv_heads int, scale f64) int {
+    << checked(metal_native.batch_attention_decode_f16(b.handle, dst.handle, q.handle, k_cache.handle, v_cache.handle, kv_len, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+}
+pub fn (b $&Batch) add_rmsnorm_f32(dst_norm $&F32Matrix, dst_sum $&F32Matrix, a &F32Matrix, rhs &F32Matrix,
+                                   weight &F32Matrix, eps f64) int {
+    << checked(metal_native.batch_add_rmsnorm_f32(b.handle, dst_norm.handle, dst_sum.handle, a.handle, rhs.handle, weight.handle, math.float32_bits(eps))) >>>
+}
+pub fn (b $&Batch) geglu_f32(dst $&F32Matrix, gate &F32Matrix, up &F32Matrix) int {
+    << checked(metal_native.batch_geglu_f32(b.handle, dst.handle, gate.handle, up.handle)) >>>
+}
+pub fn (b $&Batch) silu_f32(dst $&F32Matrix, x &F32Matrix) int {
+    << checked(metal_native.batch_silu_f32(b.handle, dst.handle, x.handle)) >>>
+}
+pub fn (b $&Batch) log_softmax_f32(dst $&F32Matrix, x &F32Matrix) int {
+    << checked(metal_native.batch_log_softmax_f32(b.handle, dst.handle, x.handle)) >>>
+}
+pub fn (b $&Batch) causal_attention_f16(dst $&F32Matrix, q &F32Matrix, k &F16Matrix, v &F16Matrix,
+                                        n_heads int, n_kv_heads int, scale f64) int {
+    << checked(metal_native.batch_causal_attention_f16(b.handle, dst.handle, q.handle, k.handle, v.handle, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+}
+pub fn (b $&Batch) moe_topk_f32(out_idx $&F32Matrix, out_w $&F32Matrix, logits &F32Matrix,
+                                k int, use_sigmoid bool, normalize_topk bool, weight_scale f64) int {
+    $us := 0
+    if use_sigmoid { us = 1 }
+    $nt := 0
+    if normalize_topk { nt = 1 }
+    << checked(metal_native.batch_moe_topk_f32(b.handle, out_idx.handle, out_w.handle, logits.handle, k, us, nt, math.float32_bits(weight_scale))) >>>
+}
+pub fn (b $&Batch) moe_weighted_add_f32(dst $&F32Matrix, expert_outs &F32Matrix, weights &F32Matrix) int {
+    << checked(metal_native.batch_moe_weighted_add_f32(b.handle, dst.handle, expert_outs.handle, weights.handle)) >>>
+}
+pub fn (b $&Batch) rope_yarn_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, rope_dim int,
+                                 interleaved bool, theta f64, scale f64, orig_ctx int,
+                                 beta_fast f64, beta_slow f64, attn_factor f64) int {
+    $il := 0
+    if interleaved { il = 1 }
+    params := [pos_offset, head_dim, rope_dim, il, orig_ctx, math.float32_bits(theta), math.float32_bits(scale), math.float32_bits(beta_fast), math.float32_bits(beta_slow), math.float32_bits(attn_factor)]
+    << checked(metal_native.batch_rope_yarn_f32(b.handle, dst.handle, x.handle, &params)) >>>
+}
+pub fn (b $&Batch) moe_gemv_q4_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q4Matrix,
+                                     expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) int {
+    << checked(metal_native.batch_moe_gemv_q4_0_f32(b.handle, dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+}
+pub fn (b $&Batch) moe_gemv_q8_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q8Matrix,
+                                     expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) int {
+    << checked(metal_native.batch_moe_gemv_q8_0_f32(b.handle, dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+}
+pub fn (b $&Batch) moe_gemv_q4_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q4KMatrix,
+                                     expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) int {
+    << checked(metal_native.batch_moe_gemv_q4_k_f32(b.handle, dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+}
+pub fn (b $&Batch) moe_gemv_q6_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q6KMatrix,
+                                     expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) int {
+    << checked(metal_native.batch_moe_gemv_q6_k_f32(b.handle, dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+}
+pub fn (b $&Batch) paged_attention_decode_f16(dst $&F32Matrix, q &F32Matrix, k_pages &F16Matrix, v_pages &F16Matrix,
+                                              block_table &F32Matrix, kv_len int, block_size int,
+                                              n_heads int, n_kv_heads int, scale f64) int {
+    params := [kv_len, block_size, n_heads, n_kv_heads, math.float32_bits(scale)]
+    << checked(metal_native.batch_paged_attention_decode_f16(b.handle, dst.handle, q.handle, k_pages.handle, v_pages.handle, block_table.handle, &params)) >>>
+}
+pub fn (b $&Batch) lora_add_f32(dst $&F32Matrix, x &F32Matrix, a &F32Matrix, rhs &F32Matrix, scale f64) int {
+    << checked(metal_native.batch_lora_add_f32(b.handle, dst.handle, x.handle, a.handle, rhs.handle, math.float32_bits(scale))) >>>
+}
+pub fn (b $&Batch) adamw_step_f32(param $&F32Matrix, grad &F32Matrix, m_buf $&F32Matrix, v_buf $&F32Matrix,
+                                  lr f64, beta1 f64, beta2 f64, eps f64, weight_decay f64, step int) int {
+    params := [math.float32_bits(lr), math.float32_bits(beta1), math.float32_bits(beta2), math.float32_bits(eps), math.float32_bits(weight_decay), step]
+    << checked(metal_native.batch_adamw_step_f32(b.handle, param.handle, grad.handle, m_buf.handle, v_buf.handle, &params)) >>>
+}
+pub fn (b $&Batch) cross_entropy_grad_f32(dlogits $&F32Matrix, losses $&F32Matrix, logits &F32Matrix, targets &F32Matrix) int {
+    << checked(metal_native.batch_cross_entropy_grad_f32(b.handle, dlogits.handle, losses.handle, logits.handle, targets.handle)) >>>
+}
+pub fn (b $&Batch) gemv_q5_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q5KMatrix) int {
+    << checked(metal_native.batch_gemv_q5_k_f32(b.handle, dst.handle, x.handle, w.handle)) >>>
+}
+pub fn (b $&Batch) moe_gemv_q5_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q5KMatrix,
+                                     expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) int {
+    << checked(metal_native.batch_moe_gemv_q5_k_f32(b.handle, dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+}
+pub fn (b $&Batch) paged_kv_cache_append_f16(pages $&F16Matrix, src &F32Matrix, block_table &F32Matrix,
+                                             pos_offset int, block_size int) int {
+    params := [pos_offset, block_size]
+    << checked(metal_native.batch_paged_kv_cache_append_f16(b.handle, pages.handle, src.handle, block_table.handle, &params)) >>>
+}
+pub fn (b $&Batch) gemm_f32_tn(dst $&F32Matrix, a &F32Matrix, rhs &F32Matrix) int {
+    << checked(metal_native.batch_gemm_f32_tn(b.handle, dst.handle, a.handle, rhs.handle)) >>>
+}
+pub fn (b $&Batch) rmsnorm_backward_f32(dx $&F32Matrix, dw $&F32Matrix, dy &F32Matrix,
+                                        x &F32Matrix, weight &F32Matrix, eps f64) int {
+    << checked(metal_native.batch_rmsnorm_backward_f32(b.handle, dx.handle, dw.handle, dy.handle, x.handle, weight.handle, math.float32_bits(eps))) >>>
+}
+pub fn (b $&Batch) swiglu_backward_f32(dgate $&F32Matrix, dup $&F32Matrix, dy &F32Matrix,
+                                       gate &F32Matrix, up &F32Matrix) int {
+    << checked(metal_native.batch_swiglu_backward_f32(b.handle, dgate.handle, dup.handle, dy.handle, gate.handle, up.handle)) >>>
+}

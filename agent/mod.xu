@@ -1,0 +1,1758 @@
+@"github.com/xulang-org/packages/agent"
+
+#encoding/json
+#errors
+openai #github.com/xulang-org/packages/openai
+anthropic #github.com/xulang-org/packages/anthropic
+gemini #github.com/xulang-org/packages/gemini
+mcp #github.com/xulang-org/packages/mcp
+
+pub struct LocalTool {
+    pub name string
+    pub description string
+    pub parameters_json string
+    pub handler fn(&string) string
+}
+
+pub struct Step {
+    pub turn int
+    pub tool_name string
+    pub arguments_json string
+    pub output string
+    pub is_error bool
+}
+
+pub struct RunResult {
+    pub content string
+    pub reasoning_content string
+    pub steps []Step
+    pub turns int
+    pub prompt_tokens int
+    pub completion_tokens int
+    pub total_tokens int
+    pub finish_reason string
+}
+
+pub struct AgentEvent {
+    pub kind string
+    pub turn int
+    pub text_delta string
+    pub reasoning_delta string
+    pub tool_name string
+    pub arguments_json string
+    pub tool_output string
+    pub is_error bool
+    pub finish_reason string
+}
+
+fn default_tool_hook(name &string, args_json &string) string {
+    << ""
+}
+
+pub struct Agent {
+    pub client openai.Client
+    pub model string
+    pub system_prompt string
+    pub max_turns int
+    pub temperature f64
+    pub has_temperature bool
+    pub max_tokens int
+    pub max_total_tokens int
+    pub tool_choice string
+    pub response_format_json string
+    pub parallel_tools bool
+    local_tools []LocalTool
+    tool_hook fn(&string, &string) string
+}
+
+pub fn new_agent(client openai.Client, model string) Agent {
+    << Agent{
+        client: ~client,
+        model: model,
+        system_prompt: "",
+        max_turns: 8,
+        temperature: 0.0,
+        has_temperature: false,
+        max_tokens: 0,
+        max_total_tokens: 0,
+        tool_choice: "",
+        response_format_json: "",
+        parallel_tools: false,
+        local_tools: []LocalTool{},
+        tool_hook: default_tool_hook
+    }
+}
+
+pub fn (a $&Agent) set_tool_hook(hook fn(&string, &string) string) {
+    a.tool_hook = hook
+}
+
+pub fn (a $&Agent) set_system_prompt(prompt string) {
+    a.system_prompt = prompt + ""
+}
+
+pub fn (a $&Agent) set_max_turns(max_turns int) {
+    if max_turns > 0 {
+        a.max_turns = max_turns
+    }
+}
+
+pub fn (a $&Agent) set_temperature(t f64) {
+    a.temperature = t
+    a.has_temperature = true
+}
+
+pub fn (a $&Agent) set_max_tokens(n int) {
+    if n > 0 {
+        a.max_tokens = n
+    }
+}
+
+pub fn (a $&Agent) set_max_total_tokens(n int) {
+    if n >= 0 {
+        a.max_total_tokens = n
+    }
+}
+
+pub fn (a $&Agent) set_tool_choice(choice string) {
+    a.tool_choice = choice + ""
+}
+
+pub fn (a $&Agent) set_response_format(format_json string) {
+    a.response_format_json = format_json + ""
+}
+
+pub fn (a $&Agent) set_parallel_tools(enabled bool) {
+    a.parallel_tools = enabled
+}
+
+pub fn (a $&Agent) add_tool(name string, description string, parameters_json string,
+                             handler fn(&string) string) {
+    $params := parameters_json + ""
+    if params.len == 0 {
+        params = "{\"type\":\"object\"}"
+    }
+    a.local_tools.push(LocalTool{
+        name: name,
+        description: description,
+        parameters_json: params,
+        handler: handler
+    })
+}
+
+pub fn from_mcp_tools(tools &[]mcp.ToolInfo) []openai.ToolDef {
+    $out := []openai.ToolDef{}
+    for i in 0:tools.len {
+        t := &tools[i]
+        out.push(openai.tool(t.name + "", t.description + "", t.input_schema_json + ""))
+    }
+    << out
+}
+
+pub fn from_mcp_anthropic_tools(tools &[]mcp.ToolInfo) []anthropic.Tool {
+    $out := []anthropic.Tool{}
+    for i in 0:tools.len {
+        t := &tools[i]
+        out.push(anthropic.tool(t.name + "", t.description + "", t.input_schema_json + ""))
+    }
+    << out
+}
+
+fn copy_tool_calls(src &[]openai.ToolCall) []openai.ToolCall {
+    $out := []openai.ToolCall{}
+    for i in 0:src.len {
+        tc := &src[i]
+        out.push(openai.ToolCall{
+            id: tc.id + "",
+            kind: tc.kind + "",
+            name: tc.name + "",
+            arguments: tc.arguments + ""
+        })
+    }
+    << out
+}
+
+fn copy_parts(src &[]openai.ContentPart) []openai.ContentPart {
+    $out := []openai.ContentPart{}
+    for i in 0:src.len {
+        p := &src[i]
+        out.push(openai.ContentPart{
+            kind: p.kind + "",
+            text: p.text + "",
+            image_url: p.image_url + "",
+            detail: p.detail + ""
+        })
+    }
+    << out
+}
+
+fn copy_messages(src &[]openai.Message) []openai.Message {
+    $out := []openai.Message{}
+    for i in 0:src.len {
+        m := &src[i]
+        out.push(openai.Message{
+            role: m.role + "",
+            content: m.content + "",
+            parts: copy_parts(&m.parts),
+            tool_call_id: m.tool_call_id + "",
+            tool_calls: copy_tool_calls(&m.tool_calls)
+        })
+    }
+    << out
+}
+
+fn build_tool_defs(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []openai.ToolDef {
+    $out := []openai.ToolDef{}
+    for i in 0:local_tools.len {
+        lt := &local_tools[i]
+        out.push(openai.tool(lt.name + "", lt.description + "", lt.parameters_json + ""))
+    }
+    mcp_defs := from_mcp_tools(extra_tools)
+    for i in 0:mcp_defs.len {
+        td := &mcp_defs[i]
+        out.push(openai.tool(td.name + "", td.description + "", td.parameters_json + ""))
+    }
+    << out
+}
+
+fn find_local_tool(local_tools &[]LocalTool, name &string) int {
+    for i in 0:local_tools.len {
+        if local_tools[i].name == *name {
+            << i
+        }
+    }
+    << -1
+}
+
+fn join_mcp_result(res &mcp.ToolResult) string {
+    $out := ""
+    for i in 0:res.content.len {
+        if i > 0 { out = out + "\n" }
+        out = out + res.content[i].text
+    }
+    << out
+}
+
+fn build_initial_history(a &Agent, user_prompt &string) []openai.Message {
+    $msgs := []openai.Message{}
+    if a.system_prompt.len > 0 {
+        msgs.push(openai.message("system", a.system_prompt + ""))
+    }
+    msgs.push(openai.message("user", *user_prompt + ""))
+    << msgs
+}
+
+fn make_turn_request(a &Agent, history &[]openai.Message, extra_tools &[]mcp.ToolInfo) openai.ChatRequest {
+    msgs := copy_messages(history)
+    $req := openai.chat_request(a.model + "", msgs)
+    req.tools = build_tool_defs(&a.local_tools, extra_tools)
+    if a.has_temperature {
+        req.temperature = a.temperature
+        req.has_temperature = true
+    }
+    if a.max_tokens > 0 {
+        req.max_tokens = a.max_tokens
+    }
+    if a.tool_choice.len > 0 {
+        req.tool_choice = a.tool_choice + ""
+    }
+    if a.response_format_json.len > 0 {
+        req.response_format_json = a.response_format_json + ""
+    }
+    << req
+}
+
+fn call_mcp_http_safe(mc $&mcp.Client, name string, args string) mcp.ToolResult {
+    << mc.call_tool(name, args) >>> (err) {
+        << mcp.error_result("mcp error: " + err.msg())
+    }
+}
+
+fn call_mcp_stdio_safe(mc $&mcp.StdioClient, name string, args string) mcp.ToolResult {
+    << mc.call_tool(name, args) >>> (err) {
+        << mcp.error_result("mcp error: " + err.msg())
+    }
+}
+
+struct ToolExecItem {
+    idx int
+    output string
+    is_error bool
+}
+
+fn run_local_tool_async(idx int, handler fn(&string) string, args string, ch chan ToolExecItem) {
+    $a := args + ""
+    out := handler(&a)
+    ch <- ToolExecItem{idx: idx, output: out, is_error: false}
+}
+
+fn run_mcp_http_async(idx int, mc_in mcp.Client, name string, args string, ch chan ToolExecItem) {
+    $mc := ~mc_in
+    tres := call_mcp_http_safe($&mc, name, args)
+    out := join_mcp_result(&tres)
+    ch <- ToolExecItem{idx: idx, output: out, is_error: tres.is_error}
+}
+
+struct ToolExecSpec {
+    name string
+    arguments string
+}
+
+fn execute_tools_batch(local_tools &[]LocalTool, specs &[]ToolExecSpec, parallel bool,
+                       use_http_mcp bool, http_mc $&mcp.Client,
+                       use_stdio_mcp bool, stdio_mc $&mcp.StdioClient,
+                       tool_hook fn(&string, &string) string) []ToolExecItem {
+    $results := []ToolExecItem{}
+    $blocked := []bool{}
+    for i in 0:specs.len {
+        sp := &specs[i]
+        reason := tool_hook(&sp.name, &sp.arguments)
+        if reason.len > 0 {
+            results.push(ToolExecItem{idx: i, output: "blocked: " + reason, is_error: true})
+            blocked.push(true)
+        } else {
+            results.push(ToolExecItem{idx: i, output: "", is_error: false})
+            blocked.push(false)
+        }
+    }
+    if parallel && specs.len > 1 && !use_stdio_mcp {
+        rch := chan ToolExecItem{cap: specs.len}
+        $pending := 0
+        for ti in 0:specs.len {
+            if blocked[ti] { -> }
+            sp := &specs[ti]
+            li := find_local_tool(local_tools, &sp.name)
+            if li >= 0 {
+                handler := local_tools[li].handler
+                xu run_local_tool_async(ti, handler, sp.arguments + "", rch)
+                pending += 1
+            } else if use_http_mcp {
+                mc_clone := http_mc.clone_client()
+                xu run_mcp_http_async(ti, ~mc_clone, sp.name + "", sp.arguments + "", rch)
+                pending += 1
+            } else {
+                results[ti] = ToolExecItem{idx: ti, output: "unknown tool: " + sp.name, is_error: true}
+            }
+        }
+        for _ in 0:pending {
+            r := <-rch
+            if r.idx >= 0 && r.idx < results.len {
+                results[r.idx] = ~r
+            }
+        }
+        << results
+    }
+    for ti in 0:specs.len {
+        if blocked[ti] { -> }
+        sp := &specs[ti]
+        li := find_local_tool(local_tools, &sp.name)
+        if li >= 0 {
+            handler := local_tools[li].handler
+            args_copy := sp.arguments + ""
+            results[ti] = ToolExecItem{idx: ti, output: handler(&args_copy), is_error: false}
+        } else if use_http_mcp {
+            tres := call_mcp_http_safe(http_mc, sp.name + "", sp.arguments + "")
+            results[ti] = ToolExecItem{idx: ti, output: join_mcp_result(&tres), is_error: tres.is_error}
+        } else if use_stdio_mcp {
+            tres := call_mcp_stdio_safe(stdio_mc, sp.name + "", sp.arguments + "")
+            results[ti] = ToolExecItem{idx: ti, output: join_mcp_result(&tres), is_error: tres.is_error}
+        } else {
+            results[ti] = ToolExecItem{idx: ti, output: "unknown tool: " + sp.name, is_error: true}
+        }
+    }
+    << results
+}
+
+fn clone_openai_client(src &openai.Client) openai.Client {
+    $hdrs := []string{}
+    for i in 0:src.extra_headers.len { hdrs.push(src.extra_headers[i] + "") }
+    << openai.Client{
+        base_url: src.base_url + "",
+        api_key: src.api_key + "",
+        timeout_ns: src.timeout_ns,
+        max_retries: src.max_retries,
+        extra_headers: ~hdrs
+    }
+}
+
+fn empty_chat_resp() openai.ChatResponse {
+    << openai.ChatResponse{
+        id: "", model: "", content: "", reasoning_content: "", finish_reason: "",
+        tool_calls: []openai.ToolCall{},
+        usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+    }
+}
+
+struct OpenaiStreamOutcome {
+    ok bool
+    err_msg string
+    resp openai.ChatResponse
+}
+
+fn openai_stream_worker(c openai.Client, req openai.ChatRequest, dch chan openai.StreamDelta, rch chan OpenaiStreamOutcome) {
+    resp := c.chat_stream_chan(&req, dch) >>> (err) {
+        dch <- openai.StreamDelta{
+            content: "", reasoning_content: "", finish_reason: "",
+            tool_calls: []openai.ToolCall{}, has_usage: false,
+            usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}, done: true
+        }
+        rch <- OpenaiStreamOutcome{ok: false, err_msg: err.msg(), resp: empty_chat_resp()}
+        <<
+    }
+    rch <- OpenaiStreamOutcome{ok: true, err_msg: "", resp: ~resp}
+}
+
+fn emit_agent_ev(on_event fn(AgentEvent) bool, ev AgentEvent) {
+    _ := on_event(ev)
+}
+
+fn ignore_agent_ev(ev AgentEvent) bool {
+    << true
+}
+
+fn run_loop_history_impl(a &Agent, history $&[]openai.Message, use_http_mcp bool, http_mc $&mcp.Client,
+                         use_stdio_mcp bool, stdio_mc $&mcp.StdioClient,
+                         use_stream bool, on_event fn(AgentEvent) bool) RunResult {
+    $extra_tools := []mcp.ToolInfo{}
+    if use_http_mcp {
+        extra_tools = http_mc.list_tools() >>>
+    } else if use_stdio_mcp {
+        extra_tools = stdio_mc.list_tools() >>>
+    }
+    $steps := []Step{}
+    $turns := 0
+    $pt := 0
+    $ct := 0
+    $tt := 0
+    $last_content := ""
+    $all_reasoning := ""
+    $last_finish := ""
+    $limit := a.max_turns
+    if limit <= 0 {
+        >>> errors.new("agent: max_turns must be positive")
+    }
+    while turns < limit {
+        turns += 1
+        req := make_turn_request(a, history, &extra_tools)
+        $resp := empty_chat_resp()
+        if use_stream {
+            dch := chan openai.StreamDelta{cap: 64}
+            rch := chan OpenaiStreamOutcome{cap: 1}
+            c_copy := clone_openai_client(&a.client)
+            xu openai_stream_worker(~c_copy, ~req, dch, rch)
+            for {
+                d := <-dch
+                if d.reasoning_content.len > 0 {
+                    emit_agent_ev(on_event, AgentEvent{
+                        kind: "reasoning_delta", turn: turns, text_delta: "",
+                        reasoning_delta: d.reasoning_content + "", tool_name: "", arguments_json: "",
+                        tool_output: "", is_error: false, finish_reason: ""
+                    })
+                }
+                if d.content.len > 0 {
+                    emit_agent_ev(on_event, AgentEvent{
+                        kind: "text_delta", turn: turns, text_delta: d.content + "",
+                        reasoning_delta: "", tool_name: "", arguments_json: "",
+                        tool_output: "", is_error: false, finish_reason: ""
+                    })
+                }
+                if d.done { <- }
+            }
+            outc := <-rch
+            if !outc.ok { >>> errors.new(outc.err_msg) }
+            resp = ~outc.resp
+        } else {
+            resp = a.client.chat(&req) >>>
+        }
+        pt += resp.usage.prompt_tokens
+        ct += resp.usage.completion_tokens
+        tt += resp.usage.total_tokens
+        if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
+            >>> errors.new("agent: token budget exceeded")
+        }
+        if resp.reasoning_content.len > 0 {
+            if all_reasoning.len > 0 { all_reasoning = all_reasoning + "\n" }
+            all_reasoning = all_reasoning + resp.reasoning_content
+        }
+        last_content = resp.content + ""
+        last_finish = resp.finish_reason + ""
+        if resp.tool_calls.len == 0 {
+            history.push(openai.message("assistant", last_content + ""))
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_finish + ""
+                })
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: all_reasoning + "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_finish + ""
+                })
+            }
+            << RunResult{
+                content: last_content,
+                reasoning_content: all_reasoning,
+                steps: ~steps,
+                turns: turns,
+                prompt_tokens: pt,
+                completion_tokens: ct,
+                total_tokens: tt,
+                finish_reason: last_finish
+            }
+        }
+        history.push(openai.Message{
+            role: "assistant",
+            content: resp.content + "",
+            parts: []openai.ContentPart{},
+            tool_call_id: "",
+            tool_calls: copy_tool_calls(&resp.tool_calls)
+        })
+        $specs := []ToolExecSpec{}
+        for ti in 0:resp.tool_calls.len {
+            tc := &resp.tool_calls[ti]
+            specs.push(ToolExecSpec{name: tc.name + "", arguments: tc.arguments + ""})
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_start", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: tc.name + "", arguments_json: tc.arguments + "",
+                    tool_output: "", is_error: false, finish_reason: ""
+                })
+            }
+        }
+        results := execute_tools_batch(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook)
+        for ti in 0:resp.tool_calls.len {
+            tc := &resp.tool_calls[ti]
+            res := &results[ti]
+            steps.push(Step{
+                turn: turns,
+                tool_name: tc.name + "",
+                arguments_json: tc.arguments + "",
+                output: res.output + "",
+                is_error: res.is_error
+            })
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: tc.name + "", arguments_json: tc.arguments + "",
+                    tool_output: res.output + "", is_error: res.is_error, finish_reason: ""
+                })
+            }
+            history.push(openai.tool_message(tc.id + "", res.output + ""))
+        }
+        if use_stream {
+            emit_agent_ev(on_event, AgentEvent{
+                kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                finish_reason: last_finish + ""
+            })
+        }
+    }
+    if use_stream {
+        emit_agent_ev(on_event, AgentEvent{
+            kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: all_reasoning + "",
+            tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+            finish_reason: last_finish + ""
+        })
+    }
+    << RunResult{
+        content: last_content,
+        reasoning_content: all_reasoning,
+        steps: ~steps,
+        turns: turns,
+        prompt_tokens: pt,
+        completion_tokens: ct,
+        total_tokens: tt,
+        finish_reason: last_finish
+    }
+}
+
+fn run_loop(a &Agent, user_prompt string, use_http_mcp bool, http_mc $&mcp.Client,
+            use_stdio_mcp bool, stdio_mc $&mcp.StdioClient,
+            use_stream bool, on_event fn(AgentEvent) bool) RunResult {
+    $history := build_initial_history(a, &user_prompt)
+    << run_loop_history_impl(a, $&history, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, use_stream, on_event) >>>
+}
+
+pub struct Session {
+    pub agent Agent
+    messages []openai.Message
+}
+
+pub fn new_session(agent Agent) Session {
+    $msgs := []openai.Message{}
+    if agent.system_prompt.len > 0 {
+        msgs.push(openai.message("system", agent.system_prompt + ""))
+    }
+    << Session{agent: agent, messages: ~msgs}
+}
+
+pub fn (s $&Session) clear() {
+    $msgs := []openai.Message{}
+    if s.agent.system_prompt.len > 0 {
+        msgs.push(openai.message("system", s.agent.system_prompt + ""))
+    }
+    s.messages = ~msgs
+}
+
+pub fn (s &Session) history() []openai.Message {
+    << copy_messages(&s.messages)
+}
+
+pub fn (s $&Session) send(user_prompt string) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(openai.message("user", user_prompt))
+    << run_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&Session) send_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(openai.message("user", user_prompt))
+    << run_loop_history_impl(&s.agent, msgs_ref, true, mc, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&Session) send_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    msgs_ref := $&s.messages
+    msgs_ref.push(openai.message("user", user_prompt))
+    << run_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&Session) send_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(openai.message("user", user_prompt))
+    << run_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (s $&Session) send_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(openai.message("user", user_prompt))
+    << run_loop_history_impl(&s.agent, msgs_ref, true, mc, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (a &Agent) run(user_prompt string) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_loop(a, user_prompt, false, $&dummy_http, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &Agent) run_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_loop(a, user_prompt, true, mc, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &Agent) run_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    << run_loop(a, user_prompt, false, $&dummy_http, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &Agent) run_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_loop(a, user_prompt, false, $&dummy_http, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (a &Agent) run_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_loop(a, user_prompt, true, mc, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (a &Agent) run_stream_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    << run_loop(a, user_prompt, false, $&dummy_http, true, mc, true, on_event) >>>
+}
+
+// ---------- AnthropicAgent ----------
+
+pub struct AnthropicAgent {
+    pub client anthropic.Client
+    pub model string
+    pub system_prompt string
+    pub max_turns int
+    pub max_tokens int
+    pub max_total_tokens int
+    pub temperature f64
+    pub has_temperature bool
+    pub thinking_budget_tokens int
+    pub parallel_tools bool
+    local_tools []LocalTool
+    tool_hook fn(&string, &string) string
+}
+
+pub fn new_anthropic_agent(client anthropic.Client, model string) AnthropicAgent {
+    << AnthropicAgent{
+        client: ~client,
+        model: model,
+        system_prompt: "",
+        max_turns: 8,
+        max_tokens: 1024,
+        max_total_tokens: 0,
+        temperature: 0.0,
+        has_temperature: false,
+        thinking_budget_tokens: 0,
+        parallel_tools: false,
+        local_tools: []LocalTool{},
+        tool_hook: default_tool_hook
+    }
+}
+
+pub fn (a $&AnthropicAgent) set_tool_hook(hook fn(&string, &string) string) {
+    a.tool_hook = hook
+}
+
+pub fn (a $&AnthropicAgent) set_system_prompt(prompt string) {
+    a.system_prompt = prompt + ""
+}
+
+pub fn (a $&AnthropicAgent) set_max_turns(max_turns int) {
+    if max_turns > 0 { a.max_turns = max_turns }
+}
+
+pub fn (a $&AnthropicAgent) set_max_tokens(n int) {
+    if n > 0 { a.max_tokens = n }
+}
+
+pub fn (a $&AnthropicAgent) set_max_total_tokens(n int) {
+    if n >= 0 { a.max_total_tokens = n }
+}
+
+pub fn (a $&AnthropicAgent) set_temperature(t f64) {
+    a.temperature = t
+    a.has_temperature = true
+}
+
+pub fn (a $&AnthropicAgent) set_thinking_budget(tokens int) {
+    if tokens >= 0 { a.thinking_budget_tokens = tokens }
+}
+
+pub fn (a $&AnthropicAgent) set_parallel_tools(enabled bool) {
+    a.parallel_tools = enabled
+}
+
+pub fn (a $&AnthropicAgent) add_tool(name string, description string, parameters_json string,
+                                      handler fn(&string) string) {
+    $params := parameters_json + ""
+    if params.len == 0 { params = "{\"type\":\"object\"}" }
+    a.local_tools.push(LocalTool{
+        name: name, description: description, parameters_json: params, handler: handler
+    })
+}
+
+fn copy_anth_blocks(src &[]anthropic.ContentBlock) []anthropic.ContentBlock {
+    $out := []anthropic.ContentBlock{}
+    for i in 0:src.len {
+        b := &src[i]
+        out.push(anthropic.ContentBlock{
+            kind: b.kind + "", text: b.text + "", thinking: b.thinking + "",
+            id: b.id + "", name: b.name + "", input_json: b.input_json + "",
+            media_type: b.media_type + "", data: b.data + "", cache_control: b.cache_control + ""
+        })
+    }
+    << out
+}
+
+fn copy_anth_messages(src &[]anthropic.Message) []anthropic.Message {
+    $out := []anthropic.Message{}
+    for i in 0:src.len {
+        m := &src[i]
+        out.push(anthropic.Message{
+            role: m.role + "", content: m.content + "", blocks: copy_anth_blocks(&m.blocks)
+        })
+    }
+    << out
+}
+
+fn build_anth_tools(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []anthropic.Tool {
+    $out := []anthropic.Tool{}
+    for i in 0:local_tools.len {
+        lt := &local_tools[i]
+        out.push(anthropic.tool(lt.name + "", lt.description + "", lt.parameters_json + ""))
+    }
+    mtools := from_mcp_anthropic_tools(extra_tools)
+    for i in 0:mtools.len {
+        mt := &mtools[i]
+        out.push(anthropic.tool(mt.name + "", mt.description + "", mt.input_schema_json + ""))
+    }
+    << out
+}
+
+fn clone_anth_client(src &anthropic.Client) anthropic.Client {
+    $hdrs := []string{}
+    for i in 0:src.extra_headers.len { hdrs.push(src.extra_headers[i] + "") }
+    << anthropic.Client{
+        base_url: src.base_url + "",
+        api_key: src.api_key + "",
+        api_version: src.api_version + "",
+        timeout_ns: src.timeout_ns,
+        max_retries: src.max_retries,
+        extra_headers: ~hdrs
+    }
+}
+
+fn empty_anth_resp() anthropic.MessagesResponse {
+    << anthropic.MessagesResponse{
+        id: "", model: "", role: "assistant", stop_reason: "", content: "", thinking: "",
+        tool_uses: []anthropic.ToolUse{}, blocks: []anthropic.ContentBlock{},
+        usage: anthropic.Usage{input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0}
+    }
+}
+
+struct AnthStreamOutcome {
+    ok bool
+    err_msg string
+    resp anthropic.MessagesResponse
+}
+
+fn anth_stream_worker(c anthropic.Client, req anthropic.MessagesRequest,
+                      ech chan anthropic.StreamEvent, rch chan AnthStreamOutcome) {
+    resp := c.messages_stream_chan(&req, ech) >>> (err) {
+        ech <- anthropic.StreamEvent{
+            event_type: "message_stop", text_delta: "", thinking_delta: "", stop_reason: "",
+            tool_use: anthropic.ToolUse{id: "", name: "", input_json: ""}, has_tool_use: false,
+            usage: anthropic.Usage{input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0},
+            done: true
+        }
+        rch <- AnthStreamOutcome{ok: false, err_msg: err.msg(), resp: empty_anth_resp()}
+        <<
+    }
+    rch <- AnthStreamOutcome{ok: true, err_msg: "", resp: ~resp}
+}
+
+fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, use_http_mcp bool, http_mc $&mcp.Client,
+                              use_stream bool, on_event fn(AgentEvent) bool) RunResult {
+    $extra_tools := []mcp.ToolInfo{}
+    if use_http_mcp {
+        extra_tools = http_mc.list_tools() >>>
+    }
+    $steps := []Step{}
+    $turns := 0
+    $pt := 0
+    $ct := 0
+    $last_content := ""
+    $all_thinking := ""
+    $last_stop := ""
+    $limit := a.max_turns
+    if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+
+    while turns < limit {
+        turns += 1
+        $req := anthropic.messages_request(a.model + "", copy_anth_messages(history), a.max_tokens)
+        req.system = a.system_prompt + ""
+        req.tools = build_anth_tools(&a.local_tools, &extra_tools)
+        if a.has_temperature {
+            req.temperature = a.temperature
+            req.has_temperature = true
+        }
+        if a.thinking_budget_tokens > 0 {
+            req.thinking_budget_tokens = a.thinking_budget_tokens
+        }
+        $resp := empty_anth_resp()
+        if use_stream {
+            ech := chan anthropic.StreamEvent{cap: 64}
+            rch := chan AnthStreamOutcome{cap: 1}
+            c_copy := clone_anth_client(&a.client)
+            xu anth_stream_worker(~c_copy, ~req, ech, rch)
+            for {
+                ev := <-ech
+                if ev.thinking_delta.len > 0 {
+                    emit_agent_ev(on_event, AgentEvent{
+                        kind: "reasoning_delta", turn: turns, text_delta: "",
+                        reasoning_delta: ev.thinking_delta + "", tool_name: "", arguments_json: "",
+                        tool_output: "", is_error: false, finish_reason: ""
+                    })
+                }
+                if ev.text_delta.len > 0 {
+                    emit_agent_ev(on_event, AgentEvent{
+                        kind: "text_delta", turn: turns, text_delta: ev.text_delta + "",
+                        reasoning_delta: "", tool_name: "", arguments_json: "",
+                        tool_output: "", is_error: false, finish_reason: ""
+                    })
+                }
+                if ev.done { <- }
+            }
+            outc := <-rch
+            if !outc.ok { >>> errors.new(outc.err_msg) }
+            resp = ~outc.resp
+        } else {
+            resp = a.client.messages(&req) >>>
+        }
+        pt += resp.usage.input_tokens
+        ct += resp.usage.output_tokens
+        if a.max_total_tokens > 0 && (pt + ct) > a.max_total_tokens {
+            >>> errors.new("agent: token budget exceeded")
+        }
+        if resp.thinking.len > 0 {
+            if all_thinking.len > 0 { all_thinking = all_thinking + "\n" }
+            all_thinking = all_thinking + resp.thinking
+        }
+        last_content = resp.content + ""
+        last_stop = resp.stop_reason + ""
+        if resp.tool_uses.len == 0 {
+            history.push(anthropic.message("assistant", last_content + ""))
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_stop + ""
+                })
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: all_thinking + "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_stop + ""
+                })
+            }
+            << RunResult{
+                content: last_content, reasoning_content: all_thinking, steps: ~steps, turns: turns,
+                prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct, finish_reason: last_stop
+            }
+        }
+        $asst_blocks := copy_anth_blocks(&resp.blocks)
+        if asst_blocks.len == 0 {
+            for ti in 0:resp.tool_uses.len {
+                tu := &resp.tool_uses[ti]
+                asst_blocks.push(anthropic.ContentBlock{
+                    kind: "tool_use", text: "", thinking: "",
+                    id: tu.id + "", name: tu.name + "", input_json: tu.input_json + "",
+                    media_type: "", data: "", cache_control: ""
+                })
+            }
+        }
+        history.push(anthropic.Message{role: "assistant", content: "", blocks: ~asst_blocks})
+        $specs := []ToolExecSpec{}
+        for ti in 0:resp.tool_uses.len {
+            tu := &resp.tool_uses[ti]
+            specs.push(ToolExecSpec{name: tu.name + "", arguments: tu.input_json + ""})
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_start", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: tu.name + "", arguments_json: tu.input_json + "",
+                    tool_output: "", is_error: false, finish_reason: ""
+                })
+            }
+        }
+        $dummy_stdio := mcp.closed_stdio_client()
+        results := execute_tools_batch(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, false, $&dummy_stdio, a.tool_hook)
+        $res_blocks := []anthropic.ContentBlock{}
+        for ti in 0:resp.tool_uses.len {
+            tu := &resp.tool_uses[ti]
+            res := &results[ti]
+            steps.push(Step{
+                turn: turns, tool_name: tu.name + "", arguments_json: tu.input_json + "",
+                output: res.output + "", is_error: res.is_error
+            })
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: tu.name + "", arguments_json: tu.input_json + "",
+                    tool_output: res.output + "", is_error: res.is_error, finish_reason: ""
+                })
+            }
+            $ie := "false"
+            if res.is_error { ie = "true" }
+            res_blocks.push(anthropic.ContentBlock{
+                kind: "tool_result", text: res.output + "", thinking: "",
+                id: tu.id + "", name: "", input_json: ie,
+                media_type: "", data: "", cache_control: ""
+            })
+        }
+        history.push(anthropic.Message{role: "user", content: "", blocks: ~res_blocks})
+        if use_stream {
+            emit_agent_ev(on_event, AgentEvent{
+                kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                finish_reason: last_stop + ""
+            })
+        }
+    }
+    if use_stream {
+        emit_agent_ev(on_event, AgentEvent{
+            kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: all_thinking + "",
+            tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+            finish_reason: last_stop + ""
+        })
+    }
+    << RunResult{
+        content: last_content, reasoning_content: all_thinking, steps: ~steps, turns: turns,
+        prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct, finish_reason: last_stop
+    }
+}
+
+fn run_anth_loop_impl(a &AnthropicAgent, user_prompt string, use_http_mcp bool, http_mc $&mcp.Client,
+                      use_stream bool, on_event fn(AgentEvent) bool) RunResult {
+    $history := [anthropic.message("user", user_prompt)]
+    << run_anth_loop_history_impl(a, $&history, use_http_mcp, http_mc, use_stream, on_event) >>>
+}
+
+pub fn (a &AnthropicAgent) run(user_prompt string) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    << run_anth_loop_impl(a, user_prompt, false, $&dummy_http, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &AnthropicAgent) run_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    << run_anth_loop_impl(a, user_prompt, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &AnthropicAgent) run_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    << run_anth_loop_impl(a, user_prompt, false, $&dummy_http, true, on_event) >>>
+}
+
+pub fn (a &AnthropicAgent) run_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    << run_anth_loop_impl(a, user_prompt, true, mc, true, on_event) >>>
+}
+
+pub struct AnthropicSession {
+    pub agent AnthropicAgent
+    messages []anthropic.Message
+}
+
+pub fn new_anthropic_session(agent AnthropicAgent) AnthropicSession {
+    << AnthropicSession{agent: agent, messages: []anthropic.Message{}}
+}
+
+pub fn (s $&AnthropicSession) clear() {
+    s.messages = []anthropic.Message{}
+}
+
+pub fn (s &AnthropicSession) history() []anthropic.Message {
+    << copy_anth_messages(&s.messages)
+}
+
+pub fn (s $&AnthropicSession) send(user_prompt string) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    msgs_ref := $&s.messages
+    msgs_ref.push(anthropic.message("user", user_prompt))
+    << run_anth_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&AnthropicSession) send_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    msgs_ref := $&s.messages
+    msgs_ref.push(anthropic.message("user", user_prompt))
+    << run_anth_loop_history_impl(&s.agent, msgs_ref, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&AnthropicSession) send_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    msgs_ref := $&s.messages
+    msgs_ref.push(anthropic.message("user", user_prompt))
+    << run_anth_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, true, on_event) >>>
+}
+
+pub fn (s $&AnthropicSession) send_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    msgs_ref := $&s.messages
+    msgs_ref.push(anthropic.message("user", user_prompt))
+    << run_anth_loop_history_impl(&s.agent, msgs_ref, true, mc, true, on_event) >>>
+}
+
+// ---------- GeminiAgent ----------
+
+pub struct GeminiAgent {
+    pub client gemini.Client
+    pub model string
+    pub system_prompt string
+    pub max_turns int
+    pub max_tokens int
+    pub max_total_tokens int
+    pub temperature f64
+    pub has_temperature bool
+    pub thinking_budget int
+    pub parallel_tools bool
+    local_tools []LocalTool
+    tool_hook fn(&string, &string) string
+}
+
+pub fn new_gemini_agent(client gemini.Client, model string) GeminiAgent {
+    << GeminiAgent{
+        client: ~client,
+        model: model,
+        system_prompt: "",
+        max_turns: 8,
+        max_tokens: 0,
+        max_total_tokens: 0,
+        temperature: 0.0,
+        has_temperature: false,
+        thinking_budget: -1,
+        parallel_tools: false,
+        local_tools: []LocalTool{},
+        tool_hook: default_tool_hook
+    }
+}
+
+pub fn (a $&GeminiAgent) set_tool_hook(hook fn(&string, &string) string) {
+    a.tool_hook = hook
+}
+
+pub fn (a $&GeminiAgent) set_system_prompt(prompt string) {
+    a.system_prompt = prompt + ""
+}
+
+pub fn (a $&GeminiAgent) set_max_turns(max_turns int) {
+    if max_turns > 0 { a.max_turns = max_turns }
+}
+
+pub fn (a $&GeminiAgent) set_max_tokens(n int) {
+    if n > 0 { a.max_tokens = n }
+}
+
+pub fn (a $&GeminiAgent) set_max_total_tokens(n int) {
+    if n >= 0 { a.max_total_tokens = n }
+}
+
+pub fn (a $&GeminiAgent) set_temperature(t f64) {
+    a.temperature = t
+    a.has_temperature = true
+}
+
+pub fn (a $&GeminiAgent) set_thinking_budget(tokens int) {
+    a.thinking_budget = tokens
+}
+
+pub fn (a $&GeminiAgent) set_parallel_tools(enabled bool) {
+    a.parallel_tools = enabled
+}
+
+pub fn (a $&GeminiAgent) add_tool(name string, description string, parameters_json string,
+                                   handler fn(&string) string) {
+    $params := parameters_json + ""
+    if params.len == 0 { params = "{\"type\":\"object\"}" }
+    a.local_tools.push(LocalTool{
+        name: name, description: description, parameters_json: params, handler: handler
+    })
+}
+
+pub fn from_mcp_gemini_tools(tools &[]mcp.ToolInfo) []gemini.FunctionDecl {
+    $out := []gemini.FunctionDecl{}
+    for i in 0:tools.len {
+        t := &tools[i]
+        out.push(gemini.function_decl(t.name + "", t.description + "", t.input_schema_json + ""))
+    }
+    << out
+}
+
+fn copy_gem_parts(src &[]gemini.Part) []gemini.Part {
+    $out := []gemini.Part{}
+    for i in 0:src.len {
+        p := &src[i]
+        out.push(gemini.Part{
+            kind: p.kind + "", text: p.text + "", mime_type: p.mime_type + "",
+            data: p.data + "", name: p.name + "", args_json: p.args_json + "",
+            response_json: p.response_json + "", thought: p.thought
+        })
+    }
+    << out
+}
+
+fn copy_gem_contents(src &[]gemini.Content) []gemini.Content {
+    $out := []gemini.Content{}
+    for i in 0:src.len {
+        c := &src[i]
+        out.push(gemini.Content{role: c.role + "", parts: copy_gem_parts(&c.parts)})
+    }
+    << out
+}
+
+fn build_gem_tools(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []gemini.FunctionDecl {
+    $out := []gemini.FunctionDecl{}
+    for i in 0:local_tools.len {
+        lt := &local_tools[i]
+        out.push(gemini.function_decl(lt.name + "", lt.description + "", lt.parameters_json + ""))
+    }
+    mtools := from_mcp_gemini_tools(extra_tools)
+    for i in 0:mtools.len {
+        mt := &mtools[i]
+        out.push(gemini.function_decl(mt.name + "", mt.description + "", mt.parameters_json + ""))
+    }
+    << out
+}
+
+fn empty_gem_resp() gemini.GenerateResponse {
+    << gemini.GenerateResponse{
+        text: "", thoughts: "", function_calls: []gemini.FunctionCall{}, finish_reason: "",
+        usage: gemini.Usage{prompt_token_count: 0, candidates_token_count: 0, total_token_count: 0, thoughts_token_count: 0}
+    }
+}
+
+struct GemStreamOutcome {
+    ok bool
+    err_msg string
+    resp gemini.GenerateResponse
+}
+
+fn gem_stream_worker(c gemini.Client, req gemini.GenerateRequest,
+                     ech chan gemini.StreamChunk, rch chan GemStreamOutcome) {
+    resp := c.generate_stream_chan(&req, ech) >>> (err) {
+        ech <- gemini.StreamChunk{
+            text_delta: "", thought_delta: "", function_calls: []gemini.FunctionCall{},
+            finish_reason: "",
+            usage: gemini.Usage{prompt_token_count: 0, candidates_token_count: 0, total_token_count: 0, thoughts_token_count: 0},
+            done: true
+        }
+        rch <- GemStreamOutcome{ok: false, err_msg: err.msg(), resp: empty_gem_resp()}
+        <<
+    }
+    rch <- GemStreamOutcome{ok: true, err_msg: "", resp: ~resp}
+}
+
+fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
+                             use_http_mcp bool, http_mc $&mcp.Client,
+                             use_stdio_mcp bool, stdio_mc $&mcp.StdioClient,
+                             use_stream bool, on_event fn(AgentEvent) bool) RunResult {
+    $extra_tools := []mcp.ToolInfo{}
+    if use_http_mcp {
+        extra_tools = http_mc.list_tools() >>>
+    } else if use_stdio_mcp {
+        extra_tools = stdio_mc.list_tools() >>>
+    }
+    $steps := []Step{}
+    $turns := 0
+    $pt := 0
+    $ct := 0
+    $tt := 0
+    $last_content := ""
+    $all_thoughts := ""
+    $last_finish := ""
+    $limit := a.max_turns
+    if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+
+    while turns < limit {
+        turns += 1
+        $req := gemini.generate_request(a.model + "", copy_gem_contents(history))
+        req.system_instruction = a.system_prompt + ""
+        req.tools = build_gem_tools(&a.local_tools, &extra_tools)
+        if a.has_temperature {
+            req.temperature = a.temperature
+            req.has_temperature = true
+        }
+        if a.max_tokens > 0 {
+            req.max_output_tokens = a.max_tokens
+        }
+        if a.thinking_budget >= 0 {
+            req.thinking_budget = a.thinking_budget
+        }
+        $resp := empty_gem_resp()
+        if use_stream {
+            ech := chan gemini.StreamChunk{cap: 64}
+            rch := chan GemStreamOutcome{cap: 1}
+            c_copy := a.client.clone_client()
+            xu gem_stream_worker(~c_copy, ~req, ech, rch)
+            for {
+                ev := <-ech
+                if ev.thought_delta.len > 0 {
+                    emit_agent_ev(on_event, AgentEvent{
+                        kind: "reasoning_delta", turn: turns, text_delta: "",
+                        reasoning_delta: ev.thought_delta + "", tool_name: "", arguments_json: "",
+                        tool_output: "", is_error: false, finish_reason: ""
+                    })
+                }
+                if ev.text_delta.len > 0 {
+                    emit_agent_ev(on_event, AgentEvent{
+                        kind: "text_delta", turn: turns, text_delta: ev.text_delta + "",
+                        reasoning_delta: "", tool_name: "", arguments_json: "",
+                        tool_output: "", is_error: false, finish_reason: ""
+                    })
+                }
+                if ev.done { <- }
+            }
+            outc := <-rch
+            if !outc.ok { >>> errors.new(outc.err_msg) }
+            resp = ~outc.resp
+        } else {
+            resp = a.client.generate(&req) >>>
+        }
+        pt += resp.usage.prompt_token_count
+        ct += resp.usage.candidates_token_count
+        $tt_turn := resp.usage.total_token_count
+        if tt_turn <= 0 {
+            tt_turn = resp.usage.prompt_token_count + resp.usage.candidates_token_count
+        }
+        tt += tt_turn
+        if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
+            >>> errors.new("agent: token budget exceeded")
+        }
+        if resp.thoughts.len > 0 {
+            if all_thoughts.len > 0 { all_thoughts = all_thoughts + "\n" }
+            all_thoughts = all_thoughts + resp.thoughts
+        }
+        last_content = resp.text + ""
+        last_finish = resp.finish_reason + ""
+        if resp.function_calls.len == 0 {
+            history.push(gemini.model_text(last_content + ""))
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_finish + ""
+                })
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: all_thoughts + "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_finish + ""
+                })
+            }
+            << RunResult{
+                content: last_content, reasoning_content: all_thoughts, steps: ~steps, turns: turns,
+                prompt_tokens: pt, completion_tokens: ct, total_tokens: tt, finish_reason: last_finish
+            }
+        }
+        $m_parts := []gemini.Part{}
+        $specs := []ToolExecSpec{}
+        for ti in 0:resp.function_calls.len {
+            fc := &resp.function_calls[ti]
+            m_parts.push(gemini.function_call_part(fc.name + "", fc.args_json + ""))
+            specs.push(ToolExecSpec{name: fc.name + "", arguments: fc.args_json + ""})
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_start", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: fc.name + "", arguments_json: fc.args_json + "",
+                    tool_output: "", is_error: false, finish_reason: ""
+                })
+            }
+        }
+        history.push(gemini.content("model", ~m_parts))
+        results := execute_tools_batch(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook)
+        $r_parts := []gemini.Part{}
+        for ti in 0:resp.function_calls.len {
+            fc := &resp.function_calls[ti]
+            res := &results[ti]
+            steps.push(Step{
+                turn: turns, tool_name: fc.name + "", arguments_json: fc.args_json + "",
+                output: res.output + "", is_error: res.is_error
+            })
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: fc.name + "", arguments_json: fc.args_json + "",
+                    tool_output: res.output + "", is_error: res.is_error, finish_reason: ""
+                })
+            }
+            res_json := "{\"result\":" + json.quote(&res.output) + "}"
+            r_parts.push(gemini.function_response_part(fc.name + "", res_json))
+        }
+        history.push(gemini.content("user", ~r_parts))
+        if use_stream {
+            emit_agent_ev(on_event, AgentEvent{
+                kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                finish_reason: last_finish + ""
+            })
+        }
+    }
+    if use_stream {
+        emit_agent_ev(on_event, AgentEvent{
+            kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: all_thoughts + "",
+            tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+            finish_reason: last_finish + ""
+        })
+    }
+    << RunResult{
+        content: last_content, reasoning_content: all_thoughts, steps: ~steps, turns: turns,
+        prompt_tokens: pt, completion_tokens: ct, total_tokens: tt, finish_reason: last_finish
+    }
+}
+
+fn run_gem_loop_impl(a &GeminiAgent, user_prompt string, use_http_mcp bool, http_mc $&mcp.Client,
+                     use_stdio_mcp bool, stdio_mc $&mcp.StdioClient,
+                     use_stream bool, on_event fn(AgentEvent) bool) RunResult {
+    $history := [gemini.user_text(user_prompt)]
+    << run_gem_loop_history_impl(a, $&history, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, use_stream, on_event) >>>
+}
+
+pub fn (a &GeminiAgent) run(user_prompt string) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_gem_loop_impl(a, user_prompt, false, $&dummy_http, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &GeminiAgent) run_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_gem_loop_impl(a, user_prompt, true, mc, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &GeminiAgent) run_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    << run_gem_loop_impl(a, user_prompt, false, $&dummy_http, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &GeminiAgent) run_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_gem_loop_impl(a, user_prompt, false, $&dummy_http, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (a &GeminiAgent) run_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_gem_loop_impl(a, user_prompt, true, mc, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (a &GeminiAgent) run_stream_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    << run_gem_loop_impl(a, user_prompt, false, $&dummy_http, true, mc, true, on_event) >>>
+}
+
+pub struct GeminiSession {
+    pub agent GeminiAgent
+    messages []gemini.Content
+}
+
+pub fn new_gemini_session(agent GeminiAgent) GeminiSession {
+    << GeminiSession{agent: agent, messages: []gemini.Content{}}
+}
+
+pub fn (s $&GeminiSession) clear() {
+    s.messages = []gemini.Content{}
+}
+
+pub fn (s &GeminiSession) history() []gemini.Content {
+    << copy_gem_contents(&s.messages)
+}
+
+pub fn (s $&GeminiSession) send(user_prompt string) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(gemini.user_text(user_prompt))
+    << run_gem_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&GeminiSession) send_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(gemini.user_text(user_prompt))
+    << run_gem_loop_history_impl(&s.agent, msgs_ref, true, mc, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&GeminiSession) send_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    msgs_ref := $&s.messages
+    msgs_ref.push(gemini.user_text(user_prompt))
+    << run_gem_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&GeminiSession) send_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(gemini.user_text(user_prompt))
+    << run_gem_loop_history_impl(&s.agent, msgs_ref, false, $&dummy_http, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (s $&GeminiSession) send_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    msgs_ref := $&s.messages
+    msgs_ref.push(gemini.user_text(user_prompt))
+    << run_gem_loop_history_impl(&s.agent, msgs_ref, true, mc, false, $&dummy_stdio, true, on_event) >>>
+}
+
+// ---------- ResponsesAgent & ResponsesSession ----------
+
+pub struct ResponsesAgent {
+    pub client openai.Client
+    pub model string
+    pub instructions string
+    pub max_turns int
+    pub temperature f64
+    pub has_temperature bool
+    pub max_output_tokens int
+    pub max_total_tokens int
+    pub tool_choice string
+    pub parallel_tools bool
+    local_tools []LocalTool
+    tool_hook fn(&string, &string) string
+}
+
+pub fn new_responses_agent(client openai.Client, model string) ResponsesAgent {
+    << ResponsesAgent{
+        client: ~client,
+        model: model,
+        instructions: "",
+        max_turns: 8,
+        temperature: 0.0,
+        has_temperature: false,
+        max_output_tokens: 0,
+        max_total_tokens: 0,
+        tool_choice: "",
+        parallel_tools: false,
+        local_tools: []LocalTool{},
+        tool_hook: default_tool_hook
+    }
+}
+
+pub fn (a $&ResponsesAgent) set_instructions(s string) { a.instructions = s + "" }
+pub fn (a $&ResponsesAgent) set_max_turns(n int) { if n > 0 { a.max_turns = n } }
+pub fn (a $&ResponsesAgent) set_temperature(t f64) {
+    a.temperature = t
+    a.has_temperature = true
+}
+pub fn (a $&ResponsesAgent) set_max_output_tokens(n int) { if n > 0 { a.max_output_tokens = n } }
+pub fn (a $&ResponsesAgent) set_max_total_tokens(n int) { if n >= 0 { a.max_total_tokens = n } }
+pub fn (a $&ResponsesAgent) set_tool_choice(c string) { a.tool_choice = c + "" }
+pub fn (a $&ResponsesAgent) set_parallel_tools(enabled bool) { a.parallel_tools = enabled }
+pub fn (a $&ResponsesAgent) set_tool_hook(hook fn(&string, &string) string) { a.tool_hook = hook }
+
+pub fn (a $&ResponsesAgent) add_tool(name string, description string, parameters_json string,
+                                      handler fn(&string) string) {
+    $params := parameters_json + ""
+    if params.len == 0 { params = "{\"type\":\"object\"}" }
+    a.local_tools.push(LocalTool{
+        name: name, description: description, parameters_json: params, handler: handler
+    })
+}
+
+fn empty_resp_api_out() openai.ResponsesResponse {
+    << openai.ResponsesResponse{
+        id: "", model: "", status: "", output_text: "",
+        tool_calls: []openai.ResponsesToolCall{},
+        usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+    }
+}
+
+struct RespStreamOutcome {
+    ok bool
+    err_msg string
+    resp openai.ResponsesResponse
+}
+
+fn resp_stream_worker(c openai.Client, req openai.ResponsesRequest,
+                      ech chan openai.ResponsesStreamEvent, rch chan RespStreamOutcome) {
+    resp := c.responses_stream_chan(&req, ech) >>> (err) {
+        ech <- openai.ResponsesStreamEvent{
+            event_type: "done", text_delta: "", response_id: "", status: "",
+            tool_calls: []openai.ResponsesToolCall{}, has_usage: false,
+            usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}, done: true
+        }
+        rch <- RespStreamOutcome{ok: false, err_msg: err.msg(), resp: empty_resp_api_out()}
+        <<
+    }
+    rch <- RespStreamOutcome{ok: true, err_msg: "", resp: ~resp}
+}
+
+fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt string,
+                      use_http_mcp bool, http_mc $&mcp.Client,
+                      use_stdio_mcp bool, stdio_mc $&mcp.StdioClient,
+                      use_stream bool, on_event fn(AgentEvent) bool) RunResult {
+    $extra_tools := []mcp.ToolInfo{}
+    if use_http_mcp {
+        extra_tools = http_mc.list_tools() >>>
+    } else if use_stdio_mcp {
+        extra_tools = stdio_mc.list_tools() >>>
+    }
+    $steps := []Step{}
+    $turns := 0
+    $pt := 0
+    $ct := 0
+    $tt := 0
+    $last_content := ""
+    $last_status := ""
+    $limit := a.max_turns
+    if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+
+    $cur_input := user_prompt + ""
+    $cur_input_json := ""
+    while turns < limit {
+        turns += 1
+        $req := openai.new_responses_request(a.model + "", cur_input)
+        req.input_json = cur_input_json + ""
+        req.instructions = a.instructions + ""
+        req.previous_response_id = (*prev_id_ref) + ""
+        req.tools = build_tool_defs(&a.local_tools, &extra_tools)
+        if a.has_temperature {
+            req.temperature = a.temperature
+            req.has_temperature = true
+        }
+        if a.max_output_tokens > 0 {
+            req.max_output_tokens = a.max_output_tokens
+        }
+        if a.tool_choice.len > 0 {
+            req.tool_choice = a.tool_choice + ""
+        }
+        $resp := empty_resp_api_out()
+        if use_stream {
+            ech := chan openai.ResponsesStreamEvent{cap: 64}
+            rch := chan RespStreamOutcome{cap: 1}
+            c_copy := a.client.clone_client()
+            xu resp_stream_worker(~c_copy, ~req, ech, rch)
+            for {
+                ev := <-ech
+                if ev.text_delta.len > 0 {
+                    emit_agent_ev(on_event, AgentEvent{
+                        kind: "text_delta", turn: turns, text_delta: ev.text_delta + "",
+                        reasoning_delta: "", tool_name: "", arguments_json: "",
+                        tool_output: "", is_error: false, finish_reason: ""
+                    })
+                }
+                if ev.done { <- }
+            }
+            outc := <-rch
+            if !outc.ok { >>> errors.new(outc.err_msg) }
+            resp = ~outc.resp
+        } else {
+            resp = a.client.responses(&req) >>>
+        }
+        if resp.id.len > 0 { *prev_id_ref = resp.id + "" }
+        pt += resp.usage.prompt_tokens
+        ct += resp.usage.completion_tokens
+        tt += resp.usage.total_tokens
+        if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
+            >>> errors.new("agent: token budget exceeded")
+        }
+        last_content = resp.output_text + ""
+        last_status = resp.status + ""
+        if resp.tool_calls.len == 0 {
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_status + ""
+                })
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: "",
+                    tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                    finish_reason: last_status + ""
+                })
+            }
+            << RunResult{
+                content: last_content, reasoning_content: "", steps: ~steps, turns: turns,
+                prompt_tokens: pt, completion_tokens: ct, total_tokens: tt, finish_reason: last_status
+            }
+        }
+        $specs := []ToolExecSpec{}
+        for ti in 0:resp.tool_calls.len {
+            tc := &resp.tool_calls[ti]
+            specs.push(ToolExecSpec{name: tc.name + "", arguments: tc.arguments + ""})
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_start", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: tc.name + "", arguments_json: tc.arguments + "",
+                    tool_output: "", is_error: false, finish_reason: ""
+                })
+            }
+        }
+        results := execute_tools_batch(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook)
+        $out_items := []string{}
+        for ti in 0:resp.tool_calls.len {
+            tc := &resp.tool_calls[ti]
+            res := &results[ti]
+            steps.push(Step{
+                turn: turns, tool_name: tc.name + "", arguments_json: tc.arguments + "",
+                output: res.output + "", is_error: res.is_error
+            })
+            if use_stream {
+                emit_agent_ev(on_event, AgentEvent{
+                    kind: "tool_end", turn: turns, text_delta: "", reasoning_delta: "",
+                    tool_name: tc.name + "", arguments_json: tc.arguments + "",
+                    tool_output: res.output + "", is_error: res.is_error, finish_reason: ""
+                })
+            }
+            $cid := tc.call_id + ""
+            if cid.len == 0 { cid = tc.id + "" }
+            out_items.push(openai.responses_function_call_output_item(cid, res.output + ""))
+        }
+        cur_input = ""
+        cur_input_json = openai.responses_input_array(&out_items)
+        if use_stream {
+            emit_agent_ev(on_event, AgentEvent{
+                kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
+                tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+                finish_reason: last_status + ""
+            })
+        }
+    }
+    if use_stream {
+        emit_agent_ev(on_event, AgentEvent{
+            kind: "done", turn: turns, text_delta: last_content + "", reasoning_delta: "",
+            tool_name: "", arguments_json: "", tool_output: "", is_error: false,
+            finish_reason: last_status + ""
+        })
+    }
+    << RunResult{
+        content: last_content, reasoning_content: "", steps: ~steps, turns: turns,
+        prompt_tokens: pt, completion_tokens: ct, total_tokens: tt, finish_reason: last_status
+    }
+}
+
+pub fn (a &ResponsesAgent) run(user_prompt string) RunResult {
+    $pid := ""
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_resp_loop_impl(a, $&pid, user_prompt, false, $&dummy_http, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &ResponsesAgent) run_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    $pid := ""
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_resp_loop_impl(a, $&pid, user_prompt, true, mc, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &ResponsesAgent) run_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient) RunResult {
+    $pid := ""
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    << run_resp_loop_impl(a, $&pid, user_prompt, false, $&dummy_http, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (a &ResponsesAgent) run_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $pid := ""
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_resp_loop_impl(a, $&pid, user_prompt, false, $&dummy_http, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (a &ResponsesAgent) run_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    $pid := ""
+    $dummy_stdio := mcp.closed_stdio_client()
+    << run_resp_loop_impl(a, $&pid, user_prompt, true, mc, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub struct ResponsesSession {
+    pub agent ResponsesAgent
+    pub prev_response_id string
+}
+
+pub fn new_responses_session(agent ResponsesAgent) ResponsesSession {
+    << ResponsesSession{agent: agent, prev_response_id: ""}
+}
+
+pub fn (s $&ResponsesSession) clear() {
+    s.prev_response_id = ""
+}
+
+pub fn (s &ResponsesSession) last_response_id() string {
+    << s.prev_response_id + ""
+}
+
+pub fn (s $&ResponsesSession) send(user_prompt string) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    pid_ref := $&s.prev_response_id
+    << run_resp_loop_impl(&s.agent, pid_ref, user_prompt, false, $&dummy_http, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&ResponsesSession) send_with_mcp(user_prompt string, mc $&mcp.Client) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    pid_ref := $&s.prev_response_id
+    << run_resp_loop_impl(&s.agent, pid_ref, user_prompt, true, mc, false, $&dummy_stdio, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&ResponsesSession) send_with_stdio_mcp(user_prompt string, mc $&mcp.StdioClient) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    pid_ref := $&s.prev_response_id
+    << run_resp_loop_impl(&s.agent, pid_ref, user_prompt, false, $&dummy_http, true, mc, false, ignore_agent_ev) >>>
+}
+
+pub fn (s $&ResponsesSession) send_stream(user_prompt string, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+    $dummy_stdio := mcp.closed_stdio_client()
+    pid_ref := $&s.prev_response_id
+    << run_resp_loop_impl(&s.agent, pid_ref, user_prompt, false, $&dummy_http, false, $&dummy_stdio, true, on_event) >>>
+}
+
+pub fn (s $&ResponsesSession) send_stream_with_mcp(user_prompt string, mc $&mcp.Client, on_event fn(AgentEvent) bool) RunResult {
+    $dummy_stdio := mcp.closed_stdio_client()
+    pid_ref := $&s.prev_response_id
+    << run_resp_loop_impl(&s.agent, pid_ref, user_prompt, true, mc, false, $&dummy_stdio, true, on_event) >>>
+}

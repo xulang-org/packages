@@ -2,12 +2,16 @@
 
 metal_native #"github.com/xulang-org/packages/metal_native"
 #errors
+#math
 
 // Row-major binary16 matrix (MPSDataTypeFloat16) and raw GGML Q4_0 / Q8_0 / Q4_K weights.
 pub struct F16Matrix { handle int }
 pub struct Q4Matrix { handle int }
 pub struct Q8Matrix { handle int }
 pub struct Q4KMatrix { handle int }
+pub struct Q5Matrix { handle int }
+pub struct Q5KMatrix { handle int }
+pub struct Q6KMatrix { handle int }
 
 pub fn (d &Device) matrix_f16(rows int, columns int) F16Matrix {
     handle := checked(metal_native.matrix_f16_new(d.handle, rows, columns)) >>>
@@ -87,6 +91,13 @@ pub fn gemv_q4_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q4Matrix) Fence {
     << Fence{handle: handle}
 }
 
+// Fused Top-K weighted MoE Q4_0 GEMV accumulating weighted expert outputs directly into dst [M, out_dim].
+pub fn moe_gemv_q4_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q4Matrix,
+                         expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) Fence {
+    handle := checked(metal_native.moe_gemv_q4_0_f32(dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+    << Fence{handle: handle}
+}
+
 pub fn (d &Device) matrix_q8_0(rows int, columns int) Q8Matrix {
     handle := checked(metal_native.matrix_q8_0_new(d.handle, rows, columns)) >>>
     << Q8Matrix{handle: handle}
@@ -113,6 +124,13 @@ pub fn gemv_q8_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q8Matrix) Fence {
     << Fence{handle: handle}
 }
 
+// Fused Top-K weighted MoE Q8_0 GEMV accumulating weighted expert outputs directly into dst [M, out_dim].
+pub fn moe_gemv_q8_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q8Matrix,
+                         expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) Fence {
+    handle := checked(metal_native.moe_gemv_q8_0_f32(dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+    << Fence{handle: handle}
+}
+
 pub fn (d &Device) matrix_q4_k(rows int, columns int) Q4KMatrix {
     handle := checked(metal_native.matrix_q4_k_new(d.handle, rows, columns)) >>>
     << Q4KMatrix{handle: handle}
@@ -136,5 +154,130 @@ fn (m $&Q4KMatrix) drop() {
 // Fused Q4_K dequantize+dot computing dst = x @ dequant(w)^T in GPU registers.
 pub fn gemv_q4_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q4KMatrix) Fence {
     handle := checked(metal_native.gemv_q4_k_f32(dst.handle, x.handle, w.handle)) >>>
+    << Fence{handle: handle}
+}
+
+pub fn (d &Device) matrix_q5_0(rows int, columns int) Q5Matrix {
+    handle := checked(metal_native.matrix_q5_0_new(d.handle, rows, columns)) >>>
+    << Q5Matrix{handle: handle}
+}
+pub fn (m &Q5Matrix) rows() int { << checked(metal_native.matrix_q5_0_info(m.handle, 1)) >>> }
+pub fn (m &Q5Matrix) columns() int { << checked(metal_native.matrix_q5_0_info(m.handle, 2)) >>> }
+pub fn (m &Q5Matrix) byte_len() int { << checked(metal_native.matrix_q5_0_info(m.handle, 3)) >>> }
+pub fn (m $&Q5Matrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_q5_0_write(m.handle, bytes)) >>>
+}
+pub fn (m $&Q5Matrix) close() int {
+    if m.handle == 0 { << 0 }
+    checked(metal_native.matrix_q5_0_close(m.handle)) >>>
+    m.handle = 0
+    << 0
+}
+fn (m $&Q5Matrix) drop() {
+    if m.handle > 0 { metal_native.matrix_q5_0_release(m.handle) m.handle = 0 }
+}
+pub fn gemv_q5_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q5Matrix) Fence {
+    handle := checked(metal_native.gemv_q5_0_f32(dst.handle, x.handle, w.handle)) >>>
+    << Fence{handle: handle}
+}
+
+pub fn (d &Device) matrix_q6_k(rows int, columns int) Q6KMatrix {
+    handle := checked(metal_native.matrix_q6_k_new(d.handle, rows, columns)) >>>
+    << Q6KMatrix{handle: handle}
+}
+pub fn (m &Q6KMatrix) rows() int { << checked(metal_native.matrix_q6_k_info(m.handle, 1)) >>> }
+pub fn (m &Q6KMatrix) columns() int { << checked(metal_native.matrix_q6_k_info(m.handle, 2)) >>> }
+pub fn (m &Q6KMatrix) byte_len() int { << checked(metal_native.matrix_q6_k_info(m.handle, 3)) >>> }
+pub fn (m $&Q6KMatrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_q6_k_write(m.handle, bytes)) >>>
+}
+pub fn (m $&Q6KMatrix) close() int {
+    if m.handle == 0 { << 0 }
+    checked(metal_native.matrix_q6_k_close(m.handle)) >>>
+    m.handle = 0
+    << 0
+}
+fn (m $&Q6KMatrix) drop() {
+    if m.handle > 0 { metal_native.matrix_q6_k_release(m.handle) m.handle = 0 }
+}
+pub fn gemv_q6_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q6KMatrix) Fence {
+    handle := checked(metal_native.gemv_q6_k_f32(dst.handle, x.handle, w.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// kv_cache_append_f16 converts F32 src [n, kv_dim] into F16 cache [max_seq, kv_dim] at row pos_offset.
+pub fn kv_cache_append_f16(cache $&F16Matrix, src &F32Matrix, pos_offset int) Fence {
+    handle := checked(metal_native.kv_cache_append_f16(cache.handle, src.handle, pos_offset)) >>>
+    << Fence{handle: handle}
+}
+
+// attention_decode_f16 runs single-pass online FlashDecode reading F16 K/V caches into F32 dst.
+pub fn attention_decode_f16(dst $&F32Matrix, q &F32Matrix, k_cache &F16Matrix, v_cache &F16Matrix,
+                              kv_len int, n_heads int, n_kv_heads int, scale f64) Fence {
+    handle := checked(metal_native.attention_decode_f16(dst.handle, q.handle, k_cache.handle, v_cache.handle, kv_len, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+    << Fence{handle: handle}
+}
+
+pub fn causal_attention_f16(dst $&F32Matrix, q &F32Matrix, k &F16Matrix, v &F16Matrix,
+                            n_heads int, n_kv_heads int, scale f64) Fence {
+    handle := checked(metal_native.causal_attention_f16(dst.handle, q.handle, k.handle, v.handle, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+    << Fence{handle: handle}
+}
+
+// moe_gemv_q4_k_f32 runs fused Q4_K top-k MoE GEMV over expert_ids [M, k] and weights [M, k].
+pub fn moe_gemv_q4_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q4KMatrix,
+                         expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) Fence {
+    handle := checked(metal_native.moe_gemv_q4_k_f32(dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+    << Fence{handle: handle}
+}
+
+// moe_gemv_q6_k_f32 runs fused Q6_K top-k MoE GEMV over expert_ids [M, k] and weights [M, k].
+pub fn moe_gemv_q6_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q6KMatrix,
+                         expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) Fence {
+    handle := checked(metal_native.moe_gemv_q6_k_f32(dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+    << Fence{handle: handle}
+}
+
+// paged_attention_decode_f16 runs GQA paged KV-cache decode over F16 page pools and float-encoded block_table [B, max_blocks].
+pub fn paged_attention_decode_f16(dst $&F32Matrix, q &F32Matrix, k_pages &F16Matrix, v_pages &F16Matrix,
+                                    block_table &F32Matrix, kv_len int, block_size int,
+                                    n_heads int, n_kv_heads int, scale f64) Fence {
+    params := [kv_len, block_size, n_heads, n_kv_heads, math.float32_bits(scale)]
+    handle := checked(metal_native.paged_attention_decode_f16(dst.handle, q.handle, k_pages.handle, v_pages.handle, block_table.handle, &params)) >>>
+    << Fence{handle: handle}
+}
+
+pub fn (d &Device) matrix_q5_k(rows int, columns int) Q5KMatrix {
+    handle := checked(metal_native.matrix_q5_k_new(d.handle, rows, columns)) >>>
+    << Q5KMatrix{handle: handle}
+}
+pub fn (m &Q5KMatrix) rows() int { << checked(metal_native.matrix_q5_k_info(m.handle, 1)) >>> }
+pub fn (m &Q5KMatrix) columns() int { << checked(metal_native.matrix_q5_k_info(m.handle, 2)) >>> }
+pub fn (m &Q5KMatrix) byte_len() int { << checked(metal_native.matrix_q5_k_info(m.handle, 3)) >>> }
+pub fn (m $&Q5KMatrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_q5_k_write(m.handle, bytes)) >>>
+}
+pub fn (m $&Q5KMatrix) close() int {
+    if m.handle == 0 { << 0 }
+    checked(metal_native.matrix_q5_k_close(m.handle)) >>>
+    m.handle = 0
+    << 0
+}
+fn (m $&Q5KMatrix) drop() {
+    if m.handle > 0 { metal_native.matrix_q5_k_release(m.handle) m.handle = 0 }
+}
+pub fn gemv_q5_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q5KMatrix) Fence {
+    handle := checked(metal_native.gemv_q5_k_f32(dst.handle, x.handle, w.handle)) >>>
+    << Fence{handle: handle}
+}
+pub fn moe_gemv_q5_k_f32(dst $&F32Matrix, x &F32Matrix, w &Q5KMatrix,
+                         expert_ids &F32Matrix, expert_weights &F32Matrix, n_experts int) Fence {
+    handle := checked(metal_native.moe_gemv_q5_k_f32(dst.handle, x.handle, w.handle, expert_ids.handle, expert_weights.handle, n_experts)) >>>
+    << Fence{handle: handle}
+}
+pub fn paged_kv_cache_append_f16(pages $&F16Matrix, src &F32Matrix, block_table &F32Matrix,
+                                   pos_offset int, block_size int) Fence {
+    params := [pos_offset, block_size]
+    handle := checked(metal_native.paged_kv_cache_append_f16(pages.handle, src.handle, block_table.handle, &params)) >>>
     << Fence{handle: handle}
 }

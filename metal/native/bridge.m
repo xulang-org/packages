@@ -8,7 +8,7 @@
 #include <string.h>
 #include "api.h"
 
-enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, MATRIX_F32, BATCH, MATRIX_F16, MATRIX_Q4_0, MATRIX_Q8_0, MATRIX_Q4_K, SLOT_BITS = 12, SLOT_COUNT = 4096 };
+enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, MATRIX_F32, BATCH, MATRIX_F16, MATRIX_Q4_0, MATRIX_Q8_0, MATRIX_Q4_K, MATRIX_Q5_0, MATRIX_Q6_K, MATRIX_Q5_K, SLOT_BITS = 12, SLOT_COUNT = 4096 };
 // Rounded dispatches use at most 256 threads and must not wrap a uint gid.
 static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 
@@ -25,10 +25,13 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) id<MTLComputePipelineState> mulPipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> scalePipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> ropePipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> ropeInterleavedPipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> causalAttnPipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> qkNormPipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> kvAppendPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> kvAppendF16Pipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> attnDecodePipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> attnDecodeF16Pipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> embeddingPipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> argmaxPipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> f16ToF32Pipeline;
@@ -36,6 +39,30 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) id<MTLComputePipelineState> gemvQ40Pipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> gemvQ80Pipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> gemvQ4KPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> gemvQ50Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> gemvQ6KPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> gemvQ5KPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> addRmsnormPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> gegluPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> siluPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> logSoftmaxPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> causalAttnF16Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> moeTopkPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> moeWeightedAddPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> ropeYarnPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> moeGemvQ40Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> moeGemvQ80Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> moeGemvQ4KPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> moeGemvQ6KPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> moeGemvQ5KPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> pagedAttnDecodeF16Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> pagedKvAppendF16Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> loraAddPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> adamwStepPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> crossEntropyGradPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> rmsnormBwdDxPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> rmsnormBwdDwPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> swigluBwdPipeline;
 @property(nonatomic) xu_int children;
 @property(nonatomic) xu_int dispatches;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, MPSMatrixMultiplication *> *matrixKernels;
@@ -160,26 +187,34 @@ static inline BOOL op_can_access(XMBatch *batch, XMBuffer *dst, NSArray<XMBuffer
     }
     return YES;
 }
-static void batch_acquire(XMBatch *batch, XMBuffer *dst, NSArray<XMBuffer *> *inputs, id operation) {
+static inline BOOL op_can_access2(XMBatch *batch, XMBuffer *dst1, XMBuffer *dst2, NSArray<XMBuffer *> *inputs) {
+    return op_can_access(batch, dst1, inputs) && op_can_access(batch, dst2, inputs);
+}
+static void batch_acquire_many(XMBatch *batch, NSArray<XMBuffer *> *writes, NSArray<XMBuffer *> *inputs, id operation) {
     for (XMBuffer *in in inputs) {
-        if (!in || in == dst) continue;
+        if (!in || [writes indexOfObjectIdenticalTo:in] != NSNotFound) continue;
         if ([batch.writeBuffers indexOfObjectIdenticalTo:in] == NSNotFound &&
             [batch.readBuffers indexOfObjectIdenticalTo:in] == NSNotFound) {
             in.readBusy++;
             [batch.readBuffers addObject:in];
         }
     }
-    if (dst && [batch.writeBuffers indexOfObjectIdenticalTo:dst] == NSNotFound) {
-        NSUInteger rIdx = [batch.readBuffers indexOfObjectIdenticalTo:dst];
-        if (rIdx != NSNotFound) {
-            [batch.readBuffers removeObjectAtIndex:rIdx];
-            dst.readBusy--;
+    for (XMBuffer *dst in writes) {
+        if (dst && [batch.writeBuffers indexOfObjectIdenticalTo:dst] == NSNotFound) {
+            NSUInteger rIdx = [batch.readBuffers indexOfObjectIdenticalTo:dst];
+            if (rIdx != NSNotFound) {
+                [batch.readBuffers removeObjectAtIndex:rIdx];
+                dst.readBusy--;
+            }
+            dst.writeBusy++;
+            dst.ownerBatch = batch;
+            [batch.writeBuffers addObject:dst];
         }
-        dst.writeBusy++;
-        dst.ownerBatch = batch;
-        [batch.writeBuffers addObject:dst];
     }
     if (operation) [batch.operations addObject:operation];
+}
+static void batch_acquire(XMBatch *batch, XMBuffer *dst, NSArray<XMBuffer *> *inputs, id operation) {
+    batch_acquire_many(batch, dst ? @[dst] : @[], inputs, operation);
 }
 
 // Caller holds gate. Integer and MPS operations share lifetime, read/write lock

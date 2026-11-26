@@ -1,0 +1,863 @@
+@"github.com/xulang-org/packages/anthropic"
+
+#encoding/json
+#errors
+#net/http
+#strconv
+#strings
+#time
+#crypto/tls
+transport #github.com/xulang-org/packages/transport
+
+pub const DEFAULT_TIMEOUT_NS = 60000000000
+pub const DEFAULT_VERSION = "2023-06-01"
+
+pub struct Client {
+    pub base_url string
+    pub api_key string
+    pub api_version string
+    pub timeout_ns int
+    pub max_retries int
+    pub extra_headers []string
+}
+
+pub struct ContentBlock {
+    pub kind string
+    pub text string
+    pub thinking string
+    pub id string
+    pub name string
+    pub input_json string
+    pub media_type string
+    pub data string
+    pub cache_control string
+}
+
+pub struct Message {
+    pub role string
+    pub content string
+    pub blocks []ContentBlock
+}
+
+pub struct Tool {
+    pub name string
+    pub description string
+    pub input_schema_json string
+}
+
+pub struct ToolUse {
+    pub id string
+    pub name string
+    pub input_json string
+}
+
+pub struct Usage {
+    pub input_tokens int
+    pub output_tokens int
+    pub cache_creation_input_tokens int
+    pub cache_read_input_tokens int
+}
+
+pub struct MessagesRequest {
+    pub model string
+    pub system string
+    pub cache_system bool
+    pub messages []Message
+    pub tools []Tool
+    pub max_tokens int
+    pub temperature f64
+    pub has_temperature bool
+    pub top_p f64
+    pub has_top_p bool
+    pub stop_sequences []string
+    pub thinking_budget_tokens int
+    pub tool_choice_json string
+}
+
+pub struct MessagesResponse {
+    pub id string
+    pub model string
+    pub role string
+    pub stop_reason string
+    pub content string
+    pub thinking string
+    pub tool_uses []ToolUse
+    pub blocks []ContentBlock
+    pub usage Usage
+}
+
+pub struct StreamEvent {
+    pub event_type string
+    pub text_delta string
+    pub thinking_delta string
+    pub stop_reason string
+    pub tool_use ToolUse
+    pub has_tool_use bool
+    pub usage Usage
+    pub done bool
+}
+
+pub fn new_client(api_key string) Client {
+    << new_client_with_base("https://api.anthropic.com", api_key)
+}
+
+pub fn new_client_with_base(base_url string, api_key string) Client {
+    $url := base_url + ""
+    if url.len > 0 && url[url.len - 1] == 47 {
+        url = url[0:url.len - 1]
+    }
+    if url.len == 0 {
+        url = "https://api.anthropic.com"
+    }
+    << Client{
+        base_url: url,
+        api_key: api_key,
+        api_version: DEFAULT_VERSION,
+        timeout_ns: DEFAULT_TIMEOUT_NS,
+        max_retries: 0,
+        extra_headers: []string{}
+    }
+}
+
+pub fn (c $&Client) set_max_retries(n int) {
+    if n < 0 {
+        c.max_retries = 0
+        <<
+    }
+    c.max_retries = n
+}
+
+pub fn (c $&Client) add_header(name string, value string) {
+    c.extra_headers.push(name + ": " + value)
+}
+
+pub fn (c &Client) clone_client() Client {
+    $hdrs := []string{}
+    for i in 0:c.extra_headers.len {
+        hdrs.push(c.extra_headers[i] + "")
+    }
+    << Client{
+        base_url: c.base_url + "",
+        api_key: c.api_key + "",
+        api_version: c.api_version + "",
+        timeout_ns: c.timeout_ns,
+        max_retries: c.max_retries,
+        extra_headers: ~hdrs
+    }
+}
+
+pub fn text_block(text string) ContentBlock {
+    << ContentBlock{
+        kind: "text", text: text, thinking: "", id: "", name: "", input_json: "",
+        media_type: "", data: "", cache_control: ""
+    }
+}
+
+pub fn image_base64_block(media_type string, b64_data string) ContentBlock {
+    << ContentBlock{
+        kind: "image_base64", text: "", thinking: "", id: "", name: "", input_json: "",
+        media_type: media_type, data: b64_data, cache_control: ""
+    }
+}
+
+pub fn image_url_block(url string) ContentBlock {
+    << ContentBlock{
+        kind: "image_url", text: url, thinking: "", id: "", name: "", input_json: "",
+        media_type: "", data: "", cache_control: ""
+    }
+}
+
+pub fn message(role string, content string) Message {
+    << Message{role: role, content: content, blocks: []ContentBlock{}}
+}
+
+pub fn message_blocks(role string, blocks []ContentBlock) Message {
+    << Message{role: role, content: "", blocks: ~blocks}
+}
+
+pub fn tool_result_message(tool_use_id string, content string, is_error bool) Message {
+    $err_s := "false"
+    if is_error { err_s = "true" }
+    $bs := []ContentBlock{}
+    bs.push(ContentBlock{
+        kind: "tool_result",
+        text: content,
+        thinking: "",
+        id: tool_use_id,
+        name: "",
+        input_json: err_s,
+        media_type: "",
+        data: "",
+        cache_control: ""
+    })
+    << Message{role: "user", content: "", blocks: ~bs}
+}
+
+pub fn tool(name string, description string, input_schema_json string) Tool {
+    << Tool{name: name, description: description, input_schema_json: input_schema_json}
+}
+
+pub fn messages_request(model string, messages []Message, max_tokens int) MessagesRequest {
+    $mt := max_tokens
+    if mt <= 0 { mt = 1024 }
+    << MessagesRequest{
+        model: model,
+        system: "",
+        cache_system: false,
+        messages: ~messages,
+        tools: []Tool{},
+        max_tokens: mt,
+        temperature: 0.0,
+        has_temperature: false,
+        top_p: 0.0,
+        has_top_p: false,
+        stop_sequences: []string{},
+        thinking_budget_tokens: 0,
+        tool_choice_json: ""
+    }
+}
+
+fn join_path(base_path string, suffix string) string {
+    if base_path.len == 0 || base_path == "/" { << suffix }
+    if base_path[base_path.len - 1] == 47 {
+        << base_path[0:base_path.len - 1] + suffix
+    }
+    << base_path + suffix
+}
+
+fn default_port_for(raw &string) int {
+    if strings.has_prefix(raw, "https://") { << 443 }
+    << 80
+}
+
+fn build_http_req(ep &transport.Endpoint, c &Client, body &string) string {
+    full_path := join_path(ep.path, "/v1/messages")
+    $raw := "POST " + full_path + " HTTP/1.1\r\n"
+    raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\n"
+    raw = raw + "Accept: application/json, text/event-stream\r\n"
+    raw = raw + "Content-Type: application/json\r\n"
+    if c.api_key.len > 0 {
+        raw = raw + "x-api-key: " + c.api_key + "\r\n"
+    }
+    ver := c.api_version + ""
+    if ver.len > 0 {
+        raw = raw + "anthropic-version: " + ver + "\r\n"
+    }
+    for hi in 0:c.extra_headers.len {
+        raw = raw + c.extra_headers[hi] + "\r\n"
+    }
+    raw = raw + "Content-Length: " + str(body.len) + "\r\nConnection: close\r\n\r\n" + *body
+    << raw
+}
+
+fn append_cache_control(s $&string, cc &string) {
+    if cc.len > 0 {
+        *s = *s + ",\"cache_control\":{\"type\":" + json.quote(cc) + "}"
+    }
+}
+
+fn encode_messages_body(req &MessagesRequest, stream bool) string {
+    $mt := req.max_tokens
+    if mt <= 0 { mt = 1024 }
+    $s := "{\"model\":" + json.quote(&req.model) + ",\"max_tokens\":" + str(mt)
+    if req.system.len > 0 {
+        if req.cache_system {
+            s = s + ",\"system\":[{\"type\":\"text\",\"text\":" + json.quote(&req.system) +
+                ",\"cache_control\":{\"type\":\"ephemeral\"}}]"
+        } else {
+            s = s + ",\"system\":" + json.quote(&req.system)
+        }
+    }
+    s = s + ",\"messages\":["
+    for i in 0:req.messages.len {
+        if i > 0 { s = s + "," }
+        m := &req.messages[i]
+        s = s + "{\"role\":" + json.quote(&m.role)
+        if m.blocks.len > 0 {
+            s = s + ",\"content\":["
+            for bi in 0:m.blocks.len {
+                if bi > 0 { s = s + "," }
+                b := &m.blocks[bi]
+                if b.kind == "tool_result" {
+                    $ie := "false"
+                    if b.input_json == "true" { ie = "true" }
+                    s = s + "{\"type\":\"tool_result\",\"tool_use_id\":" + json.quote(&b.id) +
+                        ",\"content\":" + json.quote(&b.text) + ",\"is_error\":" + ie
+                    append_cache_control($&s, &b.cache_control)
+                    s = s + "}"
+                } else if b.kind == "tool_use" {
+                    $inp := b.input_json + ""
+                    if inp.len == 0 { inp = "{}" }
+                    s = s + "{\"type\":\"tool_use\",\"id\":" + json.quote(&b.id) +
+                        ",\"name\":" + json.quote(&b.name) + ",\"input\":" + inp + "}"
+                } else if b.kind == "thinking" {
+                    s = s + "{\"type\":\"thinking\",\"thinking\":" + json.quote(&b.thinking) + "}"
+                } else if b.kind == "image_base64" {
+                    s = s + "{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":" +
+                        json.quote(&b.media_type) + ",\"data\":" + json.quote(&b.data) + "}"
+                    append_cache_control($&s, &b.cache_control)
+                    s = s + "}"
+                } else if b.kind == "image_url" {
+                    s = s + "{\"type\":\"image\",\"source\":{\"type\":\"url\",\"url\":" +
+                        json.quote(&b.text) + "}"
+                    append_cache_control($&s, &b.cache_control)
+                    s = s + "}"
+                } else {
+                    s = s + "{\"type\":\"text\",\"text\":" + json.quote(&b.text)
+                    append_cache_control($&s, &b.cache_control)
+                    s = s + "}"
+                }
+            }
+            s = s + "]"
+        } else {
+            s = s + ",\"content\":" + json.quote(&m.content)
+        }
+        s = s + "}"
+    }
+    s = s + "]"
+    if req.tools.len > 0 {
+        s = s + ",\"tools\":["
+        for i in 0:req.tools.len {
+            if i > 0 { s = s + "," }
+            t := &req.tools[i]
+            $sch := t.input_schema_json + ""
+            if sch.len == 0 { sch = "{\"type\":\"object\"}" }
+            s = s + "{\"name\":" + json.quote(&t.name) + ",\"description\":" + json.quote(&t.description) +
+                ",\"input_schema\":" + sch + "}"
+        }
+        s = s + "]"
+    }
+    if req.tool_choice_json.len > 0 {
+        s = s + ",\"tool_choice\":" + req.tool_choice_json
+    }
+    if req.has_temperature {
+        tf := strconv.format_float(req.temperature, 102, 4) >>> (_) { << "0.0" }
+        s = s + ",\"temperature\":" + tf
+    }
+    if req.has_top_p {
+        pf := strconv.format_float(req.top_p, 102, 4) >>> (_) { << "1.0" }
+        s = s + ",\"top_p\":" + pf
+    }
+    if req.stop_sequences.len > 0 {
+        s = s + ",\"stop_sequences\":["
+        for i in 0:req.stop_sequences.len {
+            if i > 0 { s = s + "," }
+            s = s + json.quote(&req.stop_sequences[i])
+        }
+        s = s + "]"
+    }
+    if req.thinking_budget_tokens > 0 {
+        s = s + ",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":" + str(req.thinking_budget_tokens) + "}"
+    }
+    if stream {
+        s = s + ",\"stream\":true"
+    }
+    << s + "}"
+}
+
+fn is_retriable_status(sc int) bool {
+    << sc == 429 || sc == 529 || sc >= 500
+}
+
+fn sleep_retry_backoff(attempt int) {
+    $shift := attempt
+    if shift > 6 { shift = 6 }
+    $ms := 25 << shift
+    if ms > 2000 { ms = 2000 }
+    time.sleep(ms * time.millisecond())
+}
+
+fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_int_or(doc &json.Doc, obj int, key string, def int) int {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_number(n) {
+        << doc.as_int(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_encode_or(doc &json.Doc, node int, def string) string {
+    << doc.encode(node) >>> (_) { << def }
+}
+
+fn extract_error_msg(status int, body &string) string {
+    $msg := "anthropic: HTTP " + str(status)
+    doc := json.parse(body)
+    if doc.ok() && doc.is_dict(doc.root()) {
+        root := doc.root()
+        if doc.has(root, "error") {
+            en := doc.get(root, "error") >>> (_) { << msg }
+            emsg := json_str_or(&doc, en, "message", "")
+            if emsg.len > 0 { msg = emsg }
+        }
+    }
+    << msg
+}
+
+fn parse_usage(doc &json.Doc, obj int) Usage {
+    $u := Usage{input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0}
+    if !doc.is_dict(obj) || !doc.has(obj, "usage") { << u }
+    un := doc.get(obj, "usage") >>> (_) { << u }
+    if doc.is_dict(un) {
+        u.input_tokens = json_int_or(doc, un, "input_tokens", 0)
+        u.output_tokens = json_int_or(doc, un, "output_tokens", 0)
+        u.cache_creation_input_tokens = json_int_or(doc, un, "cache_creation_input_tokens", 0)
+        u.cache_read_input_tokens = json_int_or(doc, un, "cache_read_input_tokens", 0)
+    }
+    << u
+}
+
+fn try_request_raw(ep &transport.Endpoint, raw_req &string, err_out $&string) http.Response {
+    *err_out = ""
+    ep_copy := transport.Endpoint{
+        scheme: ep.scheme + "",
+        host: ep.host + "",
+        port: ep.port,
+        path: ep.path + "",
+        secure: ep.secure
+    }
+    cfg := tls.new_config(ep_copy.host + "")
+    resp := transport.request_raw(ep_copy, cfg, *raw_req + "", "POST") >>> (err) {
+        *err_out = err.msg()
+        << http.new_response()
+    }
+    << resp
+}
+
+fn request_retry(c &Client, body &string) http.Response {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    raw_req := build_http_req(&ep, c, body)
+    $max_r := c.max_retries
+    if max_r < 0 { max_r = 0 }
+    $attempt := 0
+    for {
+        $err_msg := ""
+        resp := try_request_raw(&ep, &raw_req, $&err_msg)
+        if err_msg.len > 0 {
+            if attempt < max_r {
+                sleep_retry_backoff(attempt)
+                attempt += 1
+                ->
+            }
+            >>> errors.new(err_msg)
+        }
+        if is_retriable_status(resp.status_code) && attempt < max_r {
+            sleep_retry_backoff(attempt)
+            attempt += 1
+            ->
+        }
+        << resp
+    }
+    << http.new_response()
+}
+
+pub fn (c &Client) messages(req &MessagesRequest) MessagesResponse {
+    body := encode_messages_body(req, false)
+    resp := request_retry(c, &body) >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+    }
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("anthropic: invalid JSON response")
+    }
+    root := doc.root()
+    $out := MessagesResponse{
+        id: json_str_or(&doc, root, "id", ""),
+        model: json_str_or(&doc, root, "model", req.model),
+        role: json_str_or(&doc, root, "role", "assistant"),
+        stop_reason: json_str_or(&doc, root, "stop_reason", ""),
+        content: "",
+        thinking: "",
+        tool_uses: []ToolUse{},
+        blocks: []ContentBlock{},
+        usage: parse_usage(&doc, root)
+    }
+    if doc.has(root, "content") {
+        arr := doc.get(root, "content") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                btype := json_str_or(&doc, item, "type", "")
+                if btype == "text" {
+                    txt := json_str_or(&doc, item, "text", "")
+                    out.content = out.content + txt
+                    out.blocks.push(ContentBlock{kind: "text", text: txt, thinking: "", id: "", name: "", input_json: "", media_type: "", data: "", cache_control: ""})
+                } else if btype == "thinking" {
+                    th := json_str_or(&doc, item, "thinking", "")
+                    out.thinking = out.thinking + th
+                    out.blocks.push(ContentBlock{kind: "thinking", text: "", thinking: th, id: "", name: "", input_json: "", media_type: "", data: "", cache_control: ""})
+                } else if btype == "tool_use" {
+                    tid := json_str_or(&doc, item, "id", "")
+                    tname := json_str_or(&doc, item, "name", "")
+                    $tin := "{}"
+                    if doc.has(item, "input") {
+                        innode := doc.get(item, "input") >>>
+                        tin = json_encode_or(&doc, innode, "{}")
+                    }
+                    out.tool_uses.push(ToolUse{id: tid + "", name: tname + "", input_json: tin + ""})
+                    out.blocks.push(ContentBlock{kind: "tool_use", text: "", thinking: "", id: tid, name: tname, input_json: tin, media_type: "", data: "", cache_control: ""})
+                }
+            }
+        }
+    }
+    << out
+}
+
+fn find_substr_from(s &string, pat &string, start int) int {
+    if pat.len <= 0 || start < 0 || start + pat.len > s.len { << -1 }
+    limit := s.len - pat.len + 1
+    for i in start:limit {
+        $eq := true
+        for j in 0:pat.len {
+            if (*s)[i + j] != (*pat)[j] {
+                eq = false
+                <-
+            }
+        }
+        if eq { << i }
+    }
+    << -1
+}
+
+fn parse_status_line(head &string) int {
+    $sp := -1
+    for i in 0:head.len {
+        if (*head)[i] == 32 {
+            sp = i
+            <-
+        }
+        if (*head)[i] == 10 { <- }
+    }
+    if sp < 0 || sp + 4 > head.len { << 0 }
+    $end := sp + 1
+    while end < head.len && (*head)[end] >= 48 && (*head)[end] <= 57 {
+        end += 1
+    }
+    if end == sp + 1 { << 0 }
+    code_s := (*head)[sp + 1:end]
+    << strconv.atoi(&code_s) >>> (_) { << 0 }
+}
+
+fn close_conn(conn $&transport.Conn) int {
+    _ := conn.close() >>> (_) { << 0 }
+    << 0
+}
+
+fn conn_read_or(conn $&transport.Conn, max int) string {
+    << conn.read(max) >>> (_) { << "" }
+}
+
+fn open_stream_attempt(ep &transport.Endpoint, raw_req &string, timeout_ns int,
+                       ok_out $&bool, retriable_out $&bool, err_code_out $&int,
+                       err_msg_out $&string, rest_out $&string) transport.Conn {
+    *ok_out = false
+    *retriable_out = false
+    *err_code_out = 0
+    *err_msg_out = ""
+    *rest_out = ""
+    ep_copy := transport.Endpoint{
+        scheme: ep.scheme + "",
+        host: ep.host + "",
+        port: ep.port,
+        path: ep.path + "",
+        secure: ep.secure
+    }
+    cfg := tls.new_config(ep_copy.host + "")
+    $conn := transport.dial(ep_copy, cfg, timeout_ns) >>> (err) {
+        *retriable_out = true
+        *err_msg_out = err.msg()
+        << transport.closed_conn()
+    }
+    _ := conn.write_all(*raw_req + "") >>> (err) {
+        _ := close_conn($&conn)
+        *retriable_out = true
+        *err_msg_out = err.msg()
+        << transport.closed_conn()
+    }
+    $buf := ""
+    crlf2 := "\r\n\r\n"
+    $hdr_end := -1
+    while hdr_end < 0 {
+        chunk := conn.read(8192) >>> (err) {
+            _ := close_conn($&conn)
+            *retriable_out = true
+            *err_msg_out = err.msg()
+            << transport.closed_conn()
+        }
+        if chunk.len == 0 { <- }
+        buf = buf + chunk
+        hdr_end = find_substr_from(&buf, &crlf2, 0)
+    }
+    if hdr_end < 0 {
+        _ := close_conn($&conn)
+        *retriable_out = true
+        *err_msg_out = "anthropic: incomplete HTTP headers"
+        << transport.closed_conn()
+    }
+    head := buf[0:hdr_end]
+    status := parse_status_line(&head)
+    $rest := buf[(hdr_end + 4):buf.len]
+    if status < 200 || status >= 300 {
+        for {
+            chunk := conn.read(8192) >>> (_) { <- }
+            if chunk.len == 0 { <- }
+            rest = rest + chunk
+        }
+        _ := close_conn($&conn)
+        *err_code_out = status
+        *err_msg_out = extract_error_msg(status, &rest)
+        *retriable_out = is_retriable_status(status)
+        << transport.closed_conn()
+    }
+    *ok_out = true
+    *err_code_out = status
+    *rest_out = rest
+    << conn
+}
+
+fn open_stream_retry(c &Client, req &MessagesRequest, rest_out $&string) transport.Conn {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    body := encode_messages_body(req, true)
+    raw_req := build_http_req(&ep, c, &body)
+    $max_r := c.max_retries
+    if max_r < 0 { max_r = 0 }
+    $attempt := 0
+    for {
+        $ok := false
+        $retriable := false
+        $err_code := 0
+        $err_msg := ""
+        $rest := ""
+        $conn := open_stream_attempt(&ep, &raw_req, c.timeout_ns, $&ok, $&retriable, $&err_code, $&err_msg, $&rest)
+        if ok {
+            *rest_out = rest
+            << conn
+        }
+        _ := close_conn($&conn)
+        if retriable && attempt < max_r {
+            sleep_retry_backoff(attempt)
+            attempt += 1
+            ->
+        }
+        if err_code != 0 {
+            >>> errors.code(err_code, err_msg)
+        }
+        >>> errors.new(err_msg)
+    }
+    >>> errors.new("anthropic: stream failed")
+}
+
+fn copy_stream_event(ev &StreamEvent) StreamEvent {
+    << StreamEvent{
+        event_type: ev.event_type + "",
+        text_delta: ev.text_delta + "",
+        thinking_delta: ev.thinking_delta + "",
+        stop_reason: ev.stop_reason + "",
+        tool_use: ToolUse{id: ev.tool_use.id + "", name: ev.tool_use.name + "", input_json: ev.tool_use.input_json + ""},
+        has_tool_use: ev.has_tool_use,
+        usage: ev.usage,
+        done: ev.done
+    }
+}
+
+fn emit_event(ev StreamEvent, use_cb bool, on_event fn(StreamEvent) bool,
+              has_ch bool, ch chan StreamEvent, stopped $&bool) {
+    if has_ch {
+        ch <- copy_stream_event(&ev)
+    }
+    if use_cb {
+        if !on_event(copy_stream_event(&ev)) {
+            *stopped = true
+        }
+    }
+}
+
+fn copy_blocks(src &[]ContentBlock) []ContentBlock {
+    $out := []ContentBlock{}
+    for i in 0:src.len {
+        b := &src[i]
+        out.push(ContentBlock{
+            kind: b.kind + "",
+            text: b.text + "",
+            thinking: b.thinking + "",
+            id: b.id + "",
+            name: b.name + "",
+            input_json: b.input_json + "",
+            media_type: b.media_type + "",
+            data: b.data + "",
+            cache_control: b.cache_control + ""
+        })
+    }
+    << out
+}
+
+fn messages_stream_impl(c &Client, req &MessagesRequest, use_cb bool, on_event fn(StreamEvent) bool,
+                        has_ch bool, ch chan StreamEvent) MessagesResponse {
+    $line_buf := ""
+    $conn := open_stream_retry(c, req, $&line_buf) >>>
+    $out := MessagesResponse{
+        id: "",
+        model: req.model,
+        role: "assistant",
+        stop_reason: "",
+        content: "",
+        thinking: "",
+        tool_uses: []ToolUse{},
+        blocks: []ContentBlock{},
+        usage: Usage{input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0}
+    }
+    $open_blocks := []ContentBlock{}
+    $stopped := false
+    for {
+        $processed := 0
+        for {
+            $nl := -1
+            for i in processed:line_buf.len {
+                if line_buf[i] == 10 {
+                    nl = i
+                    <-
+                }
+            }
+            if nl < 0 { <- }
+            $line := line_buf[processed:nl]
+            processed = nl + 1
+            line = strings.trim_space(&line)
+            if line.len == 0 || !strings.has_prefix(&line, "data:") { -> }
+            $payload := line[5:line.len]
+            payload = strings.trim_space(&payload)
+            if payload.len == 0 { -> }
+            doc := json.parse(&payload)
+            if !doc.ok() || !doc.is_dict(doc.root()) { -> }
+            root := doc.root()
+            ev_t := json_str_or(&doc, root, "type", "")
+            if ev_t == "message_start" {
+                if doc.has(root, "message") {
+                    mnode := doc.get(root, "message") >>> (_) { -> }
+                    out.id = json_str_or(&doc, mnode, "id", out.id)
+                    out.model = json_str_or(&doc, mnode, "model", out.model)
+                    mu := parse_usage(&doc, mnode)
+                    out.usage.input_tokens = mu.input_tokens
+                    out.usage.cache_creation_input_tokens = mu.cache_creation_input_tokens
+                    out.usage.cache_read_input_tokens = mu.cache_read_input_tokens
+                }
+            } else if ev_t == "content_block_start" {
+                idx := json_int_or(&doc, root, "index", 0)
+                while open_blocks.len <= idx {
+                    open_blocks.push(ContentBlock{kind: "", text: "", thinking: "", id: "", name: "", input_json: "", media_type: "", data: "", cache_control: ""})
+                }
+                if doc.has(root, "content_block") {
+                    cb := doc.get(root, "content_block") >>> (_) { -> }
+                    open_blocks[idx].kind = json_str_or(&doc, cb, "type", "text")
+                    open_blocks[idx].text = json_str_or(&doc, cb, "text", "")
+                    open_blocks[idx].thinking = json_str_or(&doc, cb, "thinking", "")
+                    open_blocks[idx].id = json_str_or(&doc, cb, "id", "")
+                    open_blocks[idx].name = json_str_or(&doc, cb, "name", "")
+                    open_blocks[idx].input_json = ""
+                }
+            } else if ev_t == "content_block_delta" {
+                idx := json_int_or(&doc, root, "index", 0)
+                while open_blocks.len <= idx {
+                    open_blocks.push(ContentBlock{kind: "text", text: "", thinking: "", id: "", name: "", input_json: "", media_type: "", data: "", cache_control: ""})
+                }
+                if doc.has(root, "delta") {
+                    dn := doc.get(root, "delta") >>> (_) { -> }
+                    dt := json_str_or(&doc, dn, "type", "")
+                    if dt == "text_delta" {
+                        td := json_str_or(&doc, dn, "text", "")
+                        out.content = out.content + td
+                        open_blocks[idx].text = open_blocks[idx].text + td
+                        emit_event(StreamEvent{
+                            event_type: "text_delta", text_delta: td, thinking_delta: "",
+                            stop_reason: "", tool_use: ToolUse{id: "", name: "", input_json: ""},
+                            has_tool_use: false, usage: out.usage, done: false
+                        }, use_cb, on_event, has_ch, ch, $&stopped)
+                    } else if dt == "thinking_delta" {
+                        thd := json_str_or(&doc, dn, "thinking", "")
+                        out.thinking = out.thinking + thd
+                        open_blocks[idx].thinking = open_blocks[idx].thinking + thd
+                        emit_event(StreamEvent{
+                            event_type: "thinking_delta", text_delta: "", thinking_delta: thd,
+                            stop_reason: "", tool_use: ToolUse{id: "", name: "", input_json: ""},
+                            has_tool_use: false, usage: out.usage, done: false
+                        }, use_cb, on_event, has_ch, ch, $&stopped)
+                    } else if dt == "input_json_delta" {
+                        pj := json_str_or(&doc, dn, "partial_json", "")
+                        open_blocks[idx].input_json = open_blocks[idx].input_json + pj
+                    }
+                }
+            } else if ev_t == "content_block_stop" {
+                idx := json_int_or(&doc, root, "index", 0)
+                if idx >= 0 && idx < open_blocks.len && open_blocks[idx].kind == "tool_use" {
+                    $fin_in := open_blocks[idx].input_json + ""
+                    if fin_in.len == 0 { fin_in = "{}" }
+                    open_blocks[idx].input_json = fin_in + ""
+                    tu := ToolUse{
+                        id: open_blocks[idx].id + "",
+                        name: open_blocks[idx].name + "",
+                        input_json: fin_in + ""
+                    }
+                    out.tool_uses.push(ToolUse{id: tu.id + "", name: tu.name + "", input_json: tu.input_json + ""})
+                    emit_event(StreamEvent{
+                        event_type: "tool_use", text_delta: "", thinking_delta: "",
+                        stop_reason: "", tool_use: tu, has_tool_use: true,
+                        usage: out.usage, done: false
+                    }, use_cb, on_event, has_ch, ch, $&stopped)
+                }
+            } else if ev_t == "message_delta" {
+                if doc.has(root, "delta") {
+                    dn := doc.get(root, "delta") >>> (_) { -> }
+                    out.stop_reason = json_str_or(&doc, dn, "stop_reason", out.stop_reason)
+                }
+                du := parse_usage(&doc, root)
+                if du.output_tokens > 0 { out.usage.output_tokens = du.output_tokens }
+            } else if ev_t == "message_stop" {
+                stopped = true
+                <-
+            }
+            if stopped { <- }
+        }
+        if processed > 0 {
+            line_buf = line_buf[processed:line_buf.len]
+        }
+        if stopped { <- }
+        chunk := conn_read_or($&conn, 8192)
+        if chunk.len == 0 { <- }
+        line_buf = line_buf + chunk
+    }
+    _ := close_conn($&conn)
+    out.blocks = copy_blocks(&open_blocks)
+    emit_event(StreamEvent{
+        event_type: "message_stop", text_delta: "", thinking_delta: "",
+        stop_reason: out.stop_reason + "", tool_use: ToolUse{id: "", name: "", input_json: ""},
+        has_tool_use: false, usage: out.usage, done: true
+    }, use_cb, on_event, has_ch, ch, $&stopped)
+    << out
+}
+
+pub fn (c &Client) messages_stream(req &MessagesRequest, on_event fn(StreamEvent) bool) MessagesResponse {
+    dummy_ch := chan StreamEvent{cap: 1}
+    << messages_stream_impl(c, req, true, on_event, false, dummy_ch) >>>
+}
+
+fn ignore_ev(ev StreamEvent) bool {
+    << true
+}
+
+pub fn (c &Client) messages_stream_chan(req &MessagesRequest, ch chan StreamEvent) MessagesResponse {
+    << messages_stream_impl(c, req, false, ignore_ev, true, ch) >>>
+}

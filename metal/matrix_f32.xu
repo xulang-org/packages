@@ -98,6 +98,12 @@ pub fn gemm_f32_nt(dst $&F32Matrix, a &F32Matrix, b &F32Matrix) Fence {
     << Fence{handle: handle}
 }
 
+// gemm_f32_tn computes dst = a^T @ b where a is [K, M], b is [K, N], dst is [M, N].
+pub fn gemm_f32_tn(dst $&F32Matrix, a &F32Matrix, b &F32Matrix) Fence {
+    handle := checked(metal_native.gemm_f32_tn(dst.handle, a.handle, b.handle)) >>>
+    << Fence{handle: handle}
+}
+
 // rmsnorm_f32 computes row-wise RMSNorm(x, eps) * weight for x [M, N] and weight [1, N].
 pub fn rmsnorm_f32(dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, eps f64) Fence {
     handle := checked(metal_native.rmsnorm_f32(dst.handle, x.handle, weight.handle, math.float32_bits(eps))) >>>
@@ -152,6 +158,23 @@ pub fn rope_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, the
     << Fence{handle: handle}
 }
 
+// rope_interleaved_f32 applies interleaved even/odd pair rotary position embeddings over [seq_len, n_heads * head_dim].
+pub fn rope_interleaved_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, theta f64) Fence {
+    handle := checked(metal_native.rope_interleaved_f32(dst.handle, x.handle, pos_offset, head_dim, math.float32_bits(theta))) >>>
+    << Fence{handle: handle}
+}
+
+// rope_yarn_f32 applies YaRN NTK-by-parts scaled rotary embeddings (split-half or interleaved, optional partial rope_dim).
+pub fn rope_yarn_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, rope_dim int,
+                     interleaved bool, theta f64, scale f64, orig_ctx int,
+                     beta_fast f64, beta_slow f64, attn_factor f64) Fence {
+    $il := 0
+    if interleaved { il = 1 }
+    params := [pos_offset, head_dim, rope_dim, il, orig_ctx, math.float32_bits(theta), math.float32_bits(scale), math.float32_bits(beta_fast), math.float32_bits(beta_slow), math.float32_bits(attn_factor)]
+    handle := checked(metal_native.rope_yarn_f32(dst.handle, x.handle, &params)) >>>
+    << Fence{handle: handle}
+}
+
 // causal_attention_f32 computes multi-head causal GQA attention:
 // q, dst: [seq_len, n_heads * head_dim]; k, v: [kv_len, n_kv_heads * head_dim].
 pub fn causal_attention_f32(dst $&F32Matrix, q &F32Matrix, k &F32Matrix, v &F32Matrix,
@@ -188,5 +211,81 @@ pub fn embedding_f32(dst $&F32Matrix, table &F32Matrix, ids &[]int) Fence {
 // argmax_f32 writes the per-row argmax column index (as float32) of x [M, N] into dst [M, 1].
 pub fn argmax_f32(dst $&F32Matrix, x &F32Matrix) Fence {
     handle := checked(metal_native.argmax_f32(dst.handle, x.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// add_rmsnorm_f32 fuses dst_sum = a + b and dst_norm = rmsnorm(dst_sum, eps) * weight.
+pub fn add_rmsnorm_f32(dst_norm $&F32Matrix, dst_sum $&F32Matrix, a &F32Matrix, b &F32Matrix,
+                       weight &F32Matrix, eps f64) Fence {
+    handle := checked(metal_native.add_rmsnorm_f32(dst_norm.handle, dst_sum.handle, a.handle, b.handle, weight.handle, math.float32_bits(eps))) >>>
+    << Fence{handle: handle}
+}
+
+// geglu_f32 computes element-wise GELU(gate) * up over [M, N] matrices.
+pub fn geglu_f32(dst $&F32Matrix, gate &F32Matrix, up &F32Matrix) Fence {
+    handle := checked(metal_native.geglu_f32(dst.handle, gate.handle, up.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// silu_f32 computes element-wise SiLU(x) = x / (1 + exp(-x)) over [M, N] matrices.
+pub fn silu_f32(dst $&F32Matrix, x &F32Matrix) Fence {
+    handle := checked(metal_native.silu_f32(dst.handle, x.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// log_softmax_f32 computes row-wise log(softmax(x)) over [M, N] matrices.
+pub fn log_softmax_f32(dst $&F32Matrix, x &F32Matrix) Fence {
+    handle := checked(metal_native.log_softmax_f32(dst.handle, x.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// moe_topk_f32 routes each token row of logits [M, E] to top-k expert indices and weights [M, k].
+pub fn moe_topk_f32(out_idx $&F32Matrix, out_w $&F32Matrix, logits &F32Matrix,
+                    k int, use_sigmoid bool, normalize_topk bool, weight_scale f64) Fence {
+    $us := 0
+    if use_sigmoid { us = 1 }
+    $nt := 0
+    if normalize_topk { nt = 1 }
+    handle := checked(metal_native.moe_topk_f32(out_idx.handle, out_w.handle, logits.handle, k, us, nt, math.float32_bits(weight_scale))) >>>
+    << Fence{handle: handle}
+}
+
+// moe_weighted_add_f32 reduces expert_outs [M * k, D] with routing weights [M, k] into dst [M, D].
+pub fn moe_weighted_add_f32(dst $&F32Matrix, expert_outs &F32Matrix, weights &F32Matrix) Fence {
+    handle := checked(metal_native.moe_weighted_add_f32(dst.handle, expert_outs.handle, weights.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// lora_add_f32 accumulates dst += scale * (x @ A^T) @ B^T over [M, in_dim], A [rank, in_dim], B [out_dim, rank].
+pub fn lora_add_f32(dst $&F32Matrix, x &F32Matrix, a &F32Matrix, b &F32Matrix, scale f64) Fence {
+    handle := checked(metal_native.lora_add_f32(dst.handle, x.handle, a.handle, b.handle, math.float32_bits(scale))) >>>
+    << Fence{handle: handle}
+}
+
+// adamw_step_f32 updates param, m_buf, and v_buf in-place on GPU using AdamW moments and weight decay.
+pub fn adamw_step_f32(param $&F32Matrix, grad &F32Matrix, m_buf $&F32Matrix, v_buf $&F32Matrix,
+                      lr f64, beta1 f64, beta2 f64, eps f64, weight_decay f64, step int) Fence {
+    params := [math.float32_bits(lr), math.float32_bits(beta1), math.float32_bits(beta2), math.float32_bits(eps), math.float32_bits(weight_decay), step]
+    handle := checked(metal_native.adamw_step_f32(param.handle, grad.handle, m_buf.handle, v_buf.handle, &params)) >>>
+    << Fence{handle: handle}
+}
+
+// cross_entropy_grad_f32 computes row-wise cross-entropy loss [B, 1] and softmax gradient [B, V] in-place.
+pub fn cross_entropy_grad_f32(dlogits $&F32Matrix, losses $&F32Matrix, logits &F32Matrix, targets &F32Matrix) Fence {
+    handle := checked(metal_native.cross_entropy_grad_f32(dlogits.handle, losses.handle, logits.handle, targets.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// rmsnorm_backward_f32 computes dx [R, C] and dw [1, C] from dy [R, C], x [R, C], and weight [1, C].
+pub fn rmsnorm_backward_f32(dx $&F32Matrix, dw $&F32Matrix, dy &F32Matrix,
+                            x &F32Matrix, weight &F32Matrix, eps f64) Fence {
+    handle := checked(metal_native.rmsnorm_backward_f32(dx.handle, dw.handle, dy.handle, x.handle, weight.handle, math.float32_bits(eps))) >>>
+    << Fence{handle: handle}
+}
+
+// swiglu_backward_f32 computes dgate [R, C] and dup [R, C] from dy [R, C], gate [R, C], and up [R, C].
+pub fn swiglu_backward_f32(dgate $&F32Matrix, dup $&F32Matrix, dy &F32Matrix,
+                           gate &F32Matrix, up &F32Matrix) Fence {
+    handle := checked(metal_native.swiglu_backward_f32(dgate.handle, dup.handle, dy.handle, gate.handle, up.handle)) >>>
     << Fence{handle: handle}
 }

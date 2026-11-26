@@ -2,8 +2,10 @@
 
 #encoding/json
 #errors
+#net/http
 #strconv
 #strings
+#time
 #crypto/tls
 transport #github.com/xulang-org/packages/transport
 
@@ -13,6 +15,8 @@ pub struct Client {
     pub base_url string
     pub api_key string
     pub timeout_ns int
+    pub max_retries int
+    pub extra_headers []string
 }
 
 pub struct ToolCall {
@@ -22,9 +26,17 @@ pub struct ToolCall {
     pub arguments string
 }
 
+pub struct ContentPart {
+    pub kind string
+    pub text string
+    pub image_url string
+    pub detail string
+}
+
 pub struct Message {
     pub role string
     pub content string
+    pub parts []ContentPart
     pub tool_call_id string
     pub tool_calls []ToolCall
 }
@@ -41,11 +53,44 @@ pub struct ChatRequest {
     pub tools []ToolDef
     pub temperature f64
     pub has_temperature bool
+    pub top_p f64
+    pub has_top_p bool
+    pub presence_penalty f64
+    pub has_presence_penalty bool
+    pub frequency_penalty f64
+    pub has_frequency_penalty bool
+    pub max_tokens int
+    pub max_completion_tokens int
+    pub seed int
+    pub has_seed bool
+    pub stop []string
+    pub tool_choice string
+    pub response_format_json string
+    pub extra_body_json string
+    pub include_usage bool
+}
+
+pub struct CompletionRequest {
+    pub model string
+    pub prompt string
+    pub temperature f64
+    pub has_temperature bool
+    pub top_p f64
+    pub has_top_p bool
     pub max_tokens int
     pub seed int
     pub has_seed bool
     pub stop []string
-    pub include_usage bool
+    pub echo bool
+    pub extra_body_json string
+}
+
+pub struct CompletionResponse {
+    pub id string
+    pub model string
+    pub text string
+    pub finish_reason string
+    pub usage Usage
 }
 
 pub struct Usage {
@@ -58,6 +103,7 @@ pub struct ChatResponse {
     pub id string
     pub model string
     pub content string
+    pub reasoning_content string
     pub finish_reason string
     pub tool_calls []ToolCall
     pub usage Usage
@@ -65,6 +111,7 @@ pub struct ChatResponse {
 
 pub struct StreamDelta {
     pub content string
+    pub reasoning_content string
     pub finish_reason string
     pub tool_calls []ToolCall
     pub has_usage bool
@@ -88,6 +135,49 @@ pub struct ModelInfo {
     pub object string
 }
 
+pub struct ResponsesToolCall {
+    pub id string
+    pub call_id string
+    pub name string
+    pub arguments string
+}
+
+pub struct ResponsesRequest {
+    pub model string
+    pub input string
+    pub input_json string
+    pub instructions string
+    pub previous_response_id string
+    pub tools []ToolDef
+    pub temperature f64
+    pub has_temperature bool
+    pub top_p f64
+    pub has_top_p bool
+    pub max_output_tokens int
+    pub tool_choice string
+    pub extra_body_json string
+}
+
+pub struct ResponsesResponse {
+    pub id string
+    pub model string
+    pub status string
+    pub output_text string
+    pub tool_calls []ResponsesToolCall
+    pub usage Usage
+}
+
+pub struct ResponsesStreamEvent {
+    pub event_type string
+    pub text_delta string
+    pub response_id string
+    pub status string
+    pub tool_calls []ResponsesToolCall
+    pub has_usage bool
+    pub usage Usage
+    pub done bool
+}
+
 pub fn new_client(base_url string, api_key string) Client {
     $url := base_url + ""
     if url.len > 0 && url[url.len - 1] == 47 {
@@ -96,15 +186,96 @@ pub fn new_client(base_url string, api_key string) Client {
     if url.len == 0 {
         url = "https://api.openai.com"
     }
-    << Client{base_url: url, api_key: api_key, timeout_ns: DEFAULT_TIMEOUT_NS}
+    << Client{
+        base_url: url,
+        api_key: api_key,
+        timeout_ns: DEFAULT_TIMEOUT_NS,
+        max_retries: 0,
+        extra_headers: []string{}
+    }
+}
+
+pub fn (c $&Client) set_max_retries(n int) {
+    if n < 0 {
+        c.max_retries = 0
+        <<
+    }
+    c.max_retries = n
+}
+
+pub fn (c $&Client) add_header(name string, value string) {
+    c.extra_headers.push(name + ": " + value)
+}
+
+pub fn (c &Client) clone_client() Client {
+    $hdrs := []string{}
+    for i in 0:c.extra_headers.len {
+        hdrs.push(c.extra_headers[i] + "")
+    }
+    << Client{
+        base_url: c.base_url + "",
+        api_key: c.api_key + "",
+        timeout_ns: c.timeout_ns,
+        max_retries: c.max_retries,
+        extra_headers: ~hdrs
+    }
+}
+
+pub fn responses_input_text_item(role string, text string) string {
+    << "{\"type\":\"message\",\"role\":" + json.quote(&role) +
+       ",\"content\":[{\"type\":\"input_text\",\"text\":" + json.quote(&text) + "}]}"
+}
+
+pub fn responses_function_call_output_item(call_id string, output string) string {
+    << "{\"type\":\"function_call_output\",\"call_id\":" + json.quote(&call_id) +
+       ",\"output\":" + json.quote(&output) + "}"
+}
+
+pub fn responses_input_array(items &[]string) string {
+    $out := "["
+    for i in 0:items.len {
+        if i > 0 { out = out + "," }
+        out = out + items[i]
+    }
+    << out + "]"
+}
+
+pub fn text_part(text string) ContentPart {
+    << ContentPart{kind: "text", text: text, image_url: "", detail: ""}
+}
+
+pub fn image_url_part(url string, detail string) ContentPart {
+    << ContentPart{kind: "image_url", text: "", image_url: url, detail: detail}
+}
+
+pub fn image_base64_part(mime_type string, b64_data string, detail string) ContentPart {
+    << ContentPart{
+        kind: "image_url",
+        text: "",
+        image_url: "data:" + mime_type + ";base64," + b64_data,
+        detail: detail
+    }
 }
 
 pub fn message(role string, content string) Message {
-    << Message{role: role, content: content, tool_call_id: "", tool_calls: []ToolCall{}}
+    << Message{role: role, content: content, parts: []ContentPart{}, tool_call_id: "", tool_calls: []ToolCall{}}
+}
+
+pub fn message_parts(role string, parts []ContentPart) Message {
+    << Message{role: role, content: "", parts: ~parts, tool_call_id: "", tool_calls: []ToolCall{}}
 }
 
 pub fn tool_message(tool_call_id string, content string) Message {
-    << Message{role: "tool", content: content, tool_call_id: tool_call_id, tool_calls: []ToolCall{}}
+    << Message{role: "tool", content: content, parts: []ContentPart{}, tool_call_id: tool_call_id, tool_calls: []ToolCall{}}
+}
+
+pub fn json_schema_format(name string, schema_json string, strict bool) string {
+    $st := "false"
+    if strict { st = "true" }
+    $sch := schema_json + ""
+    if sch.len == 0 { sch = "{\"type\":\"object\"}" }
+    << "{\"type\":\"json_schema\",\"json_schema\":{\"name\":" + json.quote(&name) +
+       ",\"strict\":" + st + ",\"schema\":" + sch + "}}"
 }
 
 pub fn tool(name string, description string, parameters_json string) ToolDef {
@@ -118,16 +289,61 @@ pub fn chat_request(model string, messages []Message) ChatRequest {
         tools: []ToolDef{},
         temperature: 0.0,
         has_temperature: false,
+        top_p: 0.0,
+        has_top_p: false,
+        presence_penalty: 0.0,
+        has_presence_penalty: false,
+        frequency_penalty: 0.0,
+        has_frequency_penalty: false,
+        max_tokens: 0,
+        max_completion_tokens: 0,
+        seed: 0,
+        has_seed: false,
+        stop: []string{},
+        tool_choice: "",
+        response_format_json: "",
+        extra_body_json: "",
+        include_usage: false
+    }
+}
+
+pub fn new_completion_request(model string, prompt string) CompletionRequest {
+    << CompletionRequest{
+        model: model,
+        prompt: prompt,
+        temperature: 0.0,
+        has_temperature: false,
+        top_p: 0.0,
+        has_top_p: false,
         max_tokens: 0,
         seed: 0,
         has_seed: false,
         stop: []string{},
-        include_usage: false
+        echo: false,
+        extra_body_json: ""
     }
 }
 
 pub fn embed_request(model string, inputs []string) EmbedRequest {
     << EmbedRequest{model: model, inputs: ~inputs}
+}
+
+pub fn new_responses_request(model string, input string) ResponsesRequest {
+    << ResponsesRequest{
+        model: model,
+        input: input,
+        input_json: "",
+        instructions: "",
+        previous_response_id: "",
+        tools: []ToolDef{},
+        temperature: 0.0,
+        has_temperature: false,
+        top_p: 0.0,
+        has_top_p: false,
+        max_output_tokens: 0,
+        tool_choice: "",
+        extra_body_json: ""
+    }
 }
 
 fn join_endpoint_path(base_path string, suffix string) string {
@@ -149,13 +365,17 @@ fn default_port_for(raw &string) int {
     << 80
 }
 
-fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_key &string, body &string) string {
+fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_key &string,
+                      extra_headers &[]string, body &string) string {
     full_path := join_endpoint_path(ep.path, suffix)
     $raw := method + " " + full_path + " HTTP/1.1\r\n"
     raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\n"
     raw = raw + "Accept: application/json, text/event-stream\r\n"
     if api_key.len > 0 {
         raw = raw + "Authorization: Bearer " + *api_key + "\r\n"
+    }
+    for hi in 0:extra_headers.len {
+        raw = raw + extra_headers[hi] + "\r\n"
     }
     if body.len > 0 || method == "POST" {
         raw = raw + "Content-Type: application/json\r\n"
@@ -168,24 +388,85 @@ fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_
     << raw
 }
 
-fn check_http_error(status int, body &string) int {
-    if status >= 200 && status < 300 { << 0 }
+fn extract_http_error_msg(status int, body &string) string {
     $msg := "openai: HTTP " + str(status)
     doc := json.parse(body)
     if doc.ok() && doc.is_dict(doc.root()) {
         root := doc.root()
         if doc.has(root, "error") {
-            enode := doc.get(root, "error") >>> (_) { << 0 }
+            enode := doc.get(root, "error") >>> (_) { << msg }
             if doc.is_dict(enode) && doc.has(enode, "message") {
-                mnode := doc.get(enode, "message") >>> (_) { << 0 }
+                mnode := doc.get(enode, "message") >>> (_) { << msg }
                 if doc.is_string(mnode) {
-                    emsg := doc.as_string(mnode) >>> (_) { << 0 }
+                    emsg := doc.as_string(mnode) >>> (_) { << msg }
                     if emsg.len > 0 { msg = emsg }
                 }
             }
         }
     }
+    << msg
+}
+
+fn check_http_error(status int, body &string) int {
+    if status >= 200 && status < 300 { << 0 }
+    msg := extract_http_error_msg(status, body)
     >>> errors.code(status, msg)
+}
+
+fn sleep_retry_backoff(attempt int) {
+    $shift := attempt
+    if shift > 6 { shift = 6 }
+    $ms := 25 << shift
+    if ms > 2000 { ms = 2000 }
+    time.sleep(ms * time.millisecond())
+}
+
+fn try_request_raw(ep &transport.Endpoint, raw_req &string, method &string, err_out $&string) http.Response {
+    *err_out = ""
+    ep_copy := transport.Endpoint{
+        scheme: ep.scheme + "",
+        host: ep.host + "",
+        port: ep.port,
+        path: ep.path + "",
+        secure: ep.secure
+    }
+    cfg := tls.new_config(ep_copy.host + "")
+    resp := transport.request_raw(ep_copy, cfg, *raw_req + "", *method + "") >>> (err) {
+        *err_out = err.msg()
+        << http.new_response()
+    }
+    << resp
+}
+
+fn request_raw_retry(c &Client, method string, suffix string, body &string) http.Response {
+    bu := c.base_url + ""
+    ak := c.api_key + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    raw_req := build_http_request(method + "", &ep, suffix, &ak, &c.extra_headers, body)
+    $max_r := c.max_retries
+    if max_r < 0 { max_r = 0 }
+    $attempt := 0
+    for {
+        $err_msg := ""
+        resp := try_request_raw(&ep, &raw_req, &method, $&err_msg)
+        if err_msg.len > 0 {
+            if attempt < max_r {
+                sleep_retry_backoff(attempt)
+                attempt += 1
+                ->
+            }
+            >>> errors.new(err_msg)
+        }
+        sc := resp.status_code
+        if (sc == 429 || sc >= 500) && attempt < max_r {
+            sleep_retry_backoff(attempt)
+            attempt += 1
+            ->
+        }
+        << resp
+    }
+    << http.new_response()
 }
 
 fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
@@ -235,6 +516,12 @@ fn parse_usage(doc &json.Doc, root int) Usage {
     << u
 }
 
+fn parse_reasoning(doc &json.Doc, obj int) string {
+    r := json_str_or(doc, obj, "reasoning_content", "")
+    if r.len > 0 { << r }
+    << json_str_or(doc, obj, "reasoning", "")
+}
+
 fn parse_tool_calls(doc &json.Doc, msg_obj int) []ToolCall {
     $out := []ToolCall{}
     if !doc.is_dict(msg_obj) || !doc.has(msg_obj, "tool_calls") { << out }
@@ -258,12 +545,76 @@ fn parse_tool_calls(doc &json.Doc, msg_obj int) []ToolCall {
     << out
 }
 
+fn merge_stream_tool_calls(doc &json.Doc, msg_obj int, acc $&[]ToolCall) []ToolCall {
+    $delta_out := []ToolCall{}
+    if !doc.is_dict(msg_obj) || !doc.has(msg_obj, "tool_calls") { << delta_out }
+    arr := doc.get(msg_obj, "tool_calls") >>> (_) { << delta_out }
+    if !doc.is_list(arr) { << delta_out }
+    cnt := doc.count(arr)
+    for i in 0:cnt {
+        tc := doc.at(arr, i) >>> (_) { -> }
+        if !doc.is_dict(tc) { -> }
+        $idx := json_int_or(doc, tc, "index", i)
+        if idx < 0 { idx = 0 }
+        id := json_str_or(doc, tc, "id", "")
+        raw_kind := json_str_or(doc, tc, "type", "")
+        $dkind := raw_kind + ""
+        if dkind.len == 0 { dkind = "function" }
+        $name := ""
+        $args := ""
+        if doc.has(tc, "function") {
+            fn_obj := doc.get(tc, "function") >>> (_) { -> }
+            name = json_str_or(doc, fn_obj, "name", "")
+            args = json_str_or(doc, fn_obj, "arguments", "")
+        }
+        while acc.len <= idx {
+            acc.push(ToolCall{id: "", kind: "function", name: "", arguments: ""})
+        }
+        if id.len > 0 { acc[idx].id = id + "" }
+        if raw_kind.len > 0 { acc[idx].kind = raw_kind + "" }
+        if name.len > 0 { acc[idx].name = name + "" }
+        if args.len > 0 { acc[idx].arguments = acc[idx].arguments + args }
+        delta_out.push(ToolCall{id: id, kind: dkind, name: name, arguments: args})
+    }
+    << delta_out
+}
+
+fn append_extra_json_fields(s $&string, raw &string) {
+    $t := strings.trim_space(raw)
+    if t.len == 0 { << }
+    if t.len >= 2 && (t[0] & 255) == 123 && (t[t.len - 1] & 255) == 125 {
+        t = strings.trim_space(&t[1:t.len - 1])
+    }
+    if t.len > 0 {
+        *s = *s + "," + t
+    }
+}
+
 fn encode_chat_body(req &ChatRequest, stream bool) string {
     $s := "{\"model\":" + json.quote(&req.model) + ",\"messages\":["
     for i in 0:req.messages.len {
         if i > 0 { s = s + "," }
         m := &req.messages[i]
-        s = s + "{\"role\":" + json.quote(&m.role) + ",\"content\":" + json.quote(&m.content)
+        s = s + "{\"role\":" + json.quote(&m.role)
+        if m.parts.len > 0 {
+            s = s + ",\"content\":["
+            for pi in 0:m.parts.len {
+                if pi > 0 { s = s + "," }
+                p := &m.parts[pi]
+                if p.kind == "image_url" {
+                    s = s + "{\"type\":\"image_url\",\"image_url\":{\"url\":" + json.quote(&p.image_url)
+                    if p.detail.len > 0 {
+                        s = s + ",\"detail\":" + json.quote(&p.detail)
+                    }
+                    s = s + "}}"
+                } else {
+                    s = s + "{\"type\":\"text\",\"text\":" + json.quote(&p.text) + "}"
+                }
+            }
+            s = s + "]"
+        } else {
+            s = s + ",\"content\":" + json.quote(&m.content)
+        }
         if m.tool_call_id.len > 0 {
             s = s + ",\"tool_call_id\":" + json.quote(&m.tool_call_id)
         }
@@ -292,12 +643,34 @@ fn encode_chat_body(req &ChatRequest, stream bool) string {
         }
         s = s + "]"
     }
+    if req.tool_choice.len > 0 {
+        if (req.tool_choice[0] & 255) == 123 {
+            s = s + ",\"tool_choice\":" + req.tool_choice
+        } else {
+            s = s + ",\"tool_choice\":" + json.quote(&req.tool_choice)
+        }
+    }
     if req.has_temperature {
         tf := fmt_float_or(req.temperature, "0.0")
         s = s + ",\"temperature\":" + tf
     }
+    if req.has_top_p {
+        pf := fmt_float_or(req.top_p, "1.0")
+        s = s + ",\"top_p\":" + pf
+    }
+    if req.has_presence_penalty {
+        pp := fmt_float_or(req.presence_penalty, "0.0")
+        s = s + ",\"presence_penalty\":" + pp
+    }
+    if req.has_frequency_penalty {
+        fp := fmt_float_or(req.frequency_penalty, "0.0")
+        s = s + ",\"frequency_penalty\":" + fp
+    }
     if req.max_tokens > 0 {
         s = s + ",\"max_tokens\":" + str(req.max_tokens)
+    }
+    if req.max_completion_tokens > 0 {
+        s = s + ",\"max_completion_tokens\":" + str(req.max_completion_tokens)
     }
     if req.has_seed {
         s = s + ",\"seed\":" + str(req.seed)
@@ -310,6 +683,12 @@ fn encode_chat_body(req &ChatRequest, stream bool) string {
         }
         s = s + "]"
     }
+    if req.response_format_json.len > 0 {
+        s = s + ",\"response_format\":" + req.response_format_json
+    }
+    if req.extra_body_json.len > 0 {
+        append_extra_json_fields($&s, &req.extra_body_json)
+    }
     if stream {
         s = s + ",\"stream\":true"
         if req.include_usage {
@@ -320,14 +699,8 @@ fn encode_chat_body(req &ChatRequest, stream bool) string {
 }
 
 pub fn (c &Client) list_models() []ModelInfo {
-    bu := c.base_url + ""
-    ak := c.api_key + ""
-    def_port := default_port_for(&bu)
-    ep := transport.parse_endpoint(bu + "", def_port) >>>
     empty_body := ""
-    raw_req := build_http_request("GET", &ep, "/v1/models", &ak, &empty_body)
-    cfg := tls.new_config(ep.host + "")
-    resp := transport.request_raw(ep, cfg, raw_req, "GET") >>>
+    resp := request_raw_retry(c, "GET", "/v1/models", &empty_body) >>>
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
@@ -354,14 +727,8 @@ pub fn (c &Client) list_models() []ModelInfo {
 }
 
 pub fn (c &Client) chat(req &ChatRequest) ChatResponse {
-    bu := c.base_url + ""
-    ak := c.api_key + ""
-    def_port := default_port_for(&bu)
-    ep := transport.parse_endpoint(bu + "", def_port) >>>
     body := encode_chat_body(req, false)
-    raw_req := build_http_request("POST", &ep, "/v1/chat/completions", &ak, &body)
-    cfg := tls.new_config(ep.host + "")
-    resp := transport.request_raw(ep, cfg, raw_req, "POST") >>>
+    resp := request_raw_retry(c, "POST", "/v1/chat/completions", &body) >>>
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
@@ -372,6 +739,7 @@ pub fn (c &Client) chat(req &ChatRequest) ChatResponse {
         id: json_str_or(&doc, root, "id", ""),
         model: json_str_or(&doc, root, "model", req.model),
         content: "",
+        reasoning_content: "",
         finish_reason: "",
         tool_calls: []ToolCall{},
         usage: parse_usage(&doc, root)
@@ -384,6 +752,7 @@ pub fn (c &Client) chat(req &ChatRequest) ChatResponse {
             if doc.has(ch0, "message") {
                 msg_obj := doc.get(ch0, "message") >>>
                 out.content = json_str_or(&doc, msg_obj, "content", "")
+                out.reasoning_content = parse_reasoning(&doc, msg_obj)
                 out.tool_calls = parse_tool_calls(&doc, msg_obj)
             }
         }
@@ -444,19 +813,32 @@ fn close_conn(conn $&transport.Conn) int {
     << 0
 }
 
-fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(StreamDelta) bool,
-                    has_ch bool, delta_ch chan StreamDelta) ChatResponse {
-    bu := c.base_url + ""
-    ak := c.api_key + ""
-    def_port := default_port_for(&bu)
-    ep := transport.parse_endpoint(bu + "", def_port) >>>
-    body := encode_chat_body(req, true)
-    raw_req := build_http_request("POST", &ep, "/v1/chat/completions", &ak, &body)
-    cfg := tls.new_config(ep.host + "")
-    $conn := transport.dial(ep, cfg, c.timeout_ns) >>>
-    _ := conn.write_all(raw_req) >>> (err) {
+fn open_stream_attempt(ep &transport.Endpoint, raw_req &string, timeout_ns int,
+                       ok_out $&bool, retriable_out $&bool, err_code_out $&int,
+                       err_msg_out $&string, rest_out $&string) transport.Conn {
+    *ok_out = false
+    *retriable_out = false
+    *err_code_out = 0
+    *err_msg_out = ""
+    *rest_out = ""
+    ep_copy := transport.Endpoint{
+        scheme: ep.scheme + "",
+        host: ep.host + "",
+        port: ep.port,
+        path: ep.path + "",
+        secure: ep.secure
+    }
+    cfg := tls.new_config(ep_copy.host + "")
+    $conn := transport.dial(ep_copy, cfg, timeout_ns) >>> (err) {
+        *retriable_out = true
+        *err_msg_out = err.msg()
+        << transport.closed_conn()
+    }
+    _ := conn.write_all(*raw_req + "") >>> (err) {
         _ := close_conn($&conn)
-        >>> err
+        *retriable_out = true
+        *err_msg_out = err.msg()
+        << transport.closed_conn()
     }
 
     $buf := ""
@@ -465,7 +847,9 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
     while hdr_end < 0 {
         chunk := conn.read(8192) >>> (err) {
             _ := close_conn($&conn)
-            >>> err
+            *retriable_out = true
+            *err_msg_out = err.msg()
+            << transport.closed_conn()
         }
         if chunk.len == 0 { <- }
         buf = buf + chunk
@@ -473,7 +857,9 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
     }
     if hdr_end < 0 {
         _ := close_conn($&conn)
-        >>> errors.new("openai: incomplete HTTP headers")
+        *retriable_out = true
+        *err_msg_out = "openai: incomplete HTTP headers"
+        << transport.closed_conn()
     }
     head := buf[0:hdr_end]
     status := parse_status_line(&head)
@@ -485,19 +871,71 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
             rest = rest + chunk
         }
         _ := close_conn($&conn)
-        _ := check_http_error(status, &rest) >>>
+        *err_code_out = status
+        *err_msg_out = extract_http_error_msg(status, &rest)
+        *retriable_out = status == 429 || status >= 500
+        << transport.closed_conn()
     }
+    *ok_out = true
+    *err_code_out = status
+    *rest_out = rest
+    << conn
+}
+
+fn open_stream_retry_suffix(c &Client, suffix string, body &string, rest_out $&string) transport.Conn {
+    bu := c.base_url + ""
+    ak := c.api_key + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    raw_req := build_http_request("POST", &ep, suffix, &ak, &c.extra_headers, body)
+    $max_r := c.max_retries
+    if max_r < 0 { max_r = 0 }
+    $attempt := 0
+    for {
+        $ok := false
+        $retriable := false
+        $err_code := 0
+        $err_msg := ""
+        $rest := ""
+        $conn := open_stream_attempt(&ep, &raw_req, c.timeout_ns, $&ok, $&retriable, $&err_code, $&err_msg, $&rest)
+        if ok {
+            *rest_out = rest
+            << conn
+        }
+        _ := close_conn($&conn)
+        if retriable && attempt < max_r {
+            sleep_retry_backoff(attempt)
+            attempt += 1
+            ->
+        }
+        if err_code != 0 {
+            >>> errors.code(err_code, err_msg)
+        }
+        >>> errors.new(err_msg)
+    }
+    >>> errors.new("openai: stream failed")
+}
+
+fn open_stream_retry(c &Client, req &ChatRequest, rest_out $&string) transport.Conn {
+    body := encode_chat_body(req, true)
+    << open_stream_retry_suffix(c, "/v1/chat/completions", &body, rest_out) >>>
+}
+
+fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(StreamDelta) bool,
+                    has_ch bool, delta_ch chan StreamDelta) ChatResponse {
+    $line_buf := ""
+    $conn := open_stream_retry(c, req, $&line_buf) >>>
 
     $out := ChatResponse{
         id: "",
         model: req.model,
         content: "",
+        reasoning_content: "",
         finish_reason: "",
         tool_calls: []ToolCall{},
         usage: Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
     }
     $stopped := false
-    $line_buf := rest
     for {
         $processed := 0
         for {
@@ -520,14 +958,14 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
                 if payload == "[DONE]" {
                     if use_cb {
                         sd_done := StreamDelta{
-                            content: "", finish_reason: out.finish_reason + "",
+                            content: "", reasoning_content: "", finish_reason: out.finish_reason + "",
                             tool_calls: []ToolCall{}, has_usage: false,
                             usage: out.usage, done: true
                         }
                         _ := on_delta(sd_done)
                     } else if has_ch {
                         sd_done := StreamDelta{
-                            content: "", finish_reason: out.finish_reason + "",
+                            content: "", reasoning_content: "", finish_reason: out.finish_reason + "",
                             tool_calls: []ToolCall{}, has_usage: false,
                             usage: out.usage, done: true
                         }
@@ -544,6 +982,7 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
                         mname := json_str_or(&doc, root, "model", "")
                         if mname.len > 0 { out.model = mname }
                         $delta_content := ""
+                        $delta_reasoning := ""
                         $delta_fr := ""
                         $delta_tcs := []ToolCall{}
                         if doc.has(root, "choices") {
@@ -561,10 +1000,11 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
                                     if delta_content.len > 0 {
                                         out.content = out.content + delta_content
                                     }
-                                    delta_tcs = parse_tool_calls(&doc, dn)
-                                    for ti in 0:delta_tcs.len {
-                                        out.tool_calls.push(delta_tcs[ti])
+                                    delta_reasoning = parse_reasoning(&doc, dn)
+                                    if delta_reasoning.len > 0 {
+                                        out.reasoning_content = out.reasoning_content + delta_reasoning
                                     }
+                                    delta_tcs = merge_stream_tool_calls(&doc, dn, $&out.tool_calls)
                                 }
                             }
                         }
@@ -578,7 +1018,8 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
                         }
                         if use_cb {
                             sd_cb := StreamDelta{
-                                content: delta_content + "", finish_reason: delta_fr + "",
+                                content: delta_content + "", reasoning_content: delta_reasoning + "",
+                                finish_reason: delta_fr + "",
                                 tool_calls: copy_tcs(&delta_tcs), has_usage: has_u,
                                 usage: out.usage, done: false
                             }
@@ -588,7 +1029,8 @@ fn chat_stream_impl(c &Client, req &ChatRequest, use_cb bool, on_delta fn(Stream
                             }
                         } else if has_ch {
                             sd_ch := StreamDelta{
-                                content: delta_content + "", finish_reason: delta_fr + "",
+                                content: delta_content + "", reasoning_content: delta_reasoning + "",
+                                finish_reason: delta_fr + "",
                                 tool_calls: copy_tcs(&delta_tcs), has_usage: has_u,
                                 usage: out.usage, done: false
                             }
@@ -624,19 +1066,13 @@ pub fn (c &Client) chat_stream_chan(req &ChatRequest, delta_ch chan StreamDelta)
 }
 
 pub fn (c &Client) embeddings(req &EmbedRequest) EmbedResponse {
-    bu := c.base_url + ""
-    ak := c.api_key + ""
-    def_port := default_port_for(&bu)
-    ep := transport.parse_endpoint(bu + "", def_port) >>>
     $body := "{\"model\":" + json.quote(&req.model) + ",\"input\":["
     for i in 0:req.inputs.len {
         if i > 0 { body = body + "," }
         body = body + json.quote(&req.inputs[i])
     }
     body = body + "]}"
-    raw_req := build_http_request("POST", &ep, "/v1/embeddings", &ak, &body)
-    cfg := tls.new_config(ep.host + "")
-    resp := transport.request_raw(ep, cfg, raw_req, "POST") >>>
+    resp := request_raw_retry(c, "POST", "/v1/embeddings", &body) >>>
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
@@ -672,4 +1108,350 @@ pub fn (c &Client) embeddings(req &EmbedRequest) EmbedResponse {
         embeddings: ~embs,
         usage: parse_usage(&doc, root)
     }
+}
+
+pub fn (c &Client) completions(req &CompletionRequest) CompletionResponse {
+    $body := "{\"model\":" + json.quote(&req.model) + ",\"prompt\":" + json.quote(&req.prompt)
+    if req.has_temperature {
+        body = body + ",\"temperature\":" + fmt_float_or(req.temperature, "0.0")
+    }
+    if req.has_top_p {
+        body = body + ",\"top_p\":" + fmt_float_or(req.top_p, "1.0")
+    }
+    if req.max_tokens > 0 {
+        body = body + ",\"max_tokens\":" + str(req.max_tokens)
+    }
+    if req.has_seed {
+        body = body + ",\"seed\":" + str(req.seed)
+    }
+    if req.stop.len > 0 {
+        body = body + ",\"stop\":["
+        for i in 0:req.stop.len {
+            if i > 0 { body = body + "," }
+            body = body + json.quote(&req.stop[i])
+        }
+        body = body + "]"
+    }
+    if req.echo {
+        body = body + ",\"echo\":true"
+    }
+    if req.extra_body_json.len > 0 {
+        append_extra_json_fields($&body, &req.extra_body_json)
+    }
+    body = body + "}"
+    resp := request_raw_retry(c, "POST", "/v1/completions", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $out := CompletionResponse{
+        id: json_str_or(&doc, root, "id", ""),
+        model: json_str_or(&doc, root, "model", req.model),
+        text: "",
+        finish_reason: "",
+        usage: parse_usage(&doc, root)
+    }
+    if doc.has(root, "choices") {
+        choices := doc.get(root, "choices") >>>
+        if doc.is_list(choices) && doc.count(choices) > 0 {
+            ch0 := doc.at(choices, 0) >>>
+            out.text = json_str_or(&doc, ch0, "text", "")
+            out.finish_reason = json_str_or(&doc, ch0, "finish_reason", "")
+        }
+    }
+    << out
+}
+
+fn encode_responses_body(req &ResponsesRequest, stream bool) string {
+    $s := "{\"model\":" + json.quote(&req.model)
+    if req.input_json.len > 0 {
+        s = s + ",\"input\":" + req.input_json
+    } else {
+        s = s + ",\"input\":" + json.quote(&req.input)
+    }
+    if req.instructions.len > 0 {
+        s = s + ",\"instructions\":" + json.quote(&req.instructions)
+    }
+    if req.previous_response_id.len > 0 {
+        s = s + ",\"previous_response_id\":" + json.quote(&req.previous_response_id)
+    }
+    if req.tools.len > 0 {
+        s = s + ",\"tools\":["
+        for i in 0:req.tools.len {
+            if i > 0 { s = s + "," }
+            td := &req.tools[i]
+            $params := td.parameters_json + ""
+            if params.len == 0 { params = "{}" }
+            s = s + "{\"type\":\"function\",\"name\":" + json.quote(&td.name) +
+                ",\"description\":" + json.quote(&td.description) + ",\"parameters\":" + params + "}"
+        }
+        s = s + "]"
+    }
+    if req.tool_choice.len > 0 {
+        if (req.tool_choice[0] & 255) == 123 {
+            s = s + ",\"tool_choice\":" + req.tool_choice
+        } else {
+            s = s + ",\"tool_choice\":" + json.quote(&req.tool_choice)
+        }
+    }
+    if req.has_temperature {
+        s = s + ",\"temperature\":" + fmt_float_or(req.temperature, "0.0")
+    }
+    if req.has_top_p {
+        s = s + ",\"top_p\":" + fmt_float_or(req.top_p, "1.0")
+    }
+    if req.max_output_tokens > 0 {
+        s = s + ",\"max_output_tokens\":" + str(req.max_output_tokens)
+    }
+    if req.extra_body_json.len > 0 {
+        append_extra_json_fields($&s, &req.extra_body_json)
+    }
+    if stream {
+        s = s + ",\"stream\":true"
+    }
+    << s + "}"
+}
+
+fn parse_responses_usage(doc &json.Doc, obj int) Usage {
+    $u := Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+    if !doc.is_dict(obj) || !doc.has(obj, "usage") { << u }
+    un := doc_get_or(doc, obj, "usage")
+    if !doc.is_dict(un) { << u }
+    u.prompt_tokens = json_int_or(doc, un, "input_tokens", 0)
+    if u.prompt_tokens == 0 { u.prompt_tokens = json_int_or(doc, un, "prompt_tokens", 0) }
+    u.completion_tokens = json_int_or(doc, un, "output_tokens", 0)
+    if u.completion_tokens == 0 { u.completion_tokens = json_int_or(doc, un, "completion_tokens", 0) }
+    u.total_tokens = json_int_or(doc, un, "total_tokens", 0)
+    if u.total_tokens == 0 { u.total_tokens = u.prompt_tokens + u.completion_tokens }
+    << u
+}
+
+fn copy_resp_tcs(src &[]ResponsesToolCall) []ResponsesToolCall {
+    $out := []ResponsesToolCall{}
+    for i in 0:src.len {
+        out.push(ResponsesToolCall{
+            id: src[i].id + "",
+            call_id: src[i].call_id + "",
+            name: src[i].name + "",
+            arguments: src[i].arguments + ""
+        })
+    }
+    << out
+}
+
+fn parse_responses_doc(doc &json.Doc, obj int, def_model &string) ResponsesResponse {
+    $out := ResponsesResponse{
+        id: json_str_or(doc, obj, "id", ""),
+        model: json_str_or(doc, obj, "model", *def_model + ""),
+        status: json_str_or(doc, obj, "status", ""),
+        output_text: json_str_or(doc, obj, "output_text", ""),
+        tool_calls: []ResponsesToolCall{},
+        usage: parse_responses_usage(doc, obj)
+    }
+    if doc.is_dict(obj) && doc.has(obj, "output") {
+        arr := doc_get_or(doc, obj, "output")
+        if arr >= 0 && doc.is_list(arr) {
+            $fallback_txt := ""
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc_at_or(doc, arr, i)
+                if item < 0 || !doc.is_dict(item) { -> }
+                itype := json_str_or(doc, item, "type", "")
+                if itype == "function_call" {
+                    out.tool_calls.push(ResponsesToolCall{
+                        id: json_str_or(doc, item, "id", ""),
+                        call_id: json_str_or(doc, item, "call_id", ""),
+                        name: json_str_or(doc, item, "name", ""),
+                        arguments: json_str_or(doc, item, "arguments", "")
+                    })
+                } else if itype == "message" && doc.has(item, "content") {
+                    carr := doc_get_or(doc, item, "content")
+                    if carr >= 0 && doc.is_list(carr) {
+                        cc := doc.count(carr)
+                        for ci in 0:cc {
+                            cpart := doc_at_or(doc, carr, ci)
+                            if cpart < 0 || !doc.is_dict(cpart) { -> }
+                            ptype := json_str_or(doc, cpart, "type", "")
+                            if ptype == "output_text" || ptype == "text" {
+                                fallback_txt = fallback_txt + json_str_or(doc, cpart, "text", "")
+                            }
+                        }
+                    }
+                }
+            }
+            if out.output_text.len == 0 && fallback_txt.len > 0 {
+                out.output_text = fallback_txt
+            }
+        }
+    }
+    << out
+}
+
+pub fn (c &Client) responses(req &ResponsesRequest) ResponsesResponse {
+    body := encode_responses_body(req, false)
+    resp := request_raw_retry(c, "POST", "/v1/responses", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    << parse_responses_doc(&doc, doc.root(), &req.model)
+}
+
+fn emit_resp_ev(ev ResponsesStreamEvent, use_cb bool, on_event fn(ResponsesStreamEvent) bool,
+                has_ch bool, ch chan ResponsesStreamEvent, stopped $&bool) {
+    if has_ch {
+        ch <- ResponsesStreamEvent{
+            event_type: ev.event_type + "",
+            text_delta: ev.text_delta + "",
+            response_id: ev.response_id + "",
+            status: ev.status + "",
+            tool_calls: copy_resp_tcs(&ev.tool_calls),
+            has_usage: ev.has_usage,
+            usage: ev.usage,
+            done: ev.done
+        }
+    }
+    if use_cb {
+        ev_cb := ResponsesStreamEvent{
+            event_type: ev.event_type + "",
+            text_delta: ev.text_delta + "",
+            response_id: ev.response_id + "",
+            status: ev.status + "",
+            tool_calls: copy_resp_tcs(&ev.tool_calls),
+            has_usage: ev.has_usage,
+            usage: ev.usage,
+            done: ev.done
+        }
+        if !on_event(ev_cb) {
+            *stopped = true
+        }
+    }
+}
+
+fn responses_stream_impl(c &Client, req &ResponsesRequest, use_cb bool, on_event fn(ResponsesStreamEvent) bool,
+                         has_ch bool, ev_ch chan ResponsesStreamEvent) ResponsesResponse {
+    body := encode_responses_body(req, true)
+    $line_buf := ""
+    $conn := open_stream_retry_suffix(c, "/v1/responses", &body, $&line_buf) >>>
+    $out := ResponsesResponse{
+        id: "", model: req.model + "", status: "", output_text: "",
+        tool_calls: []ResponsesToolCall{},
+        usage: Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+    }
+    $cur_ev := ""
+    $stopped := false
+    for {
+        $processed := 0
+        for {
+            $nl := -1
+            for i in processed:line_buf.len {
+                if line_buf[i] == 10 {
+                    nl = i
+                    <-
+                }
+            }
+            if nl < 0 { <- }
+            $line := line_buf[processed:nl]
+            if line.len > 0 && line[line.len - 1] == 13 {
+                line = line[0:line.len - 1]
+            }
+            processed = nl + 1
+            if strings.has_prefix(&line, "event:") {
+                $evn := line[6:line.len]
+                cur_ev = strings.trim_space(&evn)
+                ->
+            }
+            if !strings.has_prefix(&line, "data:") { -> }
+            $payload := line[5:line.len]
+            payload = strings.trim_space(&payload)
+            if payload.len == 0 { -> }
+            if payload == "[DONE]" {
+                stopped = true
+                <-
+            }
+            doc := json.parse(&payload)
+            if !doc.ok() || !doc.is_dict(doc.root()) { -> }
+            root := doc.root()
+            $etype := json_str_or(&doc, root, "type", "")
+            if etype.len == 0 { etype = cur_ev + "" }
+            $td := ""
+            if etype == "response.output_text.delta" {
+                td = json_str_or(&doc, root, "delta", "")
+                if td.len > 0 { out.output_text = out.output_text + td }
+            }
+            $ev_tcs := []ResponsesToolCall{}
+            if etype == "response.output_item.done" && doc.has(root, "item") {
+                in_n := doc_get_or(&doc, root, "item")
+                if in_n >= 0 && doc.is_dict(in_n) && json_str_or(&doc, in_n, "type", "") == "function_call" {
+                    rtc := ResponsesToolCall{
+                        id: json_str_or(&doc, in_n, "id", ""),
+                        call_id: json_str_or(&doc, in_n, "call_id", ""),
+                        name: json_str_or(&doc, in_n, "name", ""),
+                        arguments: json_str_or(&doc, in_n, "arguments", "")
+                    }
+                    out.tool_calls.push(ResponsesToolCall{
+                        id: rtc.id + "", call_id: rtc.call_id + "", name: rtc.name + "", arguments: rtc.arguments + ""
+                    })
+                    ev_tcs.push(~rtc)
+                }
+            }
+            $has_u := false
+            if doc.has(root, "response") {
+                rn := doc_get_or(&doc, root, "response")
+                if rn >= 0 && doc.is_dict(rn) {
+                    parsed := parse_responses_doc(&doc, rn, &req.model)
+                    if parsed.id.len > 0 { out.id = parsed.id + "" }
+                    if parsed.model.len > 0 { out.model = parsed.model + "" }
+                    if parsed.status.len > 0 { out.status = parsed.status + "" }
+                    if out.output_text.len == 0 && parsed.output_text.len > 0 {
+                        out.output_text = parsed.output_text + ""
+                    }
+                    if out.tool_calls.len == 0 && parsed.tool_calls.len > 0 {
+                        out.tool_calls = copy_resp_tcs(&parsed.tool_calls)
+                    }
+                    if parsed.usage.total_tokens > 0 || parsed.usage.prompt_tokens > 0 {
+                        out.usage = parsed.usage
+                        has_u = true
+                    }
+                }
+            }
+            emit_resp_ev(ResponsesStreamEvent{
+                event_type: etype, text_delta: td, response_id: out.id + "",
+                status: out.status + "", tool_calls: ~ev_tcs, has_usage: has_u,
+                usage: out.usage, done: false
+            }, use_cb, on_event, has_ch, ev_ch, $&stopped)
+            if stopped { <- }
+        }
+        if processed > 0 {
+            line_buf = line_buf[processed:line_buf.len]
+        }
+        if stopped { <- }
+        chunk := conn_read_or($&conn, 8192)
+        if chunk.len == 0 { <- }
+        line_buf = line_buf + chunk
+    }
+    _ := close_conn($&conn)
+    $dstop := false
+    emit_resp_ev(ResponsesStreamEvent{
+        event_type: "done", text_delta: "", response_id: out.id + "",
+        status: out.status + "", tool_calls: copy_resp_tcs(&out.tool_calls),
+        has_usage: true, usage: out.usage, done: true
+    }, use_cb, on_event, has_ch, ev_ch, $&dstop)
+    << out
+}
+
+fn ignore_resp_ev(ev ResponsesStreamEvent) bool {
+    << true
+}
+
+pub fn (c &Client) responses_stream(req &ResponsesRequest, on_event fn(ResponsesStreamEvent) bool) ResponsesResponse {
+    dummy_ch := chan ResponsesStreamEvent{cap: 1}
+    << responses_stream_impl(c, req, true, on_event, false, dummy_ch) >>>
+}
+
+pub fn (c &Client) responses_stream_chan(req &ResponsesRequest, ch chan ResponsesStreamEvent) ResponsesResponse {
+    << responses_stream_impl(c, req, false, ignore_resp_ev, true, ch) >>>
 }

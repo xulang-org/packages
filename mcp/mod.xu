@@ -2,7 +2,10 @@
 
 #encoding/json
 #errors
+#net
+#net/http
 #os
+#os/exec
 #strconv
 #strings
 #crypto/tls
@@ -10,14 +13,42 @@ transport #github.com/xulang-org/packages/transport
 
 pub const PROTOCOL_VERSION = "2025-03-26"
 
+pub struct ToolAnnotations {
+    pub title string
+    pub read_only_hint bool
+    pub destructive_hint bool
+    pub idempotent_hint bool
+    pub open_world_hint bool
+    pub has_annotations bool
+}
+
+pub fn empty_tool_annotations() ToolAnnotations {
+    << ToolAnnotations{
+        title: "",
+        read_only_hint: false,
+        destructive_hint: false,
+        idempotent_hint: false,
+        open_world_hint: false,
+        has_annotations: false
+    }
+}
+
 pub struct ToolInfo {
     pub name string
     pub description string
     pub input_schema_json string
+    pub annotations ToolAnnotations
 }
 
 pub struct ResourceInfo {
     pub uri string
+    pub name string
+    pub description string
+    pub mime_type string
+}
+
+pub struct ResourceTemplateInfo {
+    pub uri_template string
     pub name string
     pub description string
     pub mime_type string
@@ -49,38 +80,73 @@ pub fn error_result(text string) ToolResult {
     << ToolResult{content: ~items, is_error: true}
 }
 
+fn default_completion_handler(ref_json &string, arg_name &string, arg_value &string) []string {
+    << []string{}
+}
+
 pub struct Server {
     pub name string
     pub version string
+    pub log_level string
     tools []ToolInfo
     tool_handlers []fn(&string) ToolResult
     resources []ResourceInfo
     res_handlers []fn(&string) string
+    templates []ResourceTemplateInfo
+    template_handlers []fn(&string, &string) string
+    has_template_handler []bool
     prompts []PromptInfo
     prompt_handlers []fn(&string) string
+    completion_handler fn(&string, &string, &string) []string
+}
+
+fn default_template_handler(uri &string, vars_json &string) string {
+    << ""
 }
 
 pub fn new_server(name string, version string) Server {
     << Server{
         name: name,
         version: version,
+        log_level: "info",
         tools: []ToolInfo{},
         tool_handlers: []fn(&string) ToolResult{},
         resources: []ResourceInfo{},
         res_handlers: []fn(&string) string{},
+        templates: []ResourceTemplateInfo{},
+        template_handlers: []fn(&string, &string) string{},
+        has_template_handler: []bool{},
         prompts: []PromptInfo{},
-        prompt_handlers: []fn(&string) string{}
+        prompt_handlers: []fn(&string) string{},
+        completion_handler: default_completion_handler
     }
 }
 
-pub fn (s $&Server) add_tool(name string, description string, input_schema_json string,
-                             handler fn(&string) ToolResult) {
+fn add_tool_impl(s $&Server, name string, description string, input_schema_json string,
+                 annotations ToolAnnotations, handler fn(&string) ToolResult) {
     $schema := input_schema_json + ""
     if schema.len == 0 {
         schema = "{\"type\":\"object\"}"
     }
-    s.tools.push(ToolInfo{name: name, description: description, input_schema_json: schema})
+    s.tools.push(ToolInfo{
+        name: name,
+        description: description,
+        input_schema_json: schema,
+        annotations: annotations
+    })
     s.tool_handlers.push(handler)
+}
+
+pub fn (s $&Server) add_tool(name string, description string, input_schema_json string,
+                             handler fn(&string) ToolResult) {
+    add_tool_impl(s, name, description, input_schema_json, empty_tool_annotations(), handler)
+}
+
+pub fn (s $&Server) add_tool_annotated(name string, description string, input_schema_json string,
+                                       annotations ToolAnnotations, handler fn(&string) ToolResult) {
+    $ann := annotations
+    ann.has_annotations = true
+    add_tool_impl(s, name, description, input_schema_json, ann, handler)
 }
 
 pub fn (s $&Server) add_resource(uri string, name string, description string, mime_type string,
@@ -91,12 +157,44 @@ pub fn (s $&Server) add_resource(uri string, name string, description string, mi
     s.res_handlers.push(handler)
 }
 
+pub fn (s $&Server) add_resource_template(uri_template string, name string, description string,
+                                          mime_type string) {
+    $mt := mime_type + ""
+    if mt.len == 0 { mt = "text/plain" }
+    s.templates.push(ResourceTemplateInfo{
+        uri_template: uri_template,
+        name: name,
+        description: description,
+        mime_type: mt
+    })
+    s.template_handlers.push(default_template_handler)
+    s.has_template_handler.push(false)
+}
+
+pub fn (s $&Server) add_resource_template_handler(uri_template string, name string, description string,
+                                                  mime_type string, handler fn(&string, &string) string) {
+    $mt := mime_type + ""
+    if mt.len == 0 { mt = "text/plain" }
+    s.templates.push(ResourceTemplateInfo{
+        uri_template: uri_template,
+        name: name,
+        description: description,
+        mime_type: mt
+    })
+    s.template_handlers.push(handler)
+    s.has_template_handler.push(true)
+}
+
 pub fn (s $&Server) add_prompt(name string, description string, arguments_json string,
                                handler fn(&string) string) {
     $args := arguments_json + ""
     if args.len == 0 { args = "[]" }
     s.prompts.push(PromptInfo{name: name, description: description, arguments_json: args})
     s.prompt_handlers.push(handler)
+}
+
+pub fn (s $&Server) set_completion_handler(handler fn(&string, &string, &string) []string) {
+    s.completion_handler = handler
 }
 
 fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
@@ -122,6 +220,16 @@ fn doc_bool_or(doc &json.Doc, node int, def bool) bool {
 
 fn fin_read_or(fin &os.File, max int) string {
     << fin.read(max) >>> (_) { << "" }
+}
+
+fn close_file_quiet(f $&os.File) int {
+    _ := f.close() >>> (_) { << 0 }
+    << 0
+}
+
+fn conn_close_quiet(fd int) int {
+    _ := net.conn_close(fd) >>> (_) { << 0 }
+    << 0
 }
 
 struct IdParse {
@@ -171,7 +279,7 @@ fn encode_tool_result(res &ToolResult) string {
     << s + "}"
 }
 
-pub fn (s &Server) handle_json_line(line &string) string {
+pub fn (s $&Server) handle_json_line(line &string) string {
     $trimmed := line + ""
     trimmed = strings.trim_space(&trimmed)
     if trimmed.len == 0 { << "" }
@@ -198,7 +306,7 @@ pub fn (s &Server) handle_json_line(line &string) string {
 
     if method == "initialize" {
         res := "{\"protocolVersion\":" + json.quote(&PROTOCOL_VERSION) +
-               ",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"listChanged\":false},\"prompts\":{\"listChanged\":false}}," +
+               ",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"listChanged\":false},\"prompts\":{\"listChanged\":false},\"completions\":{},\"logging\":{}}," +
                "\"serverInfo\":{\"name\":" + json.quote(&s.name) + ",\"version\":" + json.quote(&s.version) + "}}"
         << rpc_ok(&id_json, res)
     }
@@ -212,7 +320,23 @@ pub fn (s &Server) handle_json_line(line &string) string {
             t := &s.tools[i]
             arr = arr + "{\"name\":" + json.quote(&t.name) +
                   ",\"description\":" + json.quote(&t.description) +
-                  ",\"inputSchema\":" + t.input_schema_json + "}"
+                  ",\"inputSchema\":" + t.input_schema_json
+            if t.annotations.has_annotations {
+                $ro := "false"
+                if t.annotations.read_only_hint { ro = "true" }
+                $dh := "false"
+                if t.annotations.destructive_hint { dh = "true" }
+                $ih := "false"
+                if t.annotations.idempotent_hint { ih = "true" }
+                $oh := "false"
+                if t.annotations.open_world_hint { oh = "true" }
+                arr = arr + ",\"annotations\":{\"title\":" + json.quote(&t.annotations.title) +
+                      ",\"readOnlyHint\":" + ro +
+                      ",\"destructiveHint\":" + dh +
+                      ",\"idempotentHint\":" + ih +
+                      ",\"openWorldHint\":" + oh + "}"
+            }
+            arr = arr + "}"
         }
         arr = arr + "]"
         << rpc_ok(&id_json, "{\"tools\":" + arr + "}")
@@ -271,14 +395,30 @@ pub fn (s &Server) handle_json_line(line &string) string {
                 <-
             }
         }
-        if idx < 0 {
-            << rpc_err(&id_json, -32602, "resource not found: " + uri)
+        if idx >= 0 {
+            handler := s.res_handlers[idx]
+            text := handler(&uri)
+            mt := &s.resources[idx].mime_type
+            << rpc_ok(&id_json, "{\"contents\":[{\"uri\":" + json.quote(&uri) + ",\"mimeType\":" +
+                              json.quote(mt) + ",\"text\":" + json.quote(&text) + "}]}")
         }
-        handler := s.res_handlers[idx]
-        text := handler(&uri)
-        mt := &s.resources[idx].mime_type
-        << rpc_ok(&id_json, "{\"contents\":[{\"uri\":" + json.quote(&uri) + ",\"mimeType\":" +
-                          json.quote(mt) + ",\"text\":" + json.quote(&text) + "}]}")
+        $tidx := -1
+        $vars_json := "{}"
+        for ti in 0:s.templates.len {
+            if !s.has_template_handler[ti] { -> }
+            if match_uri_template(&s.templates[ti].uri_template, &uri, $&vars_json) {
+                tidx = ti
+                <-
+            }
+        }
+        if tidx >= 0 {
+            thandler := s.template_handlers[tidx]
+            ttext := thandler(&uri, &vars_json)
+            tmt := &s.templates[tidx].mime_type
+            << rpc_ok(&id_json, "{\"contents\":[{\"uri\":" + json.quote(&uri) + ",\"mimeType\":" +
+                              json.quote(tmt) + ",\"text\":" + json.quote(&ttext) + "}]}")
+        }
+        << rpc_err(&id_json, -32602, "resource not found: " + uri)
     }
     if method == "prompts/list" {
         $arr := "["
@@ -318,12 +458,126 @@ pub fn (s &Server) handle_json_line(line &string) string {
         << rpc_ok(&id_json, "{\"messages\":[{\"role\":\"user\",\"content\":{\"type\":\"text\",\"text\":" +
                           json.quote(&text) + "}}]}")
     }
+    if method == "resources/templates/list" {
+        $arr := "["
+        for i in 0:s.templates.len {
+            if i > 0 { arr = arr + "," }
+            rt := &s.templates[i]
+            arr = arr + "{\"uriTemplate\":" + json.quote(&rt.uri_template) +
+                  ",\"name\":" + json.quote(&rt.name) +
+                  ",\"description\":" + json.quote(&rt.description) +
+                  ",\"mimeType\":" + json.quote(&rt.mime_type) + "}"
+        }
+        arr = arr + "]"
+        << rpc_ok(&id_json, "{\"resourceTemplates\":" + arr + "}")
+    }
+    if method == "completion/complete" {
+        if !doc.has(root, "params") {
+            << rpc_err(&id_json, -32602, "missing params")
+        }
+        params := doc_get_or(&doc, root, "params")
+        $ref_json := "{}"
+        if doc.is_dict(params) && doc.has(params, "ref") {
+            rn := doc_get_or(&doc, params, "ref")
+            if rn >= 0 { ref_json = doc_encode_or(&doc, rn, "{}") }
+        }
+        $arg_name := ""
+        $arg_value := ""
+        if doc.is_dict(params) && doc.has(params, "argument") {
+            an := doc_get_or(&doc, params, "argument")
+            if doc.is_dict(an) {
+                arg_name = json_str_or(&doc, an, "name", "")
+                arg_value = json_str_or(&doc, an, "value", "")
+            }
+        }
+        handler := s.completion_handler
+        vals := handler(&ref_json, &arg_name, &arg_value)
+        $varr := "["
+        for i in 0:vals.len {
+            if i > 0 { varr = varr + "," }
+            varr = varr + json.quote(&vals[i])
+        }
+        varr = varr + "]"
+        << rpc_ok(&id_json, "{\"completion\":{\"values\":" + varr + ",\"total\":" + str(vals.len) + ",\"hasMore\":false}}")
+    }
+    if method == "logging/setLevel" {
+        if !doc.has(root, "params") {
+            << rpc_err(&id_json, -32602, "missing params")
+        }
+        params := doc_get_or(&doc, root, "params")
+        lvl := json_str_or(&doc, params, "level", "")
+        if !is_valid_log_level(&lvl) {
+            << rpc_err(&id_json, -32602, "invalid log level: " + lvl)
+        }
+        s.log_level = lvl
+        << rpc_ok(&id_json, "{}")
+    }
     << rpc_err(&id_json, -32601, "Method not found: " + method)
 }
 
-pub fn (s &Server) serve_stdio() int {
+fn is_valid_log_level(lvl &string) bool {
+    << *lvl == "debug" || *lvl == "info" || *lvl == "notice" || *lvl == "warning" ||
+       *lvl == "error" || *lvl == "critical" || *lvl == "alert" || *lvl == "emergency"
+}
+
+fn match_uri_template(tmpl &string, uri &string, vars_json $&string) bool {
+    $ti := 0
+    $ui := 0
+    $keys := []string{}
+    $vals := []string{}
+    while ti < tmpl.len {
+        if (*tmpl)[ti] == 123 {
+            $close := -1
+            for k in (ti + 1):tmpl.len {
+                if (*tmpl)[k] == 125 {
+                    close = k
+                    <-
+                }
+            }
+            if close < 0 { << false }
+            vname := (*tmpl)[ti + 1:close]
+            ti = close + 1
+            $stop_ch := -1
+            if ti < tmpl.len { stop_ch = (*tmpl)[ti] & 255 }
+            u_start := ui
+            while ui < uri.len {
+                ch := (*uri)[ui] & 255
+                if ch == 47 || (stop_ch >= 0 && ch == stop_ch) { <- }
+                ui += 1
+            }
+            if ui <= u_start { << false }
+            keys.push(vname)
+            vals.push((*uri)[u_start:ui])
+        } else {
+            if ui >= uri.len || (*uri)[ui] != (*tmpl)[ti] { << false }
+            ti += 1
+            ui += 1
+        }
+    }
+    if ui != uri.len { << false }
+    $vj := "{"
+    for i in 0:keys.len {
+        if i > 0 { vj = vj + "," }
+        vj = vj + json.quote(&keys[i]) + ":" + json.quote(&vals[i])
+    }
+    *vars_json = vj + "}"
+    << true
+}
+
+fn is_exit_notification(line &string) bool {
+    $trimmed := line + ""
+    trimmed = strings.trim_space(&trimmed)
+    if trimmed.len == 0 { << false }
+    doc := json.parse(&trimmed)
+    if !doc.ok() || !doc.is_dict(doc.root()) { << false }
+    method := json_str_or(&doc, doc.root(), "method", "")
+    << method == "notifications/exit" || method == "exit"
+}
+
+pub fn (s $&Server) serve_stdio() int {
     $fin := os.open("/dev/stdin") >>>
     $buf := ""
+    $should_exit := false
     for {
         $consumed := 0
         for {
@@ -340,17 +594,22 @@ pub fn (s &Server) serve_stdio() int {
                 line = line[0:line.len - 1]
             }
             consumed = nl + 1
+            if is_exit_notification(&line) {
+                should_exit = true
+                <-
+            }
             resp := s.handle_json_line(&line)
             if resp.len > 0 {
                 println(resp)
             }
         }
+        if should_exit { <- }
         if consumed > 0 {
             buf = buf[consumed:buf.len]
         }
         chunk := fin_read_or(&fin, 8192)
         if chunk.len == 0 {
-            if buf.len > 0 {
+            if buf.len > 0 && !is_exit_notification(&buf) {
                 resp := s.handle_json_line(&buf)
                 if resp.len > 0 {
                     println(resp)
@@ -360,8 +619,118 @@ pub fn (s &Server) serve_stdio() int {
         }
         buf = buf + chunk
     }
-    _ := fin.close() >>> (_) { << 0 }
+    _ := close_file_quiet($&fin)
     << 0
+}
+
+fn accept_fd_or(lfd int) int {
+    << net.accept(lfd) >>> (_) { << -1 }
+}
+
+fn read_http_req(fd int, hreq $&http.Request) bool {
+    _ := hreq.read(fd) >>> (_) { << false }
+    << true
+}
+
+fn conn_write_all_quiet(fd int, data &string) int {
+    $off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) >>> (_) { << 0 }
+        if n <= 0 { << 0 }
+        off += n
+    }
+    << 1
+}
+
+fn write_http_raw(fd int, status_line string, extra_headers string, ctype string, body &string) int {
+    $raw := status_line + "\r\n" + extra_headers
+    if ctype.len > 0 {
+        raw = raw + "Content-Type: " + ctype + "\r\n"
+    }
+    raw = raw + "Content-Length: " + str(body.len) + "\r\nConnection: close\r\n\r\n"
+    if body.len > 0 {
+        raw = raw + *body
+    }
+    << conn_write_all_quiet(fd, &raw)
+}
+
+fn is_initialize_body(body &string) bool {
+    doc := json.parse(body)
+    if !doc.ok() || !doc.is_dict(doc.root()) { << false }
+    << json_str_or(&doc, doc.root(), "method", "") == "initialize"
+}
+
+// serve_http_server runs the Streamable HTTP MCP accept loop on a pre-bound
+// http.Server (so callers can bind 127.0.0.1:0 and inspect srv.addr() first).
+pub fn (s $&Server) serve_http_server(srv $&http.Server) int {
+    if srv.lfd < 0 {
+        >>> errors.new("mcp: HTTP server is not listening")
+    }
+    $session_seq := 0
+    for {
+        fd := accept_fd_or(srv.lfd)
+        if fd < 0 { <- }
+        $hreq := http.new_request()
+        if !read_http_req(fd, $&hreq) {
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        method := hreq.method()
+        cors := "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Accept, Mcp-Session-Id, Authorization\r\n"
+        if method == "OPTIONS" {
+            empty := ""
+            _ := write_http_raw(fd, "HTTP/1.1 204 No Content", cors, "", &empty)
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        if method == "DELETE" {
+            empty := ""
+            _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "", &empty)
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        if method != "POST" {
+            msg := "{\"error\":\"method not allowed\"}"
+            _ := write_http_raw(fd, "HTTP/1.1 405 Method Not Allowed", cors, "application/json", &msg)
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        body := hreq.body()
+        resp := s.handle_json_line(&body)
+        if resp.len == 0 {
+            empty := ""
+            _ := write_http_raw(fd, "HTTP/1.1 202 Accepted", cors, "", &empty)
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        $extra := cors + ""
+        if is_initialize_body(&body) {
+            session_seq += 1
+            extra = extra + "Mcp-Session-Id: xu-mcp-" + str(session_seq) + "\r\n"
+        }
+        accept_hdr := hreq.header("Accept")
+        want_sse := strings.contains(&accept_hdr, "text/event-stream") && !strings.contains(&accept_hdr, "application/json")
+        if want_sse {
+            sse_body := "event: message\ndata: " + resp + "\n\n"
+            _ := write_http_raw(fd, "HTTP/1.1 200 OK", extra, "text/event-stream", &sse_body)
+        } else {
+            _ := write_http_raw(fd, "HTTP/1.1 200 OK", extra, "application/json", &resp)
+        }
+        _ := conn_close_quiet(fd)
+    }
+    << 0
+}
+
+pub fn (s $&Server) serve_http(addr string) int {
+    $srv := http.new_server()
+    _ := srv.listen(addr) >>>
+    rc := s.serve_http_server($&srv) >>> (err) {
+        _ := srv.close()
+        >>> err
+    }
+    _ := srv.close()
+    << rc
 }
 
 pub struct Client {
@@ -369,6 +738,7 @@ pub struct Client {
     pub session_id string
     pub server_name string
     pub server_version string
+    pub extra_headers []string
     next_id int
 }
 
@@ -378,7 +748,31 @@ pub fn new_http_client(base_url string) Client {
         session_id: "",
         server_name: "",
         server_version: "",
+        extra_headers: []string{},
         next_id: 1
+    }
+}
+
+pub fn (c $&Client) add_header(name string, value string) {
+    c.extra_headers.push(name + ": " + value)
+}
+
+pub fn (c $&Client) set_bearer_token(token string) {
+    c.extra_headers.push("Authorization: Bearer " + token)
+}
+
+pub fn (c &Client) clone_client() Client {
+    $hdrs := []string{}
+    for i in 0:c.extra_headers.len {
+        hdrs.push(c.extra_headers[i] + "")
+    }
+    << Client{
+        base_url: c.base_url + "",
+        session_id: c.session_id + "",
+        server_name: c.server_name + "",
+        server_version: c.server_version + "",
+        extra_headers: ~hdrs,
+        next_id: c.next_id + 1000
     }
 }
 
@@ -403,48 +797,20 @@ fn parse_rpc_payload(ctype &string, body &string) string {
     << *body
 }
 
-fn (c $&Client) rpc_call(method string, params_json string, is_notif bool) RpcResult {
-    bu := c.base_url + ""
-    def_port := default_port_for(&bu)
-    ep := transport.parse_endpoint(bu + "", def_port) >>>
+fn encode_rpc_request(id int, method &string, params_json &string, is_notif bool) string {
     $req_json := "{\"jsonrpc\":\"2.0\""
     if !is_notif {
-        id := c.next_id
-        c.next_id += 1
         req_json = req_json + ",\"id\":" + str(id)
     }
-    req_json = req_json + ",\"method\":" + json.quote(&method)
+    req_json = req_json + ",\"method\":" + json.quote(method)
     if params_json.len > 0 {
-        req_json = req_json + ",\"params\":" + params_json
+        req_json = req_json + ",\"params\":" + *params_json
     }
-    req_json = req_json + "}"
+    << req_json + "}"
+}
 
-    $path := ep.path + ""
-    if path.len == 0 { path = "/" }
-    $raw := "POST " + path + " HTTP/1.1\r\n" +
-            "Host: " + ep.host + ":" + str(ep.port) + "\r\n" +
-            "Content-Type: application/json\r\n" +
-            "Accept: application/json, text/event-stream\r\n"
-    if c.session_id.len > 0 {
-        raw = raw + "Mcp-Session-Id: " + c.session_id + "\r\n"
-    }
-    raw = raw + "Content-Length: " + str(req_json.len) + "\r\nConnection: close\r\n\r\n" + req_json
-    cfg := tls.new_config(ep.host + "")
-    resp := transport.request_raw(ep, cfg, raw, "POST") >>>
-    if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, "mcp: HTTP " + str(resp.status_code) + " " + resp.body)
-    }
-    sid := resp.header("Mcp-Session-Id")
-    if sid.len > 0 { c.session_id = sid }
-    if is_notif || resp.status_code == 202 || resp.body.len == 0 {
-        empty := "{}"
-        doc := json.parse(&empty)
-        rt := doc.root()
-        << RpcResult{doc: ~doc, node: rt}
-    }
-    ctype := resp.header("Content-Type")
-    payload := parse_rpc_payload(&ctype, &resp.body)
-    doc := json.parse(&payload)
+fn parse_rpc_response_json(payload &string) RpcResult {
+    doc := json.parse(payload)
     if !doc.ok() || !doc.is_dict(doc.root()) {
         >>> errors.new("mcp: invalid JSON-RPC response")
     }
@@ -461,30 +827,33 @@ fn (c $&Client) rpc_call(method string, params_json string, is_notif bool) RpcRe
     << RpcResult{doc: ~doc, node: res_node}
 }
 
-pub fn (c $&Client) initialize() int {
-    params := "{\"protocolVersion\":" + json.quote(&PROTOCOL_VERSION) +
-              ",\"capabilities\":{},\"clientInfo\":{\"name\":\"xu-mcp\",\"version\":\"1.4.0\"}}"
-    rr := c.rpc_call("initialize", params, false) >>>
-    doc := &rr.doc
-    res := rr.node
-    if doc.is_dict(res) && doc.has(res, "serverInfo") {
-        si := doc_get_or(doc, res, "serverInfo")
-        c.server_name = json_str_or(doc, si, "name", "")
-        c.server_version = json_str_or(doc, si, "version", "")
+fn parse_tool_annotations(doc &json.Doc, item int) ToolAnnotations {
+    $ann := empty_tool_annotations()
+    if !doc.is_dict(item) || !doc.has(item, "annotations") { << ann }
+    an := doc_get_or(doc, item, "annotations")
+    if an < 0 || !doc.is_dict(an) { << ann }
+    ann.has_annotations = true
+    ann.title = json_str_or(doc, an, "title", "")
+    if doc.has(an, "readOnlyHint") {
+        n := doc_get_or(doc, an, "readOnlyHint")
+        if n >= 0 && doc.is_bool(n) { ann.read_only_hint = doc_bool_or(doc, n, false) }
     }
-    _ := c.rpc_call("notifications/initialized", "", true) >>>
-    << 0
+    if doc.has(an, "destructiveHint") {
+        n := doc_get_or(doc, an, "destructiveHint")
+        if n >= 0 && doc.is_bool(n) { ann.destructive_hint = doc_bool_or(doc, n, false) }
+    }
+    if doc.has(an, "idempotentHint") {
+        n := doc_get_or(doc, an, "idempotentHint")
+        if n >= 0 && doc.is_bool(n) { ann.idempotent_hint = doc_bool_or(doc, n, false) }
+    }
+    if doc.has(an, "openWorldHint") {
+        n := doc_get_or(doc, an, "openWorldHint")
+        if n >= 0 && doc.is_bool(n) { ann.open_world_hint = doc_bool_or(doc, n, false) }
+    }
+    << ann
 }
 
-pub fn (c $&Client) ping() bool {
-    _ := c.rpc_call("ping", "", false) >>> (_) { << false }
-    << true
-}
-
-pub fn (c $&Client) list_tools() []ToolInfo {
-    rr := c.rpc_call("tools/list", "{}", false) >>>
-    doc := &rr.doc
-    res := rr.node
+fn parse_tools_result(doc &json.Doc, res int) []ToolInfo {
     $out := []ToolInfo{}
     if doc.is_dict(res) && doc.has(res, "tools") {
         arr := doc.get(res, "tools") >>>
@@ -500,7 +869,8 @@ pub fn (c $&Client) list_tools() []ToolInfo {
                 out.push(ToolInfo{
                     name: json_str_or(doc, item, "name", ""),
                     description: json_str_or(doc, item, "description", ""),
-                    input_schema_json: schema
+                    input_schema_json: schema,
+                    annotations: parse_tool_annotations(doc, item)
                 })
             }
         }
@@ -508,13 +878,60 @@ pub fn (c $&Client) list_tools() []ToolInfo {
     << out
 }
 
-pub fn (c $&Client) call_tool(name string, arguments_json string) ToolResult {
-    $args := arguments_json + ""
-    if args.len == 0 { args = "{}" }
-    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
-    rr := c.rpc_call("tools/call", params, false) >>>
-    doc := &rr.doc
-    res := rr.node
+fn parse_resource_templates_result(doc &json.Doc, res int) []ResourceTemplateInfo {
+    $out := []ResourceTemplateInfo{}
+    if doc.is_dict(res) && doc.has(res, "resourceTemplates") {
+        arr := doc.get(res, "resourceTemplates") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                out.push(ResourceTemplateInfo{
+                    uri_template: json_str_or(doc, item, "uriTemplate", ""),
+                    name: json_str_or(doc, item, "name", ""),
+                    description: json_str_or(doc, item, "description", ""),
+                    mime_type: json_str_or(doc, item, "mimeType", "text/plain")
+                })
+            }
+        }
+    }
+    << out
+}
+
+fn doc_str_or(doc &json.Doc, node int, def string) string {
+    << doc.as_string(node) >>> (_) { << def }
+}
+
+fn parse_completion_result(doc &json.Doc, res int) []string {
+    $out := []string{}
+    if !doc.is_dict(res) || !doc.has(res, "completion") { << out }
+    cn := doc_get_or(doc, res, "completion")
+    if !doc.is_dict(cn) || !doc.has(cn, "values") { << out }
+    arr := doc.get(cn, "values") >>>
+    if !doc.is_list(arr) { << out }
+    cnt := doc.count(arr)
+    for i in 0:cnt {
+        vn := doc.at(arr, i) >>>
+        if doc.is_string(vn) {
+            out.push(doc_str_or(doc, vn, ""))
+        }
+    }
+    << out
+}
+
+fn encode_complete_params(ref_type &string, ref_id &string, arg_name &string, arg_value &string) string {
+    $ref_obj := "{\"type\":" + json.quote(ref_type)
+    if *ref_type == "ref/prompt" {
+        ref_obj = ref_obj + ",\"name\":" + json.quote(ref_id) + "}"
+    } else if *ref_type == "ref/resource" {
+        ref_obj = ref_obj + ",\"uri\":" + json.quote(ref_id) + "}"
+    } else {
+        ref_obj = ref_obj + ",\"name\":" + json.quote(ref_id) + ",\"uri\":" + json.quote(ref_id) + "}"
+    }
+    << "{\"ref\":" + ref_obj + ",\"argument\":{\"name\":" + json.quote(arg_name) + ",\"value\":" + json.quote(arg_value) + "}}"
+}
+
+fn parse_tool_call_result(doc &json.Doc, res int) ToolResult {
     $items := []ContentItem{}
     if doc.is_dict(res) && doc.has(res, "content") {
         arr := doc.get(res, "content") >>>
@@ -539,10 +956,7 @@ pub fn (c $&Client) call_tool(name string, arguments_json string) ToolResult {
     << ToolResult{content: ~items, is_error: is_err}
 }
 
-pub fn (c $&Client) list_resources() []ResourceInfo {
-    rr := c.rpc_call("resources/list", "{}", false) >>>
-    doc := &rr.doc
-    res := rr.node
+fn parse_resources_result(doc &json.Doc, res int) []ResourceInfo {
     $out := []ResourceInfo{}
     if doc.is_dict(res) && doc.has(res, "resources") {
         arr := doc.get(res, "resources") >>>
@@ -562,11 +976,7 @@ pub fn (c $&Client) list_resources() []ResourceInfo {
     << out
 }
 
-pub fn (c $&Client) read_resource(uri string) string {
-    params := "{\"uri\":" + json.quote(&uri) + "}"
-    rr := c.rpc_call("resources/read", params, false) >>>
-    doc := &rr.doc
-    res := rr.node
+fn parse_resource_read_result(doc &json.Doc, res int) string {
     if doc.is_dict(res) && doc.has(res, "contents") {
         arr := doc.get(res, "contents") >>>
         if doc.is_list(arr) && doc.count(arr) > 0 {
@@ -577,10 +987,7 @@ pub fn (c $&Client) read_resource(uri string) string {
     << ""
 }
 
-pub fn (c $&Client) list_prompts() []PromptInfo {
-    rr := c.rpc_call("prompts/list", "{}", false) >>>
-    doc := &rr.doc
-    res := rr.node
+fn parse_prompts_result(doc &json.Doc, res int) []PromptInfo {
     $out := []PromptInfo{}
     if doc.is_dict(res) && doc.has(res, "prompts") {
         arr := doc.get(res, "prompts") >>>
@@ -604,13 +1011,7 @@ pub fn (c $&Client) list_prompts() []PromptInfo {
     << out
 }
 
-pub fn (c $&Client) get_prompt(name string, arguments_json string) string {
-    $args := arguments_json + ""
-    if args.len == 0 { args = "{}" }
-    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
-    rr := c.rpc_call("prompts/get", params, false) >>>
-    doc := &rr.doc
-    res := rr.node
+fn parse_prompt_get_result(doc &json.Doc, res int) string {
     if doc.is_dict(res) && doc.has(res, "messages") {
         arr := doc.get(res, "messages") >>>
         if doc.is_list(arr) && doc.count(arr) > 0 {
@@ -622,4 +1023,366 @@ pub fn (c $&Client) get_prompt(name string, arguments_json string) string {
         }
     }
     << ""
+}
+
+fn init_params_json() string {
+    << "{\"protocolVersion\":" + json.quote(&PROTOCOL_VERSION) +
+       ",\"capabilities\":{},\"clientInfo\":{\"name\":\"xu-mcp\",\"version\":\"1.5.0\"}}"
+}
+
+fn (c $&Client) rpc_call(method string, params_json string, is_notif bool) RpcResult {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    $id := 0
+    if !is_notif {
+        id = c.next_id
+        c.next_id += 1
+    }
+    req_json := encode_rpc_request(id, &method, &params_json, is_notif)
+
+    $path := ep.path + ""
+    if path.len == 0 { path = "/" }
+    $raw := "POST " + path + " HTTP/1.1\r\n" +
+            "Host: " + ep.host + ":" + str(ep.port) + "\r\n" +
+            "Content-Type: application/json\r\n" +
+            "Accept: application/json, text/event-stream\r\n"
+    if c.session_id.len > 0 {
+        raw = raw + "Mcp-Session-Id: " + c.session_id + "\r\n"
+    }
+    for hi in 0:c.extra_headers.len {
+        raw = raw + c.extra_headers[hi] + "\r\n"
+    }
+    raw = raw + "Content-Length: " + str(req_json.len) + "\r\nConnection: close\r\n\r\n" + req_json
+    cfg := tls.new_config(ep.host + "")
+    resp := transport.request_raw(ep, cfg, raw, "POST") >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, "mcp: HTTP " + str(resp.status_code) + " " + resp.body)
+    }
+    sid := resp.header("Mcp-Session-Id")
+    if sid.len > 0 { c.session_id = sid }
+    if is_notif || resp.status_code == 202 || resp.body.len == 0 {
+        empty := "{}"
+        doc := json.parse(&empty)
+        rt := doc.root()
+        << RpcResult{doc: ~doc, node: rt}
+    }
+    ctype := resp.header("Content-Type")
+    payload := parse_rpc_payload(&ctype, &resp.body)
+    << parse_rpc_response_json(&payload) >>>
+}
+
+pub fn (c $&Client) initialize() int {
+    rr := c.rpc_call("initialize", init_params_json(), false) >>>
+    doc := &rr.doc
+    res := rr.node
+    if doc.is_dict(res) && doc.has(res, "serverInfo") {
+        si := doc_get_or(doc, res, "serverInfo")
+        c.server_name = json_str_or(doc, si, "name", "")
+        c.server_version = json_str_or(doc, si, "version", "")
+    }
+    _ := c.rpc_call("notifications/initialized", "", true) >>>
+    << 0
+}
+
+pub fn (c $&Client) close_session() int {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    $path := ep.path + ""
+    if path.len == 0 { path = "/" }
+    $raw := "DELETE " + path + " HTTP/1.1\r\nHost: " + ep.host + ":" + str(ep.port) + "\r\n"
+    if c.session_id.len > 0 {
+        raw = raw + "Mcp-Session-Id: " + c.session_id + "\r\n"
+    }
+    for hi in 0:c.extra_headers.len {
+        raw = raw + c.extra_headers[hi] + "\r\n"
+    }
+    raw = raw + "Connection: close\r\n\r\n"
+    cfg := tls.new_config(ep.host + "")
+    resp := transport.request_raw(ep, cfg, raw, "DELETE") >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, "mcp: DELETE HTTP " + str(resp.status_code))
+    }
+    c.session_id = ""
+    << 0
+}
+
+pub fn (c $&Client) ping() bool {
+    _ := c.rpc_call("ping", "", false) >>> (_) { << false }
+    << true
+}
+
+pub fn (c $&Client) list_tools() []ToolInfo {
+    rr := c.rpc_call("tools/list", "{}", false) >>>
+    << parse_tools_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) call_tool(name string, arguments_json string) ToolResult {
+    $args := arguments_json + ""
+    if args.len == 0 { args = "{}" }
+    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
+    rr := c.rpc_call("tools/call", params, false) >>>
+    << parse_tool_call_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) list_resources() []ResourceInfo {
+    rr := c.rpc_call("resources/list", "{}", false) >>>
+    << parse_resources_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) list_resource_templates() []ResourceTemplateInfo {
+    rr := c.rpc_call("resources/templates/list", "{}", false) >>>
+    << parse_resource_templates_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) complete(ref_type string, ref_id string, argument_name string, argument_value string) []string {
+    params := encode_complete_params(&ref_type, &ref_id, &argument_name, &argument_value)
+    rr := c.rpc_call("completion/complete", params, false) >>>
+    << parse_completion_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) read_resource(uri string) string {
+    params := "{\"uri\":" + json.quote(&uri) + "}"
+    rr := c.rpc_call("resources/read", params, false) >>>
+    << parse_resource_read_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) list_prompts() []PromptInfo {
+    rr := c.rpc_call("prompts/list", "{}", false) >>>
+    << parse_prompts_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) get_prompt(name string, arguments_json string) string {
+    $args := arguments_json + ""
+    if args.len == 0 { args = "{}" }
+    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
+    rr := c.rpc_call("prompts/get", params, false) >>>
+    << parse_prompt_get_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&Client) set_logging_level(level string) int {
+    params := "{\"level\":" + json.quote(&level) + "}"
+    _ := c.rpc_call("logging/setLevel", params, false) >>>
+    << 0
+}
+
+pub struct StdioClient {
+    pub server_name string
+    pub server_version string
+    cmd exec.Cmd
+    stdin os.File
+    stdout os.File
+    buf string
+    next_id int
+    pub closed bool
+}
+
+pub fn closed_stdio_client() StdioClient {
+    << StdioClient{
+        server_name: "",
+        server_version: "",
+        cmd: exec.command(""),
+        stdin: os.closed_file(),
+        stdout: os.closed_file(),
+        buf: "",
+        next_id: 1,
+        closed: true
+    }
+}
+
+pub fn connect_stdio(command string, args []string) StdioClient {
+    $cmd := exec.command(command)
+    for i in 0:args.len {
+        cmd.args.push(args[i] + "")
+    }
+    $sin := cmd.stdin_pipe() >>> (err) {
+        cmd.close_unstarted_pipes()
+        >>> err
+    }
+    $sout := cmd.stdout_pipe() >>> (err) {
+        _ := close_file_quiet($&sin)
+        cmd.close_unstarted_pipes()
+        >>> err
+    }
+    _ := cmd.start() >>> (err) {
+        _ := close_file_quiet($&sin)
+        _ := close_file_quiet($&sout)
+        >>> err
+    }
+    << StdioClient{
+        server_name: "",
+        server_version: "",
+        cmd: cmd,
+        stdin: sin,
+        stdout: sout,
+        buf: "",
+        next_id: 1,
+        closed: false
+    }
+}
+
+fn write_file_all(f $&os.File, data &string) int {
+    $off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := f.write(part) >>>
+        if n <= 0 { >>> errors.new("mcp: stdio pipe closed during write") }
+        off += n
+    }
+    << 0
+}
+
+fn (c $&StdioClient) read_line_nonempty() string {
+    for {
+        $nl := -1
+        for i in 0:c.buf.len {
+            if c.buf[i] == 10 {
+                nl = i
+                <-
+            }
+        }
+        if nl >= 0 {
+            $line := c.buf[0:nl]
+            c.buf = c.buf[nl + 1:c.buf.len]
+            if line.len > 0 && line[line.len - 1] == 13 {
+                line = line[0:line.len - 1]
+            }
+            trimmed := strings.trim_space(&line)
+            if trimmed.len > 0 { << trimmed }
+            ->
+        }
+        chunk := c.stdout.read(8192) >>>
+        if chunk.len == 0 {
+            rem := strings.trim_space(&c.buf)
+            c.buf = ""
+            if rem.len > 0 { << rem }
+            >>> errors.new("mcp: stdio server closed (EOF)")
+        }
+        c.buf = c.buf + chunk
+    }
+    << ""
+}
+
+fn (c $&StdioClient) rpc_call(method string, params_json string, is_notif bool) RpcResult {
+    if c.closed {
+        >>> errors.new("mcp: stdio client is closed")
+    }
+    $id := 0
+    if !is_notif {
+        id = c.next_id
+        c.next_id += 1
+    }
+    line := encode_rpc_request(id, &method, &params_json, is_notif) + "\n"
+    _ := write_file_all($&c.stdin, &line) >>>
+    if is_notif {
+        empty := "{}"
+        doc := json.parse(&empty)
+        rt := doc.root()
+        << RpcResult{doc: ~doc, node: rt}
+    }
+    resp_line := c.read_line_nonempty() >>>
+    << parse_rpc_response_json(&resp_line) >>>
+}
+
+pub fn (c $&StdioClient) initialize() int {
+    rr := c.rpc_call("initialize", init_params_json(), false) >>>
+    doc := &rr.doc
+    res := rr.node
+    if doc.is_dict(res) && doc.has(res, "serverInfo") {
+        si := doc_get_or(doc, res, "serverInfo")
+        c.server_name = json_str_or(doc, si, "name", "")
+        c.server_version = json_str_or(doc, si, "version", "")
+    }
+    _ := c.rpc_call("notifications/initialized", "", true) >>>
+    << 0
+}
+
+pub fn (c $&StdioClient) ping() bool {
+    _ := c.rpc_call("ping", "", false) >>> (_) { << false }
+    << true
+}
+
+pub fn (c $&StdioClient) list_tools() []ToolInfo {
+    rr := c.rpc_call("tools/list", "{}", false) >>>
+    << parse_tools_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) call_tool(name string, arguments_json string) ToolResult {
+    $args := arguments_json + ""
+    if args.len == 0 { args = "{}" }
+    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
+    rr := c.rpc_call("tools/call", params, false) >>>
+    << parse_tool_call_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) list_resources() []ResourceInfo {
+    rr := c.rpc_call("resources/list", "{}", false) >>>
+    << parse_resources_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) list_resource_templates() []ResourceTemplateInfo {
+    rr := c.rpc_call("resources/templates/list", "{}", false) >>>
+    << parse_resource_templates_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) complete(ref_type string, ref_id string, argument_name string, argument_value string) []string {
+    params := encode_complete_params(&ref_type, &ref_id, &argument_name, &argument_value)
+    rr := c.rpc_call("completion/complete", params, false) >>>
+    << parse_completion_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) read_resource(uri string) string {
+    params := "{\"uri\":" + json.quote(&uri) + "}"
+    rr := c.rpc_call("resources/read", params, false) >>>
+    << parse_resource_read_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) list_prompts() []PromptInfo {
+    rr := c.rpc_call("prompts/list", "{}", false) >>>
+    << parse_prompts_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) get_prompt(name string, arguments_json string) string {
+    $args := arguments_json + ""
+    if args.len == 0 { args = "{}" }
+    params := "{\"name\":" + json.quote(&name) + ",\"arguments\":" + args + "}"
+    rr := c.rpc_call("prompts/get", params, false) >>>
+    << parse_prompt_get_result(&rr.doc, rr.node) >>>
+}
+
+pub fn (c $&StdioClient) set_logging_level(level string) int {
+    params := "{\"level\":" + json.quote(&level) + "}"
+    _ := c.rpc_call("logging/setLevel", params, false) >>>
+    << 0
+}
+
+fn write_file_quiet(f $&os.File, data &string) int {
+    _ := write_file_all(f, data) >>> (_) { << 0 }
+    << 0
+}
+
+pub fn (c $&StdioClient) close() int {
+    if c.closed { << 0 }
+    c.closed = true
+    exit_line := "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/exit\"}\n"
+    _ := write_file_quiet($&c.stdin, &exit_line)
+    _ := close_file_quiet($&c.stdin)
+    _ := close_file_quiet($&c.stdout)
+    cmd_ref := $&c.cmd
+    _ := cmd_ref.wait() >>>
+    << 0
+}
+
+// close_nowait closes client pipes after sending notifications/exit without
+// waiting on child exit; use this for external MCP servers that ignore
+// notifications/exit while inherited non-FD_CLOEXEC pipes keep stdin open.
+pub fn (c $&StdioClient) close_nowait() int {
+    if c.closed { << 0 }
+    c.closed = true
+    exit_line := "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/exit\"}\n"
+    _ := write_file_quiet($&c.stdin, &exit_line)
+    _ := close_file_quiet($&c.stdin)
+    _ := close_file_quiet($&c.stdout)
+    << 0
 }

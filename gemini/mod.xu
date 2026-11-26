@@ -1,0 +1,870 @@
+@"github.com/xulang-org/packages/gemini"
+
+#encoding/json
+#errors
+#net/http
+#strconv
+#strings
+#time
+#crypto/tls
+transport #github.com/xulang-org/packages/transport
+
+pub const DEFAULT_TIMEOUT_NS = 60000000000
+pub const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+
+pub struct Client {
+    pub base_url string
+    pub api_key string
+    pub timeout_ns int
+    pub max_retries int
+    pub extra_headers []string
+}
+
+pub struct Part {
+    pub kind string
+    pub text string
+    pub mime_type string
+    pub data string
+    pub name string
+    pub args_json string
+    pub response_json string
+    pub thought bool
+}
+
+pub struct Content {
+    pub role string
+    pub parts []Part
+}
+
+pub struct FunctionDecl {
+    pub name string
+    pub description string
+    pub parameters_json string
+}
+
+pub struct GenerateRequest {
+    pub model string
+    pub system_instruction string
+    pub contents []Content
+    pub tools []FunctionDecl
+    pub temperature f64
+    pub has_temperature bool
+    pub top_p f64
+    pub has_top_p bool
+    pub max_output_tokens int
+    pub stop_sequences []string
+    pub response_mime_type string
+    pub response_schema_json string
+    pub thinking_budget int
+}
+
+pub struct FunctionCall {
+    pub name string
+    pub args_json string
+}
+
+pub struct Usage {
+    pub prompt_token_count int
+    pub candidates_token_count int
+    pub total_token_count int
+    pub thoughts_token_count int
+}
+
+pub struct GenerateResponse {
+    pub text string
+    pub thoughts string
+    pub function_calls []FunctionCall
+    pub finish_reason string
+    pub usage Usage
+}
+
+pub struct StreamChunk {
+    pub text_delta string
+    pub thought_delta string
+    pub function_calls []FunctionCall
+    pub finish_reason string
+    pub usage Usage
+    pub done bool
+}
+
+pub fn new_client(api_key string) Client {
+    << new_client_with_base(DEFAULT_BASE_URL, api_key)
+}
+
+pub fn new_client_with_base(base_url string, api_key string) Client {
+    $url := base_url + ""
+    if url.len > 0 && url[url.len - 1] == 47 {
+        url = url[0:url.len - 1]
+    }
+    if url.len == 0 {
+        url = DEFAULT_BASE_URL
+    }
+    << Client{
+        base_url: url,
+        api_key: api_key,
+        timeout_ns: DEFAULT_TIMEOUT_NS,
+        max_retries: 0,
+        extra_headers: []string{}
+    }
+}
+
+pub fn (c $&Client) set_max_retries(n int) {
+    if n < 0 {
+        c.max_retries = 0
+        <<
+    }
+    c.max_retries = n
+}
+
+pub fn (c $&Client) add_header(name string, value string) {
+    c.extra_headers.push(name + ": " + value)
+}
+
+pub fn (c &Client) clone_client() Client {
+    $hdrs := []string{}
+    for i in 0:c.extra_headers.len {
+        hdrs.push(c.extra_headers[i] + "")
+    }
+    << Client{
+        base_url: c.base_url + "",
+        api_key: c.api_key + "",
+        timeout_ns: c.timeout_ns,
+        max_retries: c.max_retries,
+        extra_headers: ~hdrs
+    }
+}
+
+pub fn text_part(text string) Part {
+    << Part{
+        kind: "text", text: text, mime_type: "", data: "",
+        name: "", args_json: "", response_json: "", thought: false
+    }
+}
+
+pub fn inline_data_part(mime_type string, data_base64 string) Part {
+    << Part{
+        kind: "inline_data", text: "", mime_type: mime_type, data: data_base64,
+        name: "", args_json: "", response_json: "", thought: false
+    }
+}
+
+pub fn function_call_part(name string, args_json string) Part {
+    $aj := args_json + ""
+    if aj.len == 0 { aj = "{}" }
+    << Part{
+        kind: "function_call", text: "", mime_type: "", data: "",
+        name: name, args_json: aj, response_json: "", thought: false
+    }
+}
+
+pub fn function_response_part(name string, response_json string) Part {
+    $rj := response_json + ""
+    if rj.len == 0 { rj = "{}" }
+    << Part{
+        kind: "function_response", text: "", mime_type: "", data: "",
+        name: name, args_json: "", response_json: rj, thought: false
+    }
+}
+
+pub fn content(role string, parts []Part) Content {
+    << Content{role: role, parts: ~parts}
+}
+
+pub fn user_text(text string) Content {
+    << content("user", [text_part(text)])
+}
+
+pub fn model_text(text string) Content {
+    << content("model", [text_part(text)])
+}
+
+pub fn function_decl(name string, description string, parameters_json string) FunctionDecl {
+    << FunctionDecl{name: name, description: description, parameters_json: parameters_json}
+}
+
+pub fn generate_request(model string, contents []Content) GenerateRequest {
+    << GenerateRequest{
+        model: model,
+        system_instruction: "",
+        contents: ~contents,
+        tools: []FunctionDecl{},
+        temperature: 0.0,
+        has_temperature: false,
+        top_p: 0.0,
+        has_top_p: false,
+        max_output_tokens: 0,
+        stop_sequences: []string{},
+        response_mime_type: "",
+        response_schema_json: "",
+        thinking_budget: -1
+    }
+}
+
+fn fmt_f64_or(v f64, def string) string {
+    << strconv.format_float(v, 102, 4) >>> (_) { << def }
+}
+
+fn join_path(base_path string, suffix string) string {
+    if base_path.len == 0 || base_path == "/" { << suffix }
+    if base_path[base_path.len - 1] == 47 {
+        << base_path[0:base_path.len - 1] + suffix
+    }
+    << base_path + suffix
+}
+
+fn default_port_for(raw &string) int {
+    if strings.has_prefix(raw, "https://") { << 443 }
+    << 80
+}
+
+fn normalize_model_name(model &string) string {
+    if strings.has_prefix(model, "models/") {
+        << (*model)[7:model.len]
+    }
+    << (*model) + ""
+}
+
+fn build_http_req(ep &transport.Endpoint, c &Client, suffix string, body &string) string {
+    full_path := join_path(ep.path, suffix)
+    $raw := "POST " + full_path + " HTTP/1.1\r\n"
+    raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\n"
+    raw = raw + "Accept: application/json, text/event-stream\r\n"
+    raw = raw + "Content-Type: application/json\r\n"
+    if c.api_key.len > 0 {
+        raw = raw + "x-goog-api-key: " + c.api_key + "\r\n"
+    }
+    for hi in 0:c.extra_headers.len {
+        raw = raw + c.extra_headers[hi] + "\r\n"
+    }
+    raw = raw + "Content-Length: " + str(body.len) + "\r\nConnection: close\r\n\r\n" + *body
+    << raw
+}
+
+fn encode_part(p &Part) string {
+    if p.kind == "inline_data" {
+        << "{\"inlineData\":{\"mimeType\":" + json.quote(&p.mime_type) + ",\"data\":" + json.quote(&p.data) + "}}"
+    } else if p.kind == "function_call" {
+        $aj := p.args_json + ""
+        if aj.len == 0 { aj = "{}" }
+        << "{\"functionCall\":{\"name\":" + json.quote(&p.name) + ",\"args\":" + aj + "}}"
+    } else if p.kind == "function_response" {
+        $rj := p.response_json + ""
+        if rj.len == 0 { rj = "{}" }
+        << "{\"functionResponse\":{\"name\":" + json.quote(&p.name) + ",\"response\":" + rj + "}}"
+    }
+    << "{\"text\":" + json.quote(&p.text) + "}"
+}
+
+fn encode_generate_body(req &GenerateRequest) string {
+    $s := "{\"contents\":["
+    for i in 0:req.contents.len {
+        if i > 0 { s = s + "," }
+        ct := &req.contents[i]
+        $role := ct.role + ""
+        if role.len == 0 { role = "user" }
+        s = s + "{\"role\":" + json.quote(&role) + ",\"parts\":["
+        for pi in 0:ct.parts.len {
+            if pi > 0 { s = s + "," }
+            s = s + encode_part(&ct.parts[pi])
+        }
+        s = s + "]}"
+    }
+    s = s + "]"
+    if req.system_instruction.len > 0 {
+        s = s + ",\"systemInstruction\":{\"parts\":[{\"text\":" + json.quote(&req.system_instruction) + "}]}"
+    }
+    if req.tools.len > 0 {
+        s = s + ",\"tools\":[{\"functionDeclarations\":["
+        for ti in 0:req.tools.len {
+            if ti > 0 { s = s + "," }
+            fd := &req.tools[ti]
+            $sch := fd.parameters_json + ""
+            if sch.len == 0 { sch = "{\"type\":\"object\"}" }
+            s = s + "{\"name\":" + json.quote(&fd.name) + ",\"description\":" + json.quote(&fd.description) +
+                ",\"parameters\":" + sch + "}"
+        }
+        s = s + "]}]"
+    }
+    $has_gcfg := req.has_temperature || req.has_top_p || req.max_output_tokens > 0 ||
+                 req.stop_sequences.len > 0 || req.response_mime_type.len > 0 ||
+                 req.response_schema_json.len > 0 || req.thinking_budget >= 0
+    if has_gcfg {
+        s = s + ",\"generationConfig\":{"
+        $gcnt := 0
+        if req.has_temperature {
+            if gcnt > 0 { s = s + "," }
+            s = s + "\"temperature\":" + fmt_f64_or(req.temperature, "0.0")
+            gcnt += 1
+        }
+        if req.has_top_p {
+            if gcnt > 0 { s = s + "," }
+            s = s + "\"topP\":" + fmt_f64_or(req.top_p, "1.0")
+            gcnt += 1
+        }
+        if req.max_output_tokens > 0 {
+            if gcnt > 0 { s = s + "," }
+            s = s + "\"maxOutputTokens\":" + str(req.max_output_tokens)
+            gcnt += 1
+        }
+        if req.stop_sequences.len > 0 {
+            if gcnt > 0 { s = s + "," }
+            s = s + "\"stopSequences\":["
+            for si in 0:req.stop_sequences.len {
+                if si > 0 { s = s + "," }
+                s = s + json.quote(&req.stop_sequences[si])
+            }
+            s = s + "]"
+            gcnt += 1
+        }
+        if req.response_mime_type.len > 0 {
+            if gcnt > 0 { s = s + "," }
+            s = s + "\"responseMimeType\":" + json.quote(&req.response_mime_type)
+            gcnt += 1
+        }
+        if req.response_schema_json.len > 0 {
+            if gcnt > 0 { s = s + "," }
+            s = s + "\"responseSchema\":" + req.response_schema_json
+            gcnt += 1
+        }
+        if req.thinking_budget >= 0 {
+            if gcnt > 0 { s = s + "," }
+            s = s + "\"thinkingConfig\":{\"thinkingBudget\":" + str(req.thinking_budget) + "}"
+            gcnt += 1
+        }
+        s = s + "}"
+    }
+    << s + "}"
+}
+
+fn is_retriable_status(sc int) bool {
+    << sc == 429 || sc == 503 || sc >= 500
+}
+
+fn sleep_retry_backoff(attempt int) {
+    $shift := attempt
+    if shift > 6 { shift = 6 }
+    $ms := 25 << shift
+    if ms > 2000 { ms = 2000 }
+    time.sleep(ms * time.millisecond())
+}
+
+fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_int_or(doc &json.Doc, obj int, key string, def int) int {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_number(n) {
+        << doc.as_int(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_bool_or(doc &json.Doc, obj int, key string, def bool) bool {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_bool(n) {
+        << doc.as_bool(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_encode_or(doc &json.Doc, node int, def string) string {
+    << doc.encode(node) >>> (_) { << def }
+}
+
+fn extract_error_msg(status int, body &string) string {
+    $msg := "gemini: HTTP " + str(status)
+    doc := json.parse(body)
+    if doc.ok() && doc.is_dict(doc.root()) {
+        root := doc.root()
+        if doc.has(root, "error") {
+            en := doc.get(root, "error") >>> (_) { << msg }
+            emsg := json_str_or(&doc, en, "message", "")
+            if emsg.len > 0 { msg = emsg }
+        }
+    }
+    << msg
+}
+
+fn parse_usage(doc &json.Doc, root int) Usage {
+    $u := Usage{prompt_token_count: 0, candidates_token_count: 0, total_token_count: 0, thoughts_token_count: 0}
+    if !doc.is_dict(root) || !doc.has(root, "usageMetadata") { << u }
+    un := doc.get(root, "usageMetadata") >>> (_) { << u }
+    if doc.is_dict(un) {
+        u.prompt_token_count = json_int_or(doc, un, "promptTokenCount", 0)
+        u.candidates_token_count = json_int_or(doc, un, "candidatesTokenCount", 0)
+        u.total_token_count = json_int_or(doc, un, "totalTokenCount", 0)
+        u.thoughts_token_count = json_int_or(doc, un, "thoughtsTokenCount", 0)
+    }
+    << u
+}
+
+fn parse_response_payload(doc &json.Doc, root int, text_out $&string, thoughts_out $&string,
+                          fcs_out $&[]FunctionCall, finish_out $&string) {
+    *text_out = ""
+    *thoughts_out = ""
+    *finish_out = ""
+    if doc.has(root, "candidates") {
+        cands := doc.get(root, "candidates") >>> (_) { << }
+        if doc.is_list(cands) && doc.count(cands) > 0 {
+            c0 := doc.at(cands, 0) >>> (_) { << }
+            fr := json_str_or(doc, c0, "finishReason", "")
+            if fr.len > 0 { *finish_out = fr }
+            if doc.has(c0, "content") {
+                ct := doc.get(c0, "content") >>> (_) { << }
+                if doc.is_dict(ct) && doc.has(ct, "parts") {
+                    ps := doc.get(ct, "parts") >>> (_) { << }
+                    if doc.is_list(ps) {
+                        cnt := doc.count(ps)
+                        for i in 0:cnt {
+                            p := doc.at(ps, i) >>> (_) { -> }
+                            if !doc.is_dict(p) { -> }
+                            is_th := json_bool_or(doc, p, "thought", false)
+                            if doc.has(p, "text") {
+                                t := json_str_or(doc, p, "text", "")
+                                if is_th {
+                                    *thoughts_out = *thoughts_out + t
+                                } else {
+                                    *text_out = *text_out + t
+                                }
+                            }
+                            if doc.has(p, "functionCall") {
+                                fcn := doc.get(p, "functionCall") >>> (_) { -> }
+                                if doc.is_dict(fcn) {
+                                    fn_name := json_str_or(doc, fcn, "name", "")
+                                    $args := "{}"
+                                    if doc.has(fcn, "args") {
+                                        an := doc.get(fcn, "args") >>> (_) { -> }
+                                        args = json_encode_or(doc, an, "{}")
+                                    }
+                                    if fn_name.len > 0 {
+                                        fcs_out.push(FunctionCall{name: fn_name, args_json: args})
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn try_request_raw(ep &transport.Endpoint, raw_req &string, err_out $&string) http.Response {
+    *err_out = ""
+    ep_copy := transport.Endpoint{
+        scheme: ep.scheme + "",
+        host: ep.host + "",
+        port: ep.port,
+        path: ep.path + "",
+        secure: ep.secure
+    }
+    cfg := tls.new_config(ep_copy.host + "")
+    resp := transport.request_raw(ep_copy, cfg, *raw_req + "", "POST") >>> (err) {
+        *err_out = err.msg()
+        << http.new_response()
+    }
+    << resp
+}
+
+fn request_retry(c &Client, suffix string, body &string) http.Response {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    raw_req := build_http_req(&ep, c, suffix, body)
+    $max_r := c.max_retries
+    if max_r < 0 { max_r = 0 }
+    $attempt := 0
+    for {
+        $err_msg := ""
+        resp := try_request_raw(&ep, &raw_req, $&err_msg)
+        if err_msg.len > 0 {
+            if attempt < max_r {
+                sleep_retry_backoff(attempt)
+                attempt += 1
+                ->
+            }
+            >>> errors.new(err_msg)
+        }
+        if is_retriable_status(resp.status_code) && attempt < max_r {
+            sleep_retry_backoff(attempt)
+            attempt += 1
+            ->
+        }
+        << resp
+    }
+    << http.new_response()
+}
+
+fn copy_function_calls(src &[]FunctionCall) []FunctionCall {
+    $out := []FunctionCall{}
+    for i in 0:src.len {
+        fc := &src[i]
+        out.push(FunctionCall{name: fc.name + "", args_json: fc.args_json + ""})
+    }
+    << out
+}
+
+pub fn (c &Client) generate(req &GenerateRequest) GenerateResponse {
+    mname := normalize_model_name(&req.model)
+    body := encode_generate_body(req)
+    suffix := "/v1beta/models/" + mname + ":generateContent"
+    resp := request_retry(c, suffix, &body) >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+    }
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("gemini: invalid JSON response")
+    }
+    root := doc.root()
+    $txt := ""
+    $th := ""
+    $fr := ""
+    $fcs := []FunctionCall{}
+    parse_response_payload(&doc, root, $&txt, $&th, $&fcs, $&fr)
+    u := parse_usage(&doc, root)
+    << GenerateResponse{
+        text: txt, thoughts: th, function_calls: ~fcs, finish_reason: fr, usage: u
+    }
+}
+
+pub fn (c &Client) embed(model string, text string) []f64 {
+    mname := normalize_model_name(&model)
+    body := "{\"model\":" + json.quote(&("models/" + mname)) + ",\"content\":{\"parts\":[{\"text\":" + json.quote(&text) + "}]}}"
+    suffix := "/v1beta/models/" + mname + ":embedContent"
+    resp := request_retry(c, suffix, &body) >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+    }
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("gemini: invalid embedding JSON response")
+    }
+    root := doc.root()
+    $out := []f64{}
+    if doc.has(root, "embedding") {
+        en := doc.get(root, "embedding") >>>
+        if doc.is_dict(en) && doc.has(en, "values") {
+            vn := doc.get(en, "values") >>>
+            if doc.is_list(vn) {
+                cnt := doc.count(vn)
+                out.reserve(cnt)
+                for i in 0:cnt {
+                    fnode := doc.at(vn, i) >>>
+                    out.push(doc.as_f64(fnode) >>>)
+                }
+            }
+        }
+    }
+    << out
+}
+
+pub fn (c &Client) batch_embed(model string, texts &[]string) [][]f64 {
+    if texts.len == 0 { << [][]f64{} }
+    mname := normalize_model_name(&model)
+    full_m := "models/" + mname
+    $reqs := "["
+    for i in 0:texts.len {
+        if i > 0 { reqs = reqs + "," }
+        t := &texts[i]
+        reqs = reqs + "{\"model\":" + json.quote(&full_m) + ",\"content\":{\"parts\":[{\"text\":" + json.quote(t) + "}]}}"
+    }
+    reqs = reqs + "]"
+    body := "{\"requests\":" + reqs + "}"
+    suffix := "/v1beta/models/" + mname + ":batchEmbedContents"
+    resp := request_retry(c, suffix, &body) >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+    }
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("gemini: invalid batch embedding JSON response")
+    }
+    root := doc.root()
+    $out := [][]f64{}
+    if doc.has(root, "embeddings") {
+        embs := doc.get(root, "embeddings") >>>
+        if doc.is_list(embs) {
+            ecnt := doc.count(embs)
+            for ei in 0:ecnt {
+                en := doc.at(embs, ei) >>>
+                $vec := []f64{}
+                if doc.is_dict(en) && doc.has(en, "values") {
+                    vn := doc.get(en, "values") >>>
+                    if doc.is_list(vn) {
+                        vcnt := doc.count(vn)
+                        vec.reserve(vcnt)
+                        for j in 0:vcnt {
+                            fnode := doc.at(vn, j) >>>
+                            vec.push(doc.as_f64(fnode) >>>)
+                        }
+                    }
+                }
+                out.push(~vec)
+            }
+        }
+    }
+    << out
+}
+
+fn find_substr_from(s &string, pat &string, start int) int {
+    if pat.len <= 0 || start < 0 || start + pat.len > s.len { << -1 }
+    limit := s.len - pat.len + 1
+    for i in start:limit {
+        $eq := true
+        for j in 0:pat.len {
+            if (*s)[i + j] != (*pat)[j] {
+                eq = false
+                <-
+            }
+        }
+        if eq { << i }
+    }
+    << -1
+}
+
+fn parse_status_line(head &string) int {
+    $sp := -1
+    for i in 0:head.len {
+        if (*head)[i] == 32 {
+            sp = i
+            <-
+        }
+        if (*head)[i] == 10 { <- }
+    }
+    if sp < 0 || sp + 4 > head.len { << 0 }
+    $end := sp + 1
+    while end < head.len && (*head)[end] >= 48 && (*head)[end] <= 57 {
+        end += 1
+    }
+    if end == sp + 1 { << 0 }
+    code_s := (*head)[sp + 1:end]
+    << strconv.atoi(&code_s) >>> (_) { << 0 }
+}
+
+fn close_conn(conn $&transport.Conn) int {
+    _ := conn.close() >>> (_) { << 0 }
+    << 0
+}
+
+fn conn_read_or(conn $&transport.Conn, max int) string {
+    << conn.read(max) >>> (_) { << "" }
+}
+
+fn open_stream_attempt(ep &transport.Endpoint, raw_req &string, timeout_ns int,
+                       ok_out $&bool, retriable_out $&bool, err_code_out $&int,
+                       err_msg_out $&string, rest_out $&string) transport.Conn {
+    *ok_out = false
+    *retriable_out = false
+    *err_code_out = 0
+    *err_msg_out = ""
+    *rest_out = ""
+    ep_copy := transport.Endpoint{
+        scheme: ep.scheme + "",
+        host: ep.host + "",
+        port: ep.port,
+        path: ep.path + "",
+        secure: ep.secure
+    }
+    cfg := tls.new_config(ep_copy.host + "")
+    $conn := transport.dial(ep_copy, cfg, timeout_ns) >>> (err) {
+        *retriable_out = true
+        *err_msg_out = err.msg()
+        << transport.closed_conn()
+    }
+    _ := conn.write_all(*raw_req + "") >>> (err) {
+        _ := close_conn($&conn)
+        *retriable_out = true
+        *err_msg_out = err.msg()
+        << transport.closed_conn()
+    }
+    $buf := ""
+    crlf2 := "\r\n\r\n"
+    $hdr_end := -1
+    while hdr_end < 0 {
+        chunk := conn.read(8192) >>> (err) {
+            _ := close_conn($&conn)
+            *retriable_out = true
+            *err_msg_out = err.msg()
+            << transport.closed_conn()
+        }
+        if chunk.len == 0 { <- }
+        buf = buf + chunk
+        hdr_end = find_substr_from(&buf, &crlf2, 0)
+    }
+    if hdr_end < 0 {
+        _ := close_conn($&conn)
+        *retriable_out = true
+        *err_msg_out = "gemini: incomplete HTTP headers"
+        << transport.closed_conn()
+    }
+    head := buf[0:hdr_end]
+    status := parse_status_line(&head)
+    $rest := buf[(hdr_end + 4):buf.len]
+    if status < 200 || status >= 300 {
+        for {
+            chunk := conn.read(8192) >>> (_) { <- }
+            if chunk.len == 0 { <- }
+            rest = rest + chunk
+        }
+        _ := close_conn($&conn)
+        *err_code_out = status
+        *err_msg_out = extract_error_msg(status, &rest)
+        *retriable_out = is_retriable_status(status)
+        << transport.closed_conn()
+    }
+    *ok_out = true
+    *err_code_out = status
+    *rest_out = rest
+    << conn
+}
+
+fn open_stream_retry(c &Client, req &GenerateRequest, rest_out $&string) transport.Conn {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    mname := normalize_model_name(&req.model)
+    body := encode_generate_body(req)
+    suffix := "/v1beta/models/" + mname + ":streamGenerateContent?alt=sse"
+    raw_req := build_http_req(&ep, c, suffix, &body)
+    $max_r := c.max_retries
+    if max_r < 0 { max_r = 0 }
+    $attempt := 0
+    for {
+        $ok := false
+        $retriable := false
+        $err_code := 0
+        $err_msg := ""
+        $rest := ""
+        $conn := open_stream_attempt(&ep, &raw_req, c.timeout_ns, $&ok, $&retriable, $&err_code, $&err_msg, $&rest)
+        if ok {
+            *rest_out = rest
+            << conn
+        }
+        _ := close_conn($&conn)
+        if retriable && attempt < max_r {
+            sleep_retry_backoff(attempt)
+            attempt += 1
+            ->
+        }
+        if err_code != 0 {
+            >>> errors.code(err_code, err_msg)
+        }
+        >>> errors.new(err_msg)
+    }
+    >>> errors.new("gemini: stream failed")
+}
+
+fn copy_stream_chunk(sc &StreamChunk) StreamChunk {
+    << StreamChunk{
+        text_delta: sc.text_delta + "",
+        thought_delta: sc.thought_delta + "",
+        function_calls: copy_function_calls(&sc.function_calls),
+        finish_reason: sc.finish_reason + "",
+        usage: sc.usage,
+        done: sc.done
+    }
+}
+
+fn emit_chunk(sc StreamChunk, use_cb bool, on_chunk fn(StreamChunk) bool,
+              has_ch bool, ch chan StreamChunk, stopped $&bool) {
+    if has_ch {
+        ch <- copy_stream_chunk(&sc)
+    }
+    if use_cb {
+        if !on_chunk(copy_stream_chunk(&sc)) {
+            *stopped = true
+        }
+    }
+}
+
+fn generate_stream_impl(c &Client, req &GenerateRequest, use_cb bool, on_chunk fn(StreamChunk) bool,
+                        has_ch bool, ch chan StreamChunk) GenerateResponse {
+    $line_buf := ""
+    $conn := open_stream_retry(c, req, $&line_buf) >>>
+    $out := GenerateResponse{
+        text: "", thoughts: "", function_calls: []FunctionCall{},
+        finish_reason: "",
+        usage: Usage{prompt_token_count: 0, candidates_token_count: 0, total_token_count: 0, thoughts_token_count: 0}
+    }
+    $stopped := false
+    for {
+        $processed := 0
+        for {
+            $nl := -1
+            for i in processed:line_buf.len {
+                if line_buf[i] == 10 {
+                    nl = i
+                    <-
+                }
+            }
+            if nl < 0 { <- }
+            $line := line_buf[processed:nl]
+            processed = nl + 1
+            line = strings.trim_space(&line)
+            if line.len == 0 || !strings.has_prefix(&line, "data:") { -> }
+            $payload := line[5:line.len]
+            payload = strings.trim_space(&payload)
+            if payload.len == 0 { -> }
+            if payload == "[DONE]" {
+                stopped = true
+                <-
+            }
+            doc := json.parse(&payload)
+            if !doc.ok() || !doc.is_dict(doc.root()) { -> }
+            root := doc.root()
+            $dt := ""
+            $dth := ""
+            $dfr := ""
+            $dfcs := []FunctionCall{}
+            parse_response_payload(&doc, root, $&dt, $&dth, $&dfcs, $&dfr)
+            u := parse_usage(&doc, root)
+            if dt.len > 0 { out.text = out.text + dt }
+            if dth.len > 0 { out.thoughts = out.thoughts + dth }
+            for fi in 0:dfcs.len {
+                out.function_calls.push(FunctionCall{name: dfcs[fi].name + "", args_json: dfcs[fi].args_json + ""})
+            }
+            if dfr.len > 0 { out.finish_reason = dfr }
+            if u.total_token_count > 0 || u.prompt_token_count > 0 { out.usage = u }
+            emit_chunk(StreamChunk{
+                text_delta: dt, thought_delta: dth, function_calls: ~dfcs,
+                finish_reason: dfr, usage: u, done: false
+            }, use_cb, on_chunk, has_ch, ch, $&stopped)
+            if stopped { <- }
+        }
+        if processed > 0 {
+            line_buf = line_buf[processed:line_buf.len]
+        }
+        if stopped { <- }
+        chunk := conn_read_or($&conn, 8192)
+        if chunk.len == 0 { <- }
+        line_buf = line_buf + chunk
+    }
+    _ := close_conn($&conn)
+    emit_chunk(StreamChunk{
+        text_delta: "", thought_delta: "", function_calls: []FunctionCall{},
+        finish_reason: out.finish_reason + "", usage: out.usage, done: true
+    }, use_cb, on_chunk, has_ch, ch, $&stopped)
+    << out
+}
+
+pub fn (c &Client) generate_stream(req &GenerateRequest, on_chunk fn(StreamChunk) bool) GenerateResponse {
+    dummy_ch := chan StreamChunk{cap: 1}
+    << generate_stream_impl(c, req, true, on_chunk, false, dummy_ch) >>>
+}
+
+fn ignore_chunk(sc StreamChunk) bool {
+    << true
+}
+
+pub fn (c &Client) generate_stream_chan(req &GenerateRequest, ch chan StreamChunk) GenerateResponse {
+    << generate_stream_impl(c, req, false, ignore_chunk, true, ch) >>>
+}

@@ -107,3 +107,72 @@ xu_int XM_API(embedding_f32)(xu_int a, xu_int b, const xu_i64_span *c) { (void)a
 xu_int XM_API(batch_embedding_f32)(xu_int a, xu_int b, xu_int c, const xu_i64_span *d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
 xu_int XM_API(argmax_f32)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
 xu_int XM_API(batch_argmax_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_0_new)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_0_info)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_0_write)(xu_int a, const xu_u8_span *b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_0_close)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_0_release)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(gemv_q5_0_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_gemv_q5_0_f32)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q6_k_new)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q6_k_info)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q6_k_write)(xu_int a, const xu_u8_span *b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q6_k_close)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q6_k_release)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(gemv_q6_k_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_gemv_q6_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(rope_interleaved_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_rope_interleaved_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(kv_cache_append_f16)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_kv_cache_append_f16)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(attention_decode_f16)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g, xu_int h) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_attention_decode_f16)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g, xu_int h, xu_int i) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; (void)i; return XM_UNAVAILABLE; }
+xu_int XM_API(add_rmsnorm_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_add_rmsnorm_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(geglu_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_geglu_f32)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(silu_f32)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_silu_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(log_softmax_f32)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_log_softmax_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(causal_attention_f16)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_causal_attention_f16)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g, xu_int h) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; return XM_UNAVAILABLE; }
+xu_int XM_API(moe_topk_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_moe_topk_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g, xu_int h) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; (void)h; return XM_UNAVAILABLE; }
+xu_int XM_API(moe_weighted_add_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_moe_weighted_add_f32)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(rope_yarn_f32)(xu_int a, xu_int b, const xu_i64_span *c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_rope_yarn_f32)(xu_int a, xu_int b, xu_int c, const xu_i64_span *d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(moe_gemv_q4_0_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_moe_gemv_q4_0_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(moe_gemv_q8_0_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_moe_gemv_q8_0_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(moe_gemv_q4_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_moe_gemv_q4_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(moe_gemv_q6_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_moe_gemv_q6_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(paged_attention_decode_f16)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, const xu_i64_span *f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_paged_attention_decode_f16)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, const xu_i64_span *g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(lora_add_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_lora_add_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(adamw_step_f32)(xu_int a, xu_int b, xu_int c, xu_int d, const xu_i64_span *e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_adamw_step_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, const xu_i64_span *f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(cross_entropy_grad_f32)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_cross_entropy_grad_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_k_new)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_k_info)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_k_write)(xu_int a, const xu_u8_span *b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_k_close)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(matrix_q5_k_release)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
+xu_int XM_API(gemv_q5_k_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_gemv_q5_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(moe_gemv_q5_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_moe_gemv_q5_k_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(paged_kv_cache_append_f16)(xu_int a, xu_int b, xu_int c, const xu_i64_span *d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_paged_kv_cache_append_f16)(xu_int a, xu_int b, xu_int c, xu_int d, const xu_i64_span *e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(gemm_f32_tn)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_gemm_f32_tn)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(rmsnorm_backward_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_rmsnorm_backward_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }
+xu_int XM_API(swiglu_backward_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(batch_swiglu_backward_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; return XM_UNAVAILABLE; }

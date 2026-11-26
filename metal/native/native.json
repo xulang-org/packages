@@ -673,6 +673,351 @@
       "name": "batch_argmax_f32",
       "params": ["int", "int", "int"],
       "ret": "int"
+    },
+    {
+      "name": "matrix_q5_0_new",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_0_info",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_0_write",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_0_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_0_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemv_q5_0_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemv_q5_0_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q6_k_new",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q6_k_info",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q6_k_write",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q6_k_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q6_k_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemv_q6_k_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemv_q6_k_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "rope_interleaved_f32",
+      "params": ["int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_rope_interleaved_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "kv_cache_append_f16",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_kv_cache_append_f16",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "attention_decode_f16",
+      "params": ["int", "int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_attention_decode_f16",
+      "params": ["int", "int", "int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "add_rmsnorm_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_add_rmsnorm_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "geglu_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_geglu_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "silu_f32",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_silu_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "log_softmax_f32",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_log_softmax_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "causal_attention_f16",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_causal_attention_f16",
+      "params": ["int", "int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "moe_topk_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_moe_topk_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "moe_weighted_add_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_moe_weighted_add_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "rope_yarn_f32",
+      "params": ["int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_rope_yarn_f32",
+      "params": ["int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "moe_gemv_q4_0_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_moe_gemv_q4_0_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "moe_gemv_q8_0_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_moe_gemv_q8_0_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "moe_gemv_q4_k_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_moe_gemv_q4_k_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "moe_gemv_q6_k_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_moe_gemv_q6_k_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "paged_attention_decode_f16",
+      "params": ["int", "int", "int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_paged_attention_decode_f16",
+      "params": ["int", "int", "int", "int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "lora_add_f32",
+      "params": ["int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_lora_add_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "adamw_step_f32",
+      "params": ["int", "int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_adamw_step_f32",
+      "params": ["int", "int", "int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "cross_entropy_grad_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_cross_entropy_grad_f32",
+      "params": ["int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_k_new",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_k_info",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_k_write",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_k_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q5_k_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemv_q5_k_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemv_q5_k_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "moe_gemv_q5_k_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_moe_gemv_q5_k_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "paged_kv_cache_append_f16",
+      "params": ["int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_paged_kv_cache_append_f16",
+      "params": ["int", "int", "int", "int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "gemm_f32_tn",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemm_f32_tn",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "rmsnorm_backward_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_rmsnorm_backward_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "swiglu_backward_f32",
+      "params": ["int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_swiglu_backward_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
     }
   ]
 }

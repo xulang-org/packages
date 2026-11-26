@@ -11,8 +11,8 @@ const SLOT = 2
 const OFF_LIBRARY = 0
 const OFF_LOADED = 8
 const OFF_SYMS = 16
-const SYM_COUNT = 107
-const BLOB_SIZE = 872
+const SYM_COUNT = 176
+const BLOB_SIZE = 1424
 
 const XM_UNAVAILABLE = -1
 
@@ -123,6 +123,75 @@ extern "C" fn xm_embedding_f32(fn_ptr c_ptr, dst int, table int, ids c_ptr) int 
 extern "C" fn xm_batch_embedding_f32(fn_ptr c_ptr, batch int, dst int, table int, ids c_ptr) int = dynamic
 extern "C" fn xm_argmax_f32(fn_ptr c_ptr, dst int, x int) int = dynamic
 extern "C" fn xm_batch_argmax_f32(fn_ptr c_ptr, batch int, dst int, x int) int = dynamic
+extern "C" fn xm_matrix_q5_0_new(fn_ptr c_ptr, device int, rows int, columns int) int = dynamic
+extern "C" fn xm_matrix_q5_0_info(fn_ptr c_ptr, matrix int, key int) int = dynamic
+extern "C" fn xm_matrix_q5_0_write(fn_ptr c_ptr, matrix int, bytes c_ptr) int = dynamic
+extern "C" fn xm_matrix_q5_0_close(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_matrix_q5_0_release(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_gemv_q5_0_f32(fn_ptr c_ptr, dst int, x int, w int) int = dynamic
+extern "C" fn xm_batch_gemv_q5_0_f32(fn_ptr c_ptr, batch int, dst int, x int, w int) int = dynamic
+extern "C" fn xm_matrix_q6_k_new(fn_ptr c_ptr, device int, rows int, columns int) int = dynamic
+extern "C" fn xm_matrix_q6_k_info(fn_ptr c_ptr, matrix int, key int) int = dynamic
+extern "C" fn xm_matrix_q6_k_write(fn_ptr c_ptr, matrix int, bytes c_ptr) int = dynamic
+extern "C" fn xm_matrix_q6_k_close(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_matrix_q6_k_release(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_gemv_q6_k_f32(fn_ptr c_ptr, dst int, x int, w int) int = dynamic
+extern "C" fn xm_batch_gemv_q6_k_f32(fn_ptr c_ptr, batch int, dst int, x int, w int) int = dynamic
+extern "C" fn xm_rope_interleaved_f32(fn_ptr c_ptr, dst int, x int, pos_offset int, head_dim int, theta_bits int) int = dynamic
+extern "C" fn xm_batch_rope_interleaved_f32(fn_ptr c_ptr, batch int, dst int, x int, pos_offset int, head_dim int, theta_bits int) int = dynamic
+extern "C" fn xm_kv_cache_append_f16(fn_ptr c_ptr, cache int, src int, pos_offset int) int = dynamic
+extern "C" fn xm_batch_kv_cache_append_f16(fn_ptr c_ptr, batch int, cache int, src int, pos_offset int) int = dynamic
+extern "C" fn xm_attention_decode_f16(fn_ptr c_ptr, dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int = dynamic
+extern "C" fn xm_batch_attention_decode_f16(fn_ptr c_ptr, batch int, dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int = dynamic
+extern "C" fn xm_add_rmsnorm_f32(fn_ptr c_ptr, dst_norm int, dst_sum int, a int, b int, weight int, eps_bits int) int = dynamic
+extern "C" fn xm_batch_add_rmsnorm_f32(fn_ptr c_ptr, batch int, dst_norm int, dst_sum int, a int, b int, weight int, eps_bits int) int = dynamic
+extern "C" fn xm_geglu_f32(fn_ptr c_ptr, dst int, gate int, up int) int = dynamic
+extern "C" fn xm_batch_geglu_f32(fn_ptr c_ptr, batch int, dst int, gate int, up int) int = dynamic
+extern "C" fn xm_silu_f32(fn_ptr c_ptr, dst int, x int) int = dynamic
+extern "C" fn xm_batch_silu_f32(fn_ptr c_ptr, batch int, dst int, x int) int = dynamic
+extern "C" fn xm_log_softmax_f32(fn_ptr c_ptr, dst int, x int) int = dynamic
+extern "C" fn xm_batch_log_softmax_f32(fn_ptr c_ptr, batch int, dst int, x int) int = dynamic
+extern "C" fn xm_causal_attention_f16(fn_ptr c_ptr, dst int, q int, k int, v int, n_heads int, n_kv_heads int, scale_bits int) int = dynamic
+extern "C" fn xm_batch_causal_attention_f16(fn_ptr c_ptr, batch int, dst int, q int, k int, v int, n_heads int, n_kv_heads int, scale_bits int) int = dynamic
+extern "C" fn xm_moe_topk_f32(fn_ptr c_ptr, out_idx int, out_w int, logits int, k int, use_sigmoid int, normalize_topk int, weight_scale_bits int) int = dynamic
+extern "C" fn xm_batch_moe_topk_f32(fn_ptr c_ptr, batch int, out_idx int, out_w int, logits int, k int, use_sigmoid int, normalize_topk int, weight_scale_bits int) int = dynamic
+extern "C" fn xm_moe_weighted_add_f32(fn_ptr c_ptr, dst int, expert_outs int, weights int) int = dynamic
+extern "C" fn xm_batch_moe_weighted_add_f32(fn_ptr c_ptr, batch int, dst int, expert_outs int, weights int) int = dynamic
+extern "C" fn xm_rope_yarn_f32(fn_ptr c_ptr, dst int, x int, params c_ptr) int = dynamic
+extern "C" fn xm_batch_rope_yarn_f32(fn_ptr c_ptr, batch int, dst int, x int, params c_ptr) int = dynamic
+extern "C" fn xm_moe_gemv_q4_0_f32(fn_ptr c_ptr, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_batch_moe_gemv_q4_0_f32(fn_ptr c_ptr, batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_moe_gemv_q8_0_f32(fn_ptr c_ptr, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_batch_moe_gemv_q8_0_f32(fn_ptr c_ptr, batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_moe_gemv_q4_k_f32(fn_ptr c_ptr, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_batch_moe_gemv_q4_k_f32(fn_ptr c_ptr, batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_moe_gemv_q6_k_f32(fn_ptr c_ptr, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_batch_moe_gemv_q6_k_f32(fn_ptr c_ptr, batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_paged_attention_decode_f16(fn_ptr c_ptr, dst int, q int, k_pages int, v_pages int, block_table int, params c_ptr) int = dynamic
+extern "C" fn xm_batch_paged_attention_decode_f16(fn_ptr c_ptr, batch int, dst int, q int, k_pages int, v_pages int, block_table int, params c_ptr) int = dynamic
+extern "C" fn xm_lora_add_f32(fn_ptr c_ptr, dst int, x int, a int, b int, scale_bits int) int = dynamic
+extern "C" fn xm_batch_lora_add_f32(fn_ptr c_ptr, batch int, dst int, x int, a int, b int, scale_bits int) int = dynamic
+extern "C" fn xm_adamw_step_f32(fn_ptr c_ptr, param int, grad int, m_buf int, v_buf int, params c_ptr) int = dynamic
+extern "C" fn xm_batch_adamw_step_f32(fn_ptr c_ptr, batch int, param int, grad int, m_buf int, v_buf int, params c_ptr) int = dynamic
+extern "C" fn xm_cross_entropy_grad_f32(fn_ptr c_ptr, dlogits int, losses int, logits int, targets int) int = dynamic
+extern "C" fn xm_batch_cross_entropy_grad_f32(fn_ptr c_ptr, batch int, dlogits int, losses int, logits int, targets int) int = dynamic
+extern "C" fn xm_matrix_q5_k_new(fn_ptr c_ptr, device int, rows int, columns int) int = dynamic
+extern "C" fn xm_matrix_q5_k_info(fn_ptr c_ptr, matrix int, key int) int = dynamic
+extern "C" fn xm_matrix_q5_k_write(fn_ptr c_ptr, matrix int, bytes c_ptr) int = dynamic
+extern "C" fn xm_matrix_q5_k_close(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_matrix_q5_k_release(fn_ptr c_ptr, matrix int) int = dynamic
+extern "C" fn xm_gemv_q5_k_f32(fn_ptr c_ptr, dst int, x int, w int) int = dynamic
+extern "C" fn xm_batch_gemv_q5_k_f32(fn_ptr c_ptr, batch int, dst int, x int, w int) int = dynamic
+extern "C" fn xm_moe_gemv_q5_k_f32(fn_ptr c_ptr, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_batch_moe_gemv_q5_k_f32(fn_ptr c_ptr, batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int = dynamic
+extern "C" fn xm_paged_kv_cache_append_f16(fn_ptr c_ptr, pages int, src int, block_table int, params c_ptr) int = dynamic
+extern "C" fn xm_batch_paged_kv_cache_append_f16(fn_ptr c_ptr, batch int, pages int, src int, block_table int, params c_ptr) int = dynamic
+extern "C" fn xm_gemm_f32_tn(fn_ptr c_ptr, dst int, a int, b int) int = dynamic
+extern "C" fn xm_batch_gemm_f32_tn(fn_ptr c_ptr, batch int, dst int, a int, b int) int = dynamic
+extern "C" fn xm_rmsnorm_backward_f32(fn_ptr c_ptr, dx int, dw int, dy int, x int, weight int, eps_bits int) int = dynamic
+extern "C" fn xm_batch_rmsnorm_backward_f32(fn_ptr c_ptr, batch int, dx int, dw int, dy int, x int, weight int, eps_bits int) int = dynamic
+extern "C" fn xm_swiglu_backward_f32(fn_ptr c_ptr, dgate int, dup int, dy int, gate int, up int) int = dynamic
+extern "C" fn xm_batch_swiglu_backward_f32(fn_ptr c_ptr, batch int, dgate int, dup int, dy int, gate int, up int) int = dynamic
 
 fn sym_name(i int) string {
     if i == 0 { << "xu_metal_native_available" }
@@ -232,6 +301,75 @@ fn sym_name(i int) string {
     if i == 104 { << "xu_metal_native_batch_embedding_f32" }
     if i == 105 { << "xu_metal_native_argmax_f32" }
     if i == 106 { << "xu_metal_native_batch_argmax_f32" }
+    if i == 107 { << "xu_metal_native_matrix_q5_0_new" }
+    if i == 108 { << "xu_metal_native_matrix_q5_0_info" }
+    if i == 109 { << "xu_metal_native_matrix_q5_0_write" }
+    if i == 110 { << "xu_metal_native_matrix_q5_0_close" }
+    if i == 111 { << "xu_metal_native_matrix_q5_0_release" }
+    if i == 112 { << "xu_metal_native_gemv_q5_0_f32" }
+    if i == 113 { << "xu_metal_native_batch_gemv_q5_0_f32" }
+    if i == 114 { << "xu_metal_native_matrix_q6_k_new" }
+    if i == 115 { << "xu_metal_native_matrix_q6_k_info" }
+    if i == 116 { << "xu_metal_native_matrix_q6_k_write" }
+    if i == 117 { << "xu_metal_native_matrix_q6_k_close" }
+    if i == 118 { << "xu_metal_native_matrix_q6_k_release" }
+    if i == 119 { << "xu_metal_native_gemv_q6_k_f32" }
+    if i == 120 { << "xu_metal_native_batch_gemv_q6_k_f32" }
+    if i == 121 { << "xu_metal_native_rope_interleaved_f32" }
+    if i == 122 { << "xu_metal_native_batch_rope_interleaved_f32" }
+    if i == 123 { << "xu_metal_native_kv_cache_append_f16" }
+    if i == 124 { << "xu_metal_native_batch_kv_cache_append_f16" }
+    if i == 125 { << "xu_metal_native_attention_decode_f16" }
+    if i == 126 { << "xu_metal_native_batch_attention_decode_f16" }
+    if i == 127 { << "xu_metal_native_add_rmsnorm_f32" }
+    if i == 128 { << "xu_metal_native_batch_add_rmsnorm_f32" }
+    if i == 129 { << "xu_metal_native_geglu_f32" }
+    if i == 130 { << "xu_metal_native_batch_geglu_f32" }
+    if i == 131 { << "xu_metal_native_silu_f32" }
+    if i == 132 { << "xu_metal_native_batch_silu_f32" }
+    if i == 133 { << "xu_metal_native_log_softmax_f32" }
+    if i == 134 { << "xu_metal_native_batch_log_softmax_f32" }
+    if i == 135 { << "xu_metal_native_causal_attention_f16" }
+    if i == 136 { << "xu_metal_native_batch_causal_attention_f16" }
+    if i == 137 { << "xu_metal_native_moe_topk_f32" }
+    if i == 138 { << "xu_metal_native_batch_moe_topk_f32" }
+    if i == 139 { << "xu_metal_native_moe_weighted_add_f32" }
+    if i == 140 { << "xu_metal_native_batch_moe_weighted_add_f32" }
+    if i == 141 { << "xu_metal_native_rope_yarn_f32" }
+    if i == 142 { << "xu_metal_native_batch_rope_yarn_f32" }
+    if i == 143 { << "xu_metal_native_moe_gemv_q4_0_f32" }
+    if i == 144 { << "xu_metal_native_batch_moe_gemv_q4_0_f32" }
+    if i == 145 { << "xu_metal_native_moe_gemv_q8_0_f32" }
+    if i == 146 { << "xu_metal_native_batch_moe_gemv_q8_0_f32" }
+    if i == 147 { << "xu_metal_native_moe_gemv_q4_k_f32" }
+    if i == 148 { << "xu_metal_native_batch_moe_gemv_q4_k_f32" }
+    if i == 149 { << "xu_metal_native_moe_gemv_q6_k_f32" }
+    if i == 150 { << "xu_metal_native_batch_moe_gemv_q6_k_f32" }
+    if i == 151 { << "xu_metal_native_paged_attention_decode_f16" }
+    if i == 152 { << "xu_metal_native_batch_paged_attention_decode_f16" }
+    if i == 153 { << "xu_metal_native_lora_add_f32" }
+    if i == 154 { << "xu_metal_native_batch_lora_add_f32" }
+    if i == 155 { << "xu_metal_native_adamw_step_f32" }
+    if i == 156 { << "xu_metal_native_batch_adamw_step_f32" }
+    if i == 157 { << "xu_metal_native_cross_entropy_grad_f32" }
+    if i == 158 { << "xu_metal_native_batch_cross_entropy_grad_f32" }
+    if i == 159 { << "xu_metal_native_matrix_q5_k_new" }
+    if i == 160 { << "xu_metal_native_matrix_q5_k_info" }
+    if i == 161 { << "xu_metal_native_matrix_q5_k_write" }
+    if i == 162 { << "xu_metal_native_matrix_q5_k_close" }
+    if i == 163 { << "xu_metal_native_matrix_q5_k_release" }
+    if i == 164 { << "xu_metal_native_gemv_q5_k_f32" }
+    if i == 165 { << "xu_metal_native_batch_gemv_q5_k_f32" }
+    if i == 166 { << "xu_metal_native_moe_gemv_q5_k_f32" }
+    if i == 167 { << "xu_metal_native_batch_moe_gemv_q5_k_f32" }
+    if i == 168 { << "xu_metal_native_paged_kv_cache_append_f16" }
+    if i == 169 { << "xu_metal_native_batch_paged_kv_cache_append_f16" }
+    if i == 170 { << "xu_metal_native_gemm_f32_tn" }
+    if i == 171 { << "xu_metal_native_batch_gemm_f32_tn" }
+    if i == 172 { << "xu_metal_native_rmsnorm_backward_f32" }
+    if i == 173 { << "xu_metal_native_batch_rmsnorm_backward_f32" }
+    if i == 174 { << "xu_metal_native_swiglu_backward_f32" }
+    if i == 175 { << "xu_metal_native_batch_swiglu_backward_f32" }
     << ""
 }
 
@@ -904,4 +1042,346 @@ pub fn argmax_f32(dst int, x int) int {
 pub fn batch_argmax_f32(batch int, dst int, x int) int {
     if !ensure() { << XM_UNAVAILABLE }
     unsafe { << xm_batch_argmax_f32(sym(106), batch, dst, x) }
+}
+pub fn matrix_q5_0_new(device int, rows int, columns int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_0_new(sym(107), device, rows, columns) }
+}
+pub fn matrix_q5_0_info(matrix int, key int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_0_info(sym(108), matrix, key) }
+}
+pub fn matrix_q5_0_write(matrix int, bytes &string) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := u8_span_copy_in_str(bytes)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_q5_0_write(sym(109), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_q5_0_close(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_0_close(sym(110), matrix) }
+}
+pub fn matrix_q5_0_release(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_0_release(sym(111), matrix) }
+}
+pub fn gemv_q5_0_f32(dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemv_q5_0_f32(sym(112), dst, x, w) }
+}
+pub fn batch_gemv_q5_0_f32(batch int, dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_gemv_q5_0_f32(sym(113), batch, dst, x, w) }
+}
+pub fn matrix_q6_k_new(device int, rows int, columns int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q6_k_new(sym(114), device, rows, columns) }
+}
+pub fn matrix_q6_k_info(matrix int, key int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q6_k_info(sym(115), matrix, key) }
+}
+pub fn matrix_q6_k_write(matrix int, bytes &string) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := u8_span_copy_in_str(bytes)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_q6_k_write(sym(116), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_q6_k_close(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q6_k_close(sym(117), matrix) }
+}
+pub fn matrix_q6_k_release(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q6_k_release(sym(118), matrix) }
+}
+pub fn gemv_q6_k_f32(dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemv_q6_k_f32(sym(119), dst, x, w) }
+}
+pub fn batch_gemv_q6_k_f32(batch int, dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_gemv_q6_k_f32(sym(120), batch, dst, x, w) }
+}
+pub fn rope_interleaved_f32(dst int, x int, pos_offset int, head_dim int, theta_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_rope_interleaved_f32(sym(121), dst, x, pos_offset, head_dim, theta_bits) }
+}
+pub fn batch_rope_interleaved_f32(batch int, dst int, x int, pos_offset int, head_dim int, theta_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_rope_interleaved_f32(sym(122), batch, dst, x, pos_offset, head_dim, theta_bits) }
+}
+pub fn kv_cache_append_f16(cache int, src int, pos_offset int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_kv_cache_append_f16(sym(123), cache, src, pos_offset) }
+}
+pub fn batch_kv_cache_append_f16(batch int, cache int, src int, pos_offset int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_kv_cache_append_f16(sym(124), batch, cache, src, pos_offset) }
+}
+pub fn attention_decode_f16(dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_attention_decode_f16(sym(125), dst, q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, scale_bits) }
+}
+pub fn batch_attention_decode_f16(batch int, dst int, q int, k_cache int, v_cache int, kv_len int, n_heads int, n_kv_heads int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_attention_decode_f16(sym(126), batch, dst, q, k_cache, v_cache, kv_len, n_heads, n_kv_heads, scale_bits) }
+}
+pub fn add_rmsnorm_f32(dst_norm int, dst_sum int, a int, b int, weight int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_add_rmsnorm_f32(sym(127), dst_norm, dst_sum, a, b, weight, eps_bits) }
+}
+pub fn batch_add_rmsnorm_f32(batch int, dst_norm int, dst_sum int, a int, b int, weight int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_add_rmsnorm_f32(sym(128), batch, dst_norm, dst_sum, a, b, weight, eps_bits) }
+}
+pub fn geglu_f32(dst int, gate int, up int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_geglu_f32(sym(129), dst, gate, up) }
+}
+pub fn batch_geglu_f32(batch int, dst int, gate int, up int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_geglu_f32(sym(130), batch, dst, gate, up) }
+}
+pub fn silu_f32(dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_silu_f32(sym(131), dst, x) }
+}
+pub fn batch_silu_f32(batch int, dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_silu_f32(sym(132), batch, dst, x) }
+}
+pub fn log_softmax_f32(dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_log_softmax_f32(sym(133), dst, x) }
+}
+pub fn batch_log_softmax_f32(batch int, dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_log_softmax_f32(sym(134), batch, dst, x) }
+}
+pub fn causal_attention_f16(dst int, q int, k int, v int, n_heads int, n_kv_heads int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_causal_attention_f16(sym(135), dst, q, k, v, n_heads, n_kv_heads, scale_bits) }
+}
+pub fn batch_causal_attention_f16(batch int, dst int, q int, k int, v int, n_heads int, n_kv_heads int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_causal_attention_f16(sym(136), batch, dst, q, k, v, n_heads, n_kv_heads, scale_bits) }
+}
+pub fn moe_topk_f32(out_idx int, out_w int, logits int, k int, use_sigmoid int, normalize_topk int, weight_scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_moe_topk_f32(sym(137), out_idx, out_w, logits, k, use_sigmoid, normalize_topk, weight_scale_bits) }
+}
+pub fn batch_moe_topk_f32(batch int, out_idx int, out_w int, logits int, k int, use_sigmoid int, normalize_topk int, weight_scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_moe_topk_f32(sym(138), batch, out_idx, out_w, logits, k, use_sigmoid, normalize_topk, weight_scale_bits) }
+}
+pub fn moe_weighted_add_f32(dst int, expert_outs int, weights int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_moe_weighted_add_f32(sym(139), dst, expert_outs, weights) }
+}
+pub fn batch_moe_weighted_add_f32(batch int, dst int, expert_outs int, weights int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_moe_weighted_add_f32(sym(140), batch, dst, expert_outs, weights) }
+}
+pub fn rope_yarn_f32(dst int, x int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_rope_yarn_f32(sym(141), dst, x, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn batch_rope_yarn_f32(batch int, dst int, x int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_batch_rope_yarn_f32(sym(142), batch, dst, x, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn moe_gemv_q4_0_f32(dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_moe_gemv_q4_0_f32(sym(143), dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn batch_moe_gemv_q4_0_f32(batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_moe_gemv_q4_0_f32(sym(144), batch, dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn moe_gemv_q8_0_f32(dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_moe_gemv_q8_0_f32(sym(145), dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn batch_moe_gemv_q8_0_f32(batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_moe_gemv_q8_0_f32(sym(146), batch, dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn moe_gemv_q4_k_f32(dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_moe_gemv_q4_k_f32(sym(147), dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn batch_moe_gemv_q4_k_f32(batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_moe_gemv_q4_k_f32(sym(148), batch, dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn moe_gemv_q6_k_f32(dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_moe_gemv_q6_k_f32(sym(149), dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn batch_moe_gemv_q6_k_f32(batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_moe_gemv_q6_k_f32(sym(150), batch, dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn paged_attention_decode_f16(dst int, q int, k_pages int, v_pages int, block_table int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_paged_attention_decode_f16(sym(151), dst, q, k_pages, v_pages, block_table, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn batch_paged_attention_decode_f16(batch int, dst int, q int, k_pages int, v_pages int, block_table int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_batch_paged_attention_decode_f16(sym(152), batch, dst, q, k_pages, v_pages, block_table, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn lora_add_f32(dst int, x int, a int, b int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_lora_add_f32(sym(153), dst, x, a, b, scale_bits) }
+}
+pub fn batch_lora_add_f32(batch int, dst int, x int, a int, b int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_lora_add_f32(sym(154), batch, dst, x, a, b, scale_bits) }
+}
+pub fn adamw_step_f32(param int, grad int, m_buf int, v_buf int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_adamw_step_f32(sym(155), param, grad, m_buf, v_buf, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn batch_adamw_step_f32(batch int, param int, grad int, m_buf int, v_buf int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_batch_adamw_step_f32(sym(156), batch, param, grad, m_buf, v_buf, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn cross_entropy_grad_f32(dlogits int, losses int, logits int, targets int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_cross_entropy_grad_f32(sym(157), dlogits, losses, logits, targets) }
+}
+pub fn batch_cross_entropy_grad_f32(batch int, dlogits int, losses int, logits int, targets int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_cross_entropy_grad_f32(sym(158), batch, dlogits, losses, logits, targets) }
+}
+pub fn matrix_q5_k_new(device int, rows int, columns int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_k_new(sym(159), device, rows, columns) }
+}
+pub fn matrix_q5_k_info(matrix int, key int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_k_info(sym(160), matrix, key) }
+}
+pub fn matrix_q5_k_write(matrix int, bytes &string) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := u8_span_copy_in_str(bytes)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_matrix_q5_k_write(sym(161), matrix, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn matrix_q5_k_close(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_k_close(sym(162), matrix) }
+}
+pub fn matrix_q5_k_release(matrix int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_matrix_q5_k_release(sym(163), matrix) }
+}
+pub fn gemv_q5_k_f32(dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemv_q5_k_f32(sym(164), dst, x, w) }
+}
+pub fn batch_gemv_q5_k_f32(batch int, dst int, x int, w int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_gemv_q5_k_f32(sym(165), batch, dst, x, w) }
+}
+pub fn moe_gemv_q5_k_f32(dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_moe_gemv_q5_k_f32(sym(166), dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn batch_moe_gemv_q5_k_f32(batch int, dst int, x int, w int, expert_ids int, expert_weights int, n_experts int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_moe_gemv_q5_k_f32(sym(167), batch, dst, x, w, expert_ids, expert_weights, n_experts) }
+}
+pub fn paged_kv_cache_append_f16(pages int, src int, block_table int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_paged_kv_cache_append_f16(sym(168), pages, src, block_table, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn batch_paged_kv_cache_append_f16(batch int, pages int, src int, block_table int, params &[]int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe {
+        span := i64_span_copy_in(params)
+        if ffi.is_null(span) { << -7 }
+        rc := xm_batch_paged_kv_cache_append_f16(sym(169), batch, pages, src, block_table, span)
+        free_span(span)
+        << rc
+    }
+}
+pub fn gemm_f32_tn(dst int, a int, b int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemm_f32_tn(sym(170), dst, a, b) }
+}
+pub fn batch_gemm_f32_tn(batch int, dst int, a int, b int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_gemm_f32_tn(sym(171), batch, dst, a, b) }
+}
+pub fn rmsnorm_backward_f32(dx int, dw int, dy int, x int, weight int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_rmsnorm_backward_f32(sym(172), dx, dw, dy, x, weight, eps_bits) }
+}
+pub fn batch_rmsnorm_backward_f32(batch int, dx int, dw int, dy int, x int, weight int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_rmsnorm_backward_f32(sym(173), batch, dx, dw, dy, x, weight, eps_bits) }
+}
+pub fn swiglu_backward_f32(dgate int, dup int, dy int, gate int, up int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_swiglu_backward_f32(sym(174), dgate, dup, dy, gate, up) }
+}
+pub fn batch_swiglu_backward_f32(batch int, dgate int, dup int, dy int, gate int, up int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_batch_swiglu_backward_f32(sym(175), batch, dgate, dup, dy, gate, up) }
 }

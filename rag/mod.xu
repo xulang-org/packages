@@ -1,0 +1,829 @@
+@"github.com/xulang-org/packages/rag"
+
+#encoding/json
+#errors
+#math
+#os
+#strconv
+#strings
+#tensor
+openai #github.com/xulang-org/packages/openai
+
+pub struct Chunk {
+    pub id string
+    pub doc_id string
+    pub text string
+    pub source string
+    pub metadata_json string
+    pub embedding []f32
+}
+
+pub struct SearchHit {
+    pub chunk Chunk
+    pub score f64
+}
+
+pub struct MemoryStore {
+    pub dim int
+    pub chunks []Chunk
+}
+
+pub fn new_store(dim int) MemoryStore {
+    << MemoryStore{dim: dim, chunks: []Chunk{}}
+}
+
+pub fn (s &MemoryStore) len() int {
+    << s.chunks.len
+}
+
+pub fn chunk_text(text string, chunk_size int, overlap int) []string {
+    $out := []string{}
+    if text.len == 0 { << out }
+    $cs := chunk_size
+    if cs <= 0 { cs = 512 }
+    $ov := overlap
+    if ov < 0 { ov = 0 }
+    if ov >= cs { ov = cs - 1 }
+    if ov < 0 { ov = 0 }
+    step := cs - ov
+    $pos := 0
+    while pos < text.len {
+        $end := pos + cs
+        if end > text.len { end = text.len }
+        out.push(text[pos:end])
+        if end >= text.len { <- }
+        pos += step
+    }
+    << out
+}
+
+fn copy_embedding(src &[]f32) []f32 {
+    $out := []f32{}
+    out.reserve(src.len)
+    for i in 0:src.len {
+        out.push(src[i])
+    }
+    << out
+}
+
+fn copy_chunk(c &Chunk) Chunk {
+    << Chunk{
+        id: c.id + "",
+        doc_id: c.doc_id + "",
+        text: c.text + "",
+        source: c.source + "",
+        metadata_json: c.metadata_json + "",
+        embedding: copy_embedding(&c.embedding)
+    }
+}
+
+pub fn (s $&MemoryStore) add_chunk(id string, doc_id string, text string, source string,
+                                   metadata_json string, embedding &[]f64) int {
+    if s.dim <= 0 {
+        >>> errors.new("rag: store dimension must be positive")
+    }
+    if embedding.len != s.dim {
+        >>> errors.new("rag: embedding dimension mismatch")
+    }
+    $vec := []f32{}
+    vec.reserve(s.dim)
+    for i in 0:s.dim {
+        vec.push(f32(embedding[i]))
+    }
+    $meta := metadata_json + ""
+    if meta.len == 0 { meta = "{}" }
+    s.chunks.push(Chunk{
+        id: id,
+        doc_id: doc_id,
+        text: text,
+        source: source,
+        metadata_json: meta,
+        embedding: ~vec
+    })
+    << s.chunks.len - 1
+}
+
+pub fn (s &MemoryStore) search(query_emb &[]f64, top_k int, filter_doc_id string) []SearchHit {
+    $hits := []SearchHit{}
+    if s.dim <= 0 || top_k <= 0 || s.chunks.len == 0 { << hits }
+    if query_emb.len != s.dim {
+        >>> errors.new("rag: query embedding dimension mismatch")
+    }
+    $matched := []int{}
+    $corpus := []f32{}
+    for i in 0:s.chunks.len {
+        c := &s.chunks[i]
+        if filter_doc_id.len > 0 && c.doc_id != filter_doc_id { -> }
+        if c.embedding.len != s.dim { -> }
+        matched.push(i)
+        for j in 0:s.dim {
+            corpus.push(c.embedding[j])
+        }
+    }
+    if matched.len == 0 { << hits }
+    $q_f32 := []f32{}
+    q_f32.reserve(s.dim)
+    for j in 0:s.dim {
+        q_f32.push(f32(query_emb[j]))
+    }
+    $k := top_k
+    if k > matched.len { k = matched.len }
+    $out_idx := []int{}
+    $out_scores := []f32{}
+    for _ in 0:k {
+        out_idx.push(0)
+        out_scores.push(f32(0))
+    }
+    picked := tensor.topk_cosine_f32(&q_f32, &corpus, matched.len, s.dim, k, $&out_idx, $&out_scores)
+    for r in 0:picked {
+        m_i := out_idx[r]
+        if m_i >= 0 && m_i < matched.len {
+            orig := matched[m_i]
+            hits.push(SearchHit{
+                chunk: copy_chunk(&s.chunks[orig]),
+                score: f64(out_scores[r])
+            })
+        }
+    }
+    << hits
+}
+
+fn fmt_f32_or(v f32) string {
+    << strconv.format_float(f64(v), 102, 7) >>> (_) { << "0.0" }
+}
+
+pub fn (s &MemoryStore) save_json(path string) int {
+    $out := "{\"dim\":" + str(s.dim) + ",\"chunks\":["
+    for i in 0:s.chunks.len {
+        if i > 0 { out = out + "," }
+        c := &s.chunks[i]
+        $meta := c.metadata_json + ""
+        if meta.len == 0 { meta = "{}" }
+        out = out + "{\"id\":" + json.quote(&c.id) +
+            ",\"doc_id\":" + json.quote(&c.doc_id) +
+            ",\"text\":" + json.quote(&c.text) +
+            ",\"source\":" + json.quote(&c.source) +
+            ",\"metadata\":" + meta +
+            ",\"embedding\":["
+        for j in 0:c.embedding.len {
+            if j > 0 { out = out + "," }
+            out = out + fmt_f32_or(c.embedding[j])
+        }
+        out = out + "]}"
+    }
+    out = out + "]}"
+    _ := os.write(path, out) >>>
+    << 0
+}
+
+fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_encode_or(doc &json.Doc, node int, def string) string {
+    << doc.encode(node) >>> (_) { << def }
+}
+
+pub fn load_json(path string) MemoryStore {
+    raw := os.read(path) >>>
+    doc := json.parse(&raw)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("rag: invalid JSON store file")
+    }
+    root := doc.root()
+    $dim := 0
+    if doc.has(root, "dim") {
+        dn := doc.get(root, "dim") >>>
+        if doc.is_number(dn) { dim = doc.as_int(dn) >>> }
+    }
+    $store := new_store(dim)
+    if doc.has(root, "chunks") {
+        arr := doc.get(root, "chunks") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                $vec := []f64{}
+                if doc.has(item, "embedding") {
+                    en := doc.get(item, "embedding") >>>
+                    if doc.is_list(en) {
+                        ec := doc.count(en)
+                        for j in 0:ec {
+                            vn := doc.at(en, j) >>>
+                            if doc.is_number(vn) {
+                                vec.push(doc.as_f64(vn) >>>)
+                            }
+                        }
+                    }
+                }
+                if store.dim <= 0 && vec.len > 0 { store.dim = vec.len }
+                $meta := "{}"
+                if doc.has(item, "metadata") {
+                    mn := doc.get(item, "metadata") >>>
+                    ms := json_encode_or(&doc, mn, "{}")
+                    if ms.len > 0 { meta = ms }
+                }
+                _ := store.add_chunk(
+                    json_str_or(&doc, item, "id", ""),
+                    json_str_or(&doc, item, "doc_id", ""),
+                    json_str_or(&doc, item, "text", ""),
+                    json_str_or(&doc, item, "source", ""),
+                    meta,
+                    &vec
+                ) >>>
+            }
+        }
+    }
+    << store
+}
+
+pub fn index_document(store $&MemoryStore, client &openai.Client, embed_model string,
+                      doc_id string, source string, text string,
+                      chunk_size int, overlap int, metadata_json string) int {
+    pieces := chunk_text(text, chunk_size, overlap)
+    if pieces.len == 0 { << 0 }
+    $inputs := []string{}
+    for i in 0:pieces.len {
+        inputs.push(pieces[i] + "")
+    }
+    req := openai.embed_request(embed_model, ~inputs)
+    resp := client.embeddings(&req) >>>
+    if resp.embeddings.len != pieces.len {
+        >>> errors.new("rag: embedding count mismatch")
+    }
+    for i in 0:pieces.len {
+        cid := doc_id + "#" + str(i)
+        _ := store.add_chunk(cid, doc_id + "", pieces[i] + "", source + "", metadata_json + "", &resp.embeddings[i]) >>>
+    }
+    << pieces.len
+}
+
+pub fn retrieve(store &MemoryStore, client &openai.Client, embed_model string,
+                query string, top_k int, filter_doc_id string) []SearchHit {
+    req := openai.embed_request(embed_model, [query])
+    resp := client.embeddings(&req) >>>
+    if resp.embeddings.len == 0 { << []SearchHit{} }
+    << store.search(&resp.embeddings[0], top_k, filter_doc_id) >>>
+}
+
+pub fn format_context(hits &[]SearchHit) string {
+    $out := ""
+    for i in 0:hits.len {
+        h := &hits[i]
+        if i > 0 { out = out + "\n\n" }
+        sc := fmt_f64_or(h.score, "0.0")
+        $hdr := "[" + str(i + 1) + "] "
+        if h.chunk.source.len > 0 { hdr = hdr + h.chunk.source + " " }
+        hdr = hdr + "(score=" + sc + ")"
+        out = out + hdr + "\n" + h.chunk.text
+    }
+    << out
+}
+
+fn fmt_f64_or(v f64, def string) string {
+    << strconv.format_float(v, 102, 4) >>> (_) { << def }
+}
+
+fn parse_md_heading(line &string, level_out $&int, title_out $&string) bool {
+    trimmed := strings.trim_space(line)
+    if trimmed.len == 0 || trimmed[0] != 35 { << false }
+    $lvl := 0
+    while lvl < trimmed.len && lvl < 6 && trimmed[lvl] == 35 {
+        lvl += 1
+    }
+    if lvl >= trimmed.len || trimmed[lvl] != 32 { << false }
+    rest := trimmed[lvl + 1:trimmed.len]
+    *level_out = lvl
+    *title_out = strings.trim_space(&rest)
+    << true
+}
+
+fn join_heading_stack(levels &[]int, titles &[]string) string {
+    $out := ""
+    for i in 0:levels.len {
+        if i > 0 { out = out + " > " }
+        out = out + titles[i]
+    }
+    << out
+}
+
+fn emit_md_section(doc_id &string, source &string, crumb &string, body &string,
+                   max_chars int, overlap int, out $&[]Chunk) {
+    bt := strings.trim_space(body)
+    if bt.len == 0 { << }
+    $prefix := ""
+    if crumb.len > 0 { prefix = "[" + (*crumb) + "]\n" }
+    $piece_limit := max_chars
+    if piece_limit <= 0 { piece_limit = 512 }
+    $avail := piece_limit - prefix.len
+    if avail < 32 { avail = piece_limit }
+    pieces := chunk_text(bt, avail, overlap)
+    meta := "{\"heading\":" + json.quote(crumb) + "}"
+    for pi in 0:pieces.len {
+        idx := out.len
+        out.push(Chunk{
+            id: (*doc_id) + "#md" + str(idx),
+            doc_id: (*doc_id) + "",
+            text: prefix + pieces[pi],
+            source: (*source) + "",
+            metadata_json: meta + "",
+            embedding: []f32{}
+        })
+    }
+}
+
+pub fn chunk_markdown(doc_id string, source string, markdown string, max_chars int, overlap int) []Chunk {
+    $out := []Chunk{}
+    if markdown.len == 0 { << out }
+    $h_levels := []int{}
+    $h_titles := []string{}
+    $buf := ""
+    $pos := 0
+    while pos <= markdown.len {
+        $nl := pos
+        while nl < markdown.len && markdown[nl] != 10 { nl += 1 }
+        line := markdown[pos:nl]
+        $lvl := 0
+        $title := ""
+        if parse_md_heading(&line, $&lvl, $&title) {
+            crumb := join_heading_stack(&h_levels, &h_titles)
+            emit_md_section(&doc_id, &source, &crumb, &buf, max_chars, overlap, $&out)
+            buf = ""
+            $nl_v := []int{}
+            $nt_v := []string{}
+            for hi in 0:h_levels.len {
+                if h_levels[hi] < lvl {
+                    nl_v.push(h_levels[hi])
+                    nt_v.push(h_titles[hi])
+                }
+            }
+            h_levels = ~nl_v
+            h_titles = ~nt_v
+            h_levels.push(lvl)
+            h_titles.push(title)
+        } else {
+            if buf.len > 0 { buf = buf + "\n" }
+            buf = buf + line
+        }
+        if nl >= markdown.len { <- }
+        pos = nl + 1
+    }
+    crumb := join_heading_stack(&h_levels, &h_titles)
+    emit_md_section(&doc_id, &source, &crumb, &buf, max_chars, overlap, $&out)
+    << out
+}
+
+fn is_term_byte(b int) bool {
+    << (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95 || b >= 128
+}
+
+fn tokenize_terms(text &string) []string {
+    $out := []string{}
+    $cur := ""
+    for i in 0:text.len {
+        $b := (*text)[i]
+        if is_term_byte(b) {
+            if b >= 65 && b <= 90 { b += 32 }
+            cur.push_str(string_from_byte(b))
+        } else if cur.len > 0 {
+            out.push(cur)
+            cur = ""
+        }
+    }
+    if cur.len > 0 { out.push(cur) }
+    << out
+}
+
+fn bm25_scored_indices_filtered(s &MemoryStore, query &string, filter_doc_id &string,
+                                 out_idx $&[]int, out_scores $&[]f64) {
+    n_docs := s.chunks.len
+    if n_docs == 0 { << }
+    q_terms_raw := tokenize_terms(query)
+    if q_terms_raw.len == 0 { << }
+    $q_terms := []string{}
+    $q_seen := map[string]bool{}
+    for i in 0:q_terms_raw.len {
+        qt := q_terms_raw[i]
+        if !q_seen.get_or(qt, false) {
+            q_seen[qt] = true
+            q_terms.push(qt)
+        }
+    }
+    $doc_lens := []int{}
+    $doc_tfs := []map[string]int{}
+    $df := map[string]int{}
+    $total_len := 0
+    for i in 0:n_docs {
+        terms := tokenize_terms(&s.chunks[i].text)
+        doc_lens.push(terms.len)
+        total_len += terms.len
+        $tf := map[string]int{}
+        $d_seen := map[string]bool{}
+        for j in 0:terms.len {
+            t := terms[j]
+            tf[t] = tf.get_or(t, 0) + 1
+            if !d_seen.get_or(t, false) {
+                d_seen[t] = true
+                df[t] = df.get_or(t, 0) + 1
+            }
+        }
+        doc_tfs.push(~tf)
+    }
+    avgdl := f64(total_len) / f64(n_docs)
+    if avgdl <= 0.0 { << }
+    k1 := 1.5
+    b_param := 0.75
+    $raw_idx := []int{}
+    $raw_sc := []f32{}
+    for i in 0:n_docs {
+        if filter_doc_id.len > 0 && s.chunks[i].doc_id != *filter_doc_id { -> }
+        $score := 0.0
+        dl := f64(doc_lens[i])
+        tf_map := &doc_tfs[i]
+        for qi in 0:q_terms.len {
+            qt := q_terms[qi]
+            tf_v := tf_map.get_or(qt, 0)
+            if tf_v <= 0 { -> }
+            df_v := f64(df.get_or(qt, 0))
+            idf := math.log((f64(n_docs) - df_v + 0.5) / (df_v + 0.5) + 1.0)
+            tf_f := f64(tf_v)
+            denom := tf_f + k1 * (1.0 - b_param + b_param * (dl / avgdl))
+            score += idf * ((tf_f * (k1 + 1.0)) / denom)
+        }
+        if score > 0.0 {
+            raw_idx.push(i)
+            raw_sc.push(f32(score))
+        }
+    }
+    if raw_idx.len == 0 { << }
+    $t_idx := []int{}
+    $t_val := []f32{}
+    for _ in 0:raw_idx.len {
+        t_idx.push(0)
+        t_val.push(f32(0))
+    }
+    picked := tensor.topk_f32(&raw_sc, raw_sc.len, raw_sc.len, $&t_idx, $&t_val)
+    for r in 0:picked {
+        ri := t_idx[r]
+        out_idx.push(raw_idx[ri])
+        out_scores.push(f64(t_val[r]))
+    }
+}
+
+pub fn (s &MemoryStore) search_bm25_filtered(query string, top_k int, filter_doc_id string) []SearchHit {
+    $hits := []SearchHit{}
+    if top_k <= 0 || s.chunks.len == 0 { << hits }
+    $idxs := []int{}
+    $scores := []f64{}
+    bm25_scored_indices_filtered(s, &query, &filter_doc_id, $&idxs, $&scores)
+    $lim := top_k
+    if lim > idxs.len { lim = idxs.len }
+    for r in 0:lim {
+        ci := idxs[r]
+        hits.push(SearchHit{chunk: copy_chunk(&s.chunks[ci]), score: scores[r]})
+    }
+    << hits
+}
+
+pub fn (s &MemoryStore) search_bm25(query string, top_k int) []SearchHit {
+    << s.search_bm25_filtered(query, top_k, "")
+}
+
+pub fn (s &MemoryStore) search_hybrid_filtered(query string, query_emb &[]f64, top_k int,
+                                              rrf_k int, filter_doc_id string) []SearchHit {
+    $hits := []SearchHit{}
+    n_docs := s.chunks.len
+    if top_k <= 0 || n_docs == 0 { << hits }
+    $rk := rrf_k
+    if rk <= 0 { rk = 60 }
+    $fused := []f32{}
+    for _ in 0:n_docs { fused.push(f32(0.0)) }
+
+    // Dense ranking via #tensor.topk_cosine_f32 (if query embedding supplied and store has vectors)
+    if s.dim > 0 && query_emb.len == s.dim {
+        $matched := []int{}
+        $corpus := []f32{}
+        for i in 0:n_docs {
+            if filter_doc_id.len > 0 && s.chunks[i].doc_id != filter_doc_id { -> }
+            if s.chunks[i].embedding.len != s.dim { -> }
+            matched.push(i)
+            for j in 0:s.dim { corpus.push(s.chunks[i].embedding[j]) }
+        }
+        if matched.len > 0 {
+            $q_f32 := []f32{}
+            q_f32.reserve(s.dim)
+            for j in 0:s.dim { q_f32.push(f32(query_emb[j])) }
+            $d_idx := []int{}
+            $d_sc := []f32{}
+            for _ in 0:matched.len {
+                d_idx.push(0)
+                d_sc.push(f32(0))
+            }
+            picked := tensor.topk_cosine_f32(&q_f32, &corpus, matched.len, s.dim, matched.len, $&d_idx, $&d_sc)
+            for rank in 0:picked {
+                mi := d_idx[rank]
+                if mi >= 0 && mi < matched.len {
+                    orig := matched[mi]
+                    fused[orig] += f32(1.0 / f64(rk + rank + 1))
+                }
+            }
+        }
+    }
+
+    // Sparse BM25 ranking
+    $b_idx := []int{}
+    $b_sc := []f64{}
+    bm25_scored_indices_filtered(s, &query, &filter_doc_id, $&b_idx, $&b_sc)
+    for rank in 0:b_idx.len {
+        orig := b_idx[rank]
+        fused[orig] += f32(1.0 / f64(rk + rank + 1))
+    }
+
+    $raw_idx := []int{}
+    $raw_sc := []f32{}
+    for i in 0:n_docs {
+        if f64(fused[i]) > 0.0 {
+            raw_idx.push(i)
+            raw_sc.push(fused[i])
+        }
+    }
+    if raw_idx.len == 0 { << hits }
+    $lim := top_k
+    if lim > raw_idx.len { lim = raw_idx.len }
+    $t_idx := []int{}
+    $t_val := []f32{}
+    for _ in 0:lim {
+        t_idx.push(0)
+        t_val.push(f32(0))
+    }
+    picked := tensor.topk_f32(&raw_sc, raw_sc.len, lim, $&t_idx, $&t_val)
+    for r in 0:picked {
+        ri := t_idx[r]
+        orig := raw_idx[ri]
+        hits.push(SearchHit{chunk: copy_chunk(&s.chunks[orig]), score: f64(t_val[r])})
+    }
+    << hits
+}
+
+pub fn (s &MemoryStore) search_hybrid(query string, query_emb &[]f64, top_k int, rrf_k int) []SearchHit {
+    << s.search_hybrid_filtered(query, query_emb, top_k, rrf_k, "")
+}
+
+pub fn (s &MemoryStore) retrieve_hybrid(query string, query_emb &[]f64, top_k int, rrf_k int) string {
+    hits := s.search_hybrid(query, query_emb, top_k, rrf_k)
+    << format_context(&hits)
+}
+
+fn cosine_f32_pair(a &[]f32, b &[]f32) f64 {
+    $n := a.len
+    if b.len < n { n = b.len }
+    if n <= 0 { << 0.0 }
+    $dot := 0.0
+    $na := 0.0
+    $nb := 0.0
+    for i in 0:n {
+        av := f64(a[i])
+        bv := f64(b[i])
+        dot += av * bv
+        na += av * av
+        nb += bv * bv
+    }
+    denom := math.sqrt(na) * math.sqrt(nb)
+    if denom <= 0.0 { << 0.0 }
+    << dot / denom
+}
+
+pub fn (s &MemoryStore) search_mmr(query_emb &[]f64, top_k int, lambda f64, filter_doc_id string) []SearchHit {
+    $hits := []SearchHit{}
+    if s.dim <= 0 || top_k <= 0 || s.chunks.len == 0 { << hits }
+    if query_emb.len != s.dim {
+        >>> errors.new("rag: query embedding dimension mismatch")
+    }
+    $lam := lambda
+    if lam < 0.0 { lam = 0.0 }
+    if lam > 1.0 { lam = 1.0 }
+    $q_f32 := []f32{}
+    q_f32.reserve(s.dim)
+    for j in 0:s.dim { q_f32.push(f32(query_emb[j])) }
+
+    $cand_idx := []int{}
+    $rel := []f32{}
+    $used := []bool{}
+    for i in 0:s.chunks.len {
+        c := &s.chunks[i]
+        if filter_doc_id.len > 0 && c.doc_id != filter_doc_id { -> }
+        if c.embedding.len != s.dim { -> }
+        cand_idx.push(i)
+        rel.push(f32(cosine_f32_pair(&c.embedding, &q_f32)))
+        used.push(false)
+    }
+    if cand_idx.len == 0 { << hits }
+    $k := top_k
+    if k > cand_idx.len { k = cand_idx.len }
+    $picked_orig := []int{}
+    for _ in 0:k {
+        $best_m := -1
+        $best_score := -1000000000.0
+        for m in 0:cand_idx.len {
+            if used[m] { -> }
+            r_score := f64(rel[m])
+            $mmr := r_score
+            if picked_orig.len > 0 {
+                $max_sim := -1000000000.0
+                orig_m := cand_idx[m]
+                c_emb := &s.chunks[orig_m].embedding
+                for si in 0:picked_orig.len {
+                    sel_orig := picked_orig[si]
+                    sim := cosine_f32_pair(c_emb, &s.chunks[sel_orig].embedding)
+                    if sim > max_sim { max_sim = sim }
+                }
+                mmr = lam * r_score - (1.0 - lam) * max_sim
+            }
+            if best_m < 0 || mmr > best_score {
+                best_m = m
+                best_score = mmr
+            }
+        }
+        if best_m < 0 { <- }
+        used[best_m] = true
+        orig := cand_idx[best_m]
+        picked_orig.push(orig)
+        hits.push(SearchHit{chunk: copy_chunk(&s.chunks[orig]), score: best_score})
+    }
+    << hits
+}
+
+pub fn (s $&MemoryStore) delete_doc(doc_id string) int {
+    $kept := []Chunk{}
+    $removed := 0
+    for i in 0:s.chunks.len {
+        if s.chunks[i].doc_id == doc_id {
+            removed += 1
+        } else {
+            kept.push(copy_chunk(&s.chunks[i]))
+        }
+    }
+    s.chunks = ~kept
+    << removed
+}
+
+fn chunk_matches_meta(c &Chunk, filter_doc_id &string, meta_key &string, meta_val &string) bool {
+    if filter_doc_id.len > 0 && c.doc_id != *filter_doc_id { << false }
+    if meta_key.len == 0 { << true }
+    doc := json.parse(&c.metadata_json)
+    if !doc.ok() || !doc.is_dict(doc.root()) { << false }
+    root := doc.root()
+    if !doc.has(root, *meta_key) { << false }
+    vn := doc.get(root, *meta_key) >>> (_) { << false }
+    if doc.is_string(vn) {
+        sv := doc.as_string(vn) >>> (_) { << false }
+        << sv == *meta_val
+    }
+    enc := doc.encode(vn) >>> (_) { << false }
+    << enc == *meta_val
+}
+
+pub fn (s &MemoryStore) search_by_meta(query_emb &[]f64, top_k int, filter_doc_id string,
+                                       meta_key string, meta_val string) []SearchHit {
+    $hits := []SearchHit{}
+    if s.dim <= 0 || top_k <= 0 || s.chunks.len == 0 { << hits }
+    if query_emb.len != s.dim {
+        >>> errors.new("rag: query embedding dimension mismatch")
+    }
+    $matched := []int{}
+    $corpus := []f32{}
+    for i in 0:s.chunks.len {
+        c := &s.chunks[i]
+        if !chunk_matches_meta(c, &filter_doc_id, &meta_key, &meta_val) { -> }
+        if c.embedding.len != s.dim { -> }
+        matched.push(i)
+        for j in 0:s.dim { corpus.push(c.embedding[j]) }
+    }
+    if matched.len == 0 { << hits }
+    $q_f32 := []f32{}
+    q_f32.reserve(s.dim)
+    for j in 0:s.dim { q_f32.push(f32(query_emb[j])) }
+    $k := top_k
+    if k > matched.len { k = matched.len }
+    $out_idx := []int{}
+    $out_scores := []f32{}
+    for _ in 0:k {
+        out_idx.push(0)
+        out_scores.push(f32(0))
+    }
+    picked := tensor.topk_cosine_f32(&q_f32, &corpus, matched.len, s.dim, k, $&out_idx, $&out_scores)
+    for r in 0:picked {
+        m_i := out_idx[r]
+        if m_i >= 0 && m_i < matched.len {
+            orig := matched[m_i]
+            hits.push(SearchHit{chunk: copy_chunk(&s.chunks[orig]), score: f64(out_scores[r])})
+        }
+    }
+    << hits
+}
+
+pub fn (s &MemoryStore) search_hybrid_by_meta(query string, query_emb &[]f64, top_k int, rrf_k int,
+                                              filter_doc_id string, meta_key string, meta_val string) []SearchHit {
+    $hits := []SearchHit{}
+    n_docs := s.chunks.len
+    if top_k <= 0 || n_docs == 0 { << hits }
+    $rk := rrf_k
+    if rk <= 0 { rk = 60 }
+    $fused := []f32{}
+    for _ in 0:n_docs { fused.push(f32(0.0)) }
+
+    if s.dim > 0 && query_emb.len == s.dim {
+        $matched := []int{}
+        $corpus := []f32{}
+        for i in 0:n_docs {
+            if !chunk_matches_meta(&s.chunks[i], &filter_doc_id, &meta_key, &meta_val) { -> }
+            if s.chunks[i].embedding.len != s.dim { -> }
+            matched.push(i)
+            for j in 0:s.dim { corpus.push(s.chunks[i].embedding[j]) }
+        }
+        if matched.len > 0 {
+            $q_f32 := []f32{}
+            q_f32.reserve(s.dim)
+            for j in 0:s.dim { q_f32.push(f32(query_emb[j])) }
+            $d_idx := []int{}
+            $d_sc := []f32{}
+            for _ in 0:matched.len {
+                d_idx.push(0)
+                d_sc.push(f32(0))
+            }
+            picked := tensor.topk_cosine_f32(&q_f32, &corpus, matched.len, s.dim, matched.len, $&d_idx, $&d_sc)
+            for rank in 0:picked {
+                mi := d_idx[rank]
+                if mi >= 0 && mi < matched.len {
+                    orig := matched[mi]
+                    fused[orig] += f32(1.0 / f64(rk + rank + 1))
+                }
+            }
+        }
+    }
+
+    $b_idx := []int{}
+    $b_sc := []f64{}
+    bm25_scored_indices_filtered(s, &query, &filter_doc_id, $&b_idx, $&b_sc)
+    $b_rank := 0
+    for bi in 0:b_idx.len {
+        orig := b_idx[bi]
+        if !chunk_matches_meta(&s.chunks[orig], &filter_doc_id, &meta_key, &meta_val) { -> }
+        fused[orig] += f32(1.0 / f64(rk + b_rank + 1))
+        b_rank += 1
+    }
+
+    $raw_idx := []int{}
+    $raw_sc := []f32{}
+    for i in 0:n_docs {
+        if f64(fused[i]) > 0.0 {
+            raw_idx.push(i)
+            raw_sc.push(fused[i])
+        }
+    }
+    if raw_idx.len == 0 { << hits }
+    $lim := top_k
+    if lim > raw_idx.len { lim = raw_idx.len }
+    $t_idx := []int{}
+    $t_val := []f32{}
+    for _ in 0:lim {
+        t_idx.push(0)
+        t_val.push(f32(0))
+    }
+    picked := tensor.topk_f32(&raw_sc, raw_sc.len, lim, $&t_idx, $&t_val)
+    for r in 0:picked {
+        ri := t_idx[r]
+        orig := raw_idx[ri]
+        hits.push(SearchHit{chunk: copy_chunk(&s.chunks[orig]), score: f64(t_val[r])})
+    }
+    << hits
+}
+
+pub fn rerank_hits(hits &[]SearchHit, scores &[]f64, top_k int) []SearchHit {
+    $out := []SearchHit{}
+    if top_k <= 0 || hits.len == 0 || scores.len < hits.len { << out }
+    $sc_f32 := []f32{}
+    sc_f32.reserve(hits.len)
+    for i in 0:hits.len { sc_f32.push(f32(scores[i])) }
+    $lim := top_k
+    if lim > hits.len { lim = hits.len }
+    $t_idx := []int{}
+    $t_val := []f32{}
+    for _ in 0:lim {
+        t_idx.push(0)
+        t_val.push(f32(0))
+    }
+    picked := tensor.topk_f32(&sc_f32, sc_f32.len, lim, $&t_idx, $&t_val)
+    for r in 0:picked {
+        idx := t_idx[r]
+        if idx >= 0 && idx < hits.len {
+            out.push(SearchHit{chunk: copy_chunk(&hits[idx].chunk), score: f64(t_val[r])})
+        }
+    }
+    << out
+}
