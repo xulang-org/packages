@@ -69,12 +69,12 @@ pub fn (v &Value) is_err() bool {
 
 pub fn (v &Value) as_string() string {
     if v.is_null {
-        >> errors.new("redis: value is nil")
+        >>> errors.new("redis: value is nil")
     }
     if v.typ == TYPE_ERR {
-        >> errors.new(v.str_val)
+        >>> errors.new(v.str_val)
     }
-    if v.typ != TYPE_STR && v.typ != TYPE_VERBATIM { >> errors.new("redis: not a string") }
+    if v.typ != TYPE_STR && v.typ != TYPE_VERBATIM { >>> errors.new("redis: not a string") }
     << v.str_val + ""
 }
 
@@ -83,29 +83,29 @@ pub fn (v &Value) as_string_or(def string) string {
         << def
     }
     if v.typ == TYPE_ERR {
-        >> errors.new(v.str_val)
+        >>> errors.new(v.str_val)
     }
-    if v.typ != TYPE_STR && v.typ != TYPE_VERBATIM { >> errors.new("redis: not a string") }
+    if v.typ != TYPE_STR && v.typ != TYPE_VERBATIM { >>> errors.new("redis: not a string") }
     << v.str_val + ""
 }
 
 pub fn (v &Value) as_int() int {
     if v.is_null {
-        >> errors.new("redis: value is nil")
+        >>> errors.new("redis: value is nil")
     }
     if v.typ == TYPE_ERR {
-        >> errors.new(v.str_val)
+        >>> errors.new(v.str_val)
     }
-    if v.typ != TYPE_INT { >> errors.new("redis: not an integer") }
+    if v.typ != TYPE_INT { >>> errors.new("redis: not an integer") }
     << v.int_val
 }
 
 pub fn (v &Value) as_bool() bool {
     if v.is_null {
-        >> errors.new("redis: value is nil")
+        >>> errors.new("redis: value is nil")
     }
-    if v.typ == TYPE_ERR { >> errors.new(v.str_val) }
-    if v.typ != TYPE_BOOL && v.typ != TYPE_INT { >> errors.new("redis: not a bool") }
+    if v.typ == TYPE_ERR { >>> errors.new(v.str_val) }
+    if v.typ != TYPE_BOOL && v.typ != TYPE_INT { >>> errors.new("redis: not a bool") }
     << v.int_val != 0
 }
 
@@ -113,22 +113,22 @@ pub fn (v &Value) as_bool() bool {
 // their own types. Null, error, nested aggregates and empty strings differ.
 pub fn (v &Value) elements() []Value {
     if v.typ != TYPE_ARR && v.typ != TYPE_MAP && v.typ != TYPE_SET && v.typ != TYPE_PUSH {
-        >> errors.new("redis: not an aggregate")
+        >>> errors.new("redis: not an aggregate")
     }
     $c := Client{fd: -1, addr: "", buf: v.raw + ""}
-    line := c.read_line() or >>
-    count := parse_int(line[1:line.len]) or >>
+    line := c.read_line() >>>
+    count := parse_int(line[1:line.len]) >>>
     $total := count
     if v.typ == TYPE_MAP { total = count * 2 }
     $out := []Value{}
-    for i in 0:total { out.push(c.read_value() or >>) }
+    for i in 0:total { out.push(c.read_value() >>>) }
     << out
 }
 
 pub fn (v &Value) as_strings() []string {
-    if v.typ != TYPE_ARR && v.typ != TYPE_SET { >> errors.new("redis: not a string array") }
-    values := v.elements() or >>
+    if v.typ != TYPE_ARR && v.typ != TYPE_SET { >>> errors.new("redis: not a string array") }
+    values := v.elements() >>>
     $out := []string{}
-    for i in 0:values.len { out.push(values[i].as_string() or >>) }
+    for i in 0:values.len { out.push(values[i].as_string() >>>) }
     << out
 }

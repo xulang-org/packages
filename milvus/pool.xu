@@ -46,7 +46,7 @@ pub fn (p &MilvusPool) get_conn() int {
     cached := sockets.take()
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
-    fd := p.client.connect() or (err) { << -1 }
+    fd := p.client.connect() >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -65,15 +65,15 @@ pub fn (p &MilvusPool) discard_conn(fd int) {
 pub fn (p &MilvusPool) create_collection(cfg CollectionConfig) bool {
     if p.client.secure {
         c := client_copy(p)
-        result := c.create_collection(cfg) or (err) { << false }
+        result := c.create_collection(cfg) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("milvus: pool closed or dial failed") }
     $reusable := false
-    result := p.client.create_collection_at(fd, cfg, $&reusable) or (err) {
+    result := p.client.create_collection_at(fd, cfg, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -82,15 +82,15 @@ pub fn (p &MilvusPool) create_collection(cfg CollectionConfig) bool {
 pub fn (p &MilvusPool) drop_collection(name string) bool {
     if p.client.secure {
         c := client_copy(p)
-        result := c.drop_collection(name) or (err) { << false }
+        result := c.drop_collection(name) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("milvus: pool closed or dial failed") }
     $reusable := false
-    result := p.client.drop_collection_at(fd, name, $&reusable) or (err) {
+    result := p.client.drop_collection_at(fd, name, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -99,15 +99,15 @@ pub fn (p &MilvusPool) drop_collection(name string) bool {
 pub fn (p &MilvusPool) insert(collection string, entities []VectorEntity) bool {
     if p.client.secure {
         c := client_copy(p)
-        result := c.insert(collection, entities) or (err) { << false }
+        result := c.insert(collection, entities) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("milvus: pool closed or dial failed") }
     $reusable := false
-    result := p.client.insert_at(fd, collection, entities, $&reusable) or (err) {
+    result := p.client.insert_at(fd, collection, entities, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -115,11 +115,11 @@ pub fn (p &MilvusPool) insert(collection string, entities []VectorEntity) bool {
 
 pub fn (p &MilvusPool) search(collection string, query_vec []string, limit int) SearchResult {
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("milvus: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("milvus: pool closed or dial failed") }
     $reusable := false
-    result := p.client.search_at(fd, collection, query_vec, limit, $&reusable) or (err) {
+    result := p.client.search_at(fd, collection, query_vec, limit, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result

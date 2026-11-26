@@ -29,20 +29,20 @@ require:
 nats #github.com/xulang-org/packages/nats
 
 fn main() int {
-    $nc := nats.connect("127.0.0.1:4222") or >>
+    $nc := nats.connect("127.0.0.1:4222") >>>
 
     // 1. 订阅主题
-    sub := nc.subscribe("orders.new") or >>
+    sub := nc.subscribe("orders.new") >>>
 
     // 2. 发布消息
-    nc.publish("orders.new", "{\"order_id\": 1001, \"item\": \"Xu Book\"}") or >>
+    nc.publish("orders.new", "{\"order_id\": 1001, \"item\": \"Xu Book\"}") >>>
 
     // 3. 接收消息
-    msg := nc.next_msg() or >>
+    msg := nc.next_msg() >>>
     println("Received on [" + msg.subject + "]: " + msg.data)
 
     // 4. 工作队列负载均衡订阅
-    worker_sub := nc.queue_subscribe("tasks", "task_workers") or >>
+    worker_sub := nc.queue_subscribe("tasks", "task_workers") >>>
 
     nc.close()
     << 0

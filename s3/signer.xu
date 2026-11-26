@@ -6,7 +6,7 @@
 #strings
 
 fn raw_from_hex(hex_str string) string {
-    raw := hex.decode_string(hex_str) or (err) {
+    raw := hex.decode_string(hex_str) >>> (err) {
         << ""
     }
     << raw

@@ -59,7 +59,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -79,17 +79,17 @@ pub fn (p &Pool) discard_conn(fd int) {
 pub fn (p &Pool) exec(sql_query string) int {
     if p.secure {
         $c := p.get()
-        resp := c.request(sql_query) or >>
-        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
+        resp := c.request(sql_query) >>>
+        if resp.status_code < 200 || resp.status_code >= 300 { >>> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
         << 0
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("clickhouse: pool closed or dial failed") }
     $c := p.get()
     $reusable := false
-    result := c.exec_at(fd, sql_query, $&reusable) or (err) {
+    result := c.exec_at(fd, sql_query, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -98,17 +98,17 @@ pub fn (p &Pool) exec(sql_query string) int {
 pub fn (p &Pool) query(sql_query string) string {
     if p.secure {
         $c := p.get()
-        resp := c.request(sql_query) or >>
-        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
+        resp := c.request(sql_query) >>>
+        if resp.status_code < 200 || resp.status_code >= 300 { >>> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
         << resp.body
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("clickhouse: pool closed or dial failed") }
     $c := p.get()
     $reusable := false
-    result := c.query_at(fd, sql_query, $&reusable) or (err) {
+    result := c.query_at(fd, sql_query, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -117,17 +117,17 @@ pub fn (p &Pool) query(sql_query string) string {
 pub fn (p &Pool) query_tsv(sql_query string) [][]string {
     if p.secure {
         $c := p.get()
-        resp := c.request(sql_query) or >>
-        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
+        resp := c.request(sql_query) >>>
+        if resp.status_code < 200 || resp.status_code >= 300 { >>> errors.new("clickhouse: HTTP status " + str(resp.status_code)) }
         << parse_tsv(resp.body)
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("clickhouse: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("clickhouse: pool closed or dial failed") }
     $c := p.get()
     $reusable := false
-    result := c.query_tsv_at(fd, sql_query, $&reusable) or (err) {
+    result := c.query_tsv_at(fd, sql_query, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result

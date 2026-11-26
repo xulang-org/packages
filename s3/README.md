@@ -30,30 +30,30 @@ fn main() {
     $client := s3.open("http://127.0.0.1:9000", "minioadmin", "minioadmin", "us-east-1")
 
     // 1. 创建 Bucket
-    client.make_bucket("xu-test-bucket") or (err) {
+    client.make_bucket("xu-test-bucket") >>> (err) {
         println("创建 Bucket 失败: " + err.msg())
         <<
     }
 
     // 2. 上传对象
     content := "Hello Xu S3 Object Storage!"
-    client.put_object("xu-test-bucket", "notes/hello.txt", content, "text/plain") or (err) {
+    client.put_object("xu-test-bucket", "notes/hello.txt", content, "text/plain") >>> (err) {
         println("上传失败: " + err.msg())
         <<
     }
 
     // 3. 读取对象
-    got := client.get_object("xu-test-bucket", "notes/hello.txt") or (err) {
+    got := client.get_object("xu-test-bucket", "notes/hello.txt") >>> (err) {
         println("读取失败: " + err.msg())
         <<
     }
     println("读取内容: " + got)
 
     // 4. 删除对象与 Bucket
-    client.remove_object("xu-test-bucket", "notes/hello.txt") or (err) {
+    client.remove_object("xu-test-bucket", "notes/hello.txt") >>> (err) {
         println("删除对象失败: " + err.msg())
     }
-    client.remove_bucket("xu-test-bucket") or (err) {
+    client.remove_bucket("xu-test-bucket") >>> (err) {
         println("删除 Bucket 失败: " + err.msg())
     }
 }

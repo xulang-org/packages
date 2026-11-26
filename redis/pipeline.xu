@@ -106,7 +106,7 @@ pub fn (p $&Pipeline) srem(key string, member string) {
 }
 
 fn format_score(score f64) string {
-    s := strconv.format_float(score, 103, -1) or (err) {
+    s := strconv.format_float(score, 103, -1) >>> (err) {
         << "0"
     }
     << s
@@ -153,12 +153,12 @@ pub fn (c $&Client) exec_pipeline(p $&Pipeline) []Value {
     if p.count == 0 {
         << []Value{}
     }
-    c.write_raw(p.raw) or >>
+    c.write_raw(p.raw) >>>
 
     $results := []Value{}
     $j := 0
     while j < p.count {
-        val := c.read_value() or >>
+        val := c.read_value() >>>
         results.push(val)
         j = j + 1
     }
@@ -168,5 +168,5 @@ pub fn (c $&Client) exec_pipeline(p $&Pipeline) []Value {
 }
 
 pub fn (p $&Pipeline) exec(c $&Client) []Value {
-    << c.exec_pipeline(p) or >>
+    << c.exec_pipeline(p) >>>
 }

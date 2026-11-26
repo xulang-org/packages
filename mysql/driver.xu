@@ -73,7 +73,7 @@ fn mysql_arg_val(args &[]driver.NamedValue, i int) string {
     }
     if args[i].value is f64 {
         x := args[i].value as f64
-        << strconv.format_float(x, 103, -1) or (err) { << "0" }
+        << strconv.format_float(x, 103, -1) >>> (err) { << "0" }
     }
     if args[i].value is time.Time {
         x := args[i].value as time.Time
@@ -495,12 +495,12 @@ fn command_state(s $&MysqlState, command int) string {
 }
 
 fn close_fd(fd int) {
-    net.conn_close(fd) or (err) { << }
+    net.conn_close(fd) >>> (err) { << }
     <<
 }
 
 fn close_tls_quiet(tc $&transport.Conn) int {
-    tc.close() or (err) { << 0 }
+    tc.close() >>> (err) { << 0 }
     << 0
 }
 
@@ -511,11 +511,11 @@ fn failed_conn(msg string) driver.Conn {
 }
 
 fn read_greeting(raw $&net.Conn) Packet {
-    $hdr := raw.read(4) or (err) { << Packet{payload: "", seq: 0, err: err.msg()} }
+    $hdr := raw.read(4) >>> (err) { << Packet{payload: "", seq: 0, err: err.msg()} }
     if hdr.len != 4 { << Packet{payload: "", seq: 0, err: "mysql: short greeting header"} }
     n := le24_at(&hdr, 0)
     if n < 0 || n > 16777216 { << Packet{payload: "", seq: 0, err: "mysql: invalid greeting length"} }
-    payload := raw.read(n) or (err) { << Packet{payload: "", seq: 0, err: err.msg()} }
+    payload := raw.read(n) >>> (err) { << Packet{payload: "", seq: 0, err: err.msg()} }
     if payload.len != n { << Packet{payload: "", seq: 0, err: "mysql: short greeting"} }
     << Packet{payload: payload, seq: hdr[3] & 255, err: ""}
 }
@@ -538,32 +538,32 @@ fn server_caps(greeting string) int {
 fn new_conn_tls(cfg Config) driver.Conn {
     port_text := str(cfg.port)
     addr := net.join_host_port(&cfg.host, &port_text)
-    $raw := net.dial_to("tcp", addr) or (err) { << failed_conn(err.msg()) }
+    $raw := net.dial_to("tcp", addr) >>> (err) { << failed_conn(err.msg()) }
     greeting := read_greeting($&raw)
     if greeting.err.len > 0 {
-        raw.close() or (e) { << failed_conn(greeting.err) }
+        raw.close() >>> (e) { << failed_conn(greeting.err) }
         << failed_conn(greeting.err)
     }
     caps := server_caps(greeting.payload)
     if caps < 0 || (caps & 2048) == 0 {
-        raw.close() or (e) { << failed_conn("mysql: server does not advertise CLIENT_SSL") }
+        raw.close() >>> (e) { << failed_conn("mysql: server does not advertise CLIENT_SSL") }
         << failed_conn("mysql: server does not advertise CLIENT_SSL")
     }
     ssl_req := le32(caps | 1 | 8 | 512 | 32768) + le32(16777216) + string_from_byte(45)
     $req := ssl_req
     for i in 0:23 { req = req + string_from_byte(0) }
     frame := le24(req.len) + string_from_byte(1) + req
-    raw.write(&frame) or (err) {
-        raw.close() or (e) { << failed_conn(err.msg()) }
+    raw.write(&frame) >>> (err) {
+        raw.close() >>> (e) { << failed_conn(err.msg()) }
         << failed_conn(err.msg())
     }
     $tc_cfg := tls.new_config(cfg.host + "")
     if cfg.root_cert_file.len > 0 {
-        pem := read_file(cfg.root_cert_file) or (err) { << failed_conn(err.msg()) }
-        ncert := x509.append_certificates($&tc_cfg.root_cas, &pem) or (err) { << failed_conn(err.msg()) }
+        pem := read_file(cfg.root_cert_file) >>> (err) { << failed_conn(err.msg()) }
+        ncert := x509.append_certificates($&tc_cfg.root_cas, &pem) >>> (err) { << failed_conn(err.msg()) }
         if ncert <= 0 { << failed_conn("mysql: no certificates in tlsrootcert") }
     }
-    tls_raw := tls.client(raw, &tc_cfg) or (err) { << failed_conn(err.msg()) }
+    tls_raw := tls.client(raw, &tc_cfg) >>> (err) { << failed_conn(err.msg()) }
     $tr := transport.Conn{fd: -1, tls_conn: tls_raw, secure: true, closed: false, eof: false, buf: ""}
     auth_err := handshake_tls_greeting($&tr, &cfg, greeting)
     tcch := chan transport.Conn{cap: 1}
@@ -581,7 +581,7 @@ fn new_conn(cfg Config) driver.Conn {
     if cfg.tls_mode != "false" && cfg.tls_mode != "0" && cfg.tls_mode != "disabled" {
         << new_conn_tls(cfg)
     }
-    fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
+    fd := net.dial(cfg.host + ":" + str(cfg.port)) >>> (err) {
         ch := chan MysqlState{cap: 1}
         ch <- MysqlState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: err.msg(), tx: 0}
         << driver.Conn(MysqlConn{st: ch})
@@ -596,7 +596,7 @@ fn new_conn(cfg Config) driver.Conn {
 }
 
 fn (d MysqlDriver) open(name string) driver.Conn {
-    cfg := parse_dsn(name) or (err) {
+    cfg := parse_dsn(name) >>> (err) {
         ch := chan MysqlState{cap: 1}
         ch <- MysqlState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: err.msg(), tx: 0}
         << driver.Conn(MysqlConn{st: ch})

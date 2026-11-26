@@ -12,7 +12,7 @@ fn (c $&Client) put_kv_at(fd int, key string, val string, reusable $&bool) bool 
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
-    resp := c.request_at(fd, "PUT", "/v1/kv/" + k, val, reusable) or (err) {
+    resp := c.request_at(fd, "PUT", "/v1/kv/" + k, val, reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200
@@ -20,7 +20,7 @@ fn (c $&Client) put_kv_at(fd int, key string, val string, reusable $&bool) bool 
 
 pub fn (c $&Client) get_kv(key string) string {
     $reusable := false
-    << c.get_kv_at(-1, key, $&reusable) or >>
+    << c.get_kv_at(-1, key, $&reusable) >>>
 }
 
 fn (c $&Client) get_kv_at(fd int, key string, reusable $&bool) string {
@@ -28,9 +28,9 @@ fn (c $&Client) get_kv_at(fd int, key string, reusable $&bool) string {
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
-    resp := c.request_at(fd, "GET", "/v1/kv/" + k + "?raw", "", reusable) or >>
+    resp := c.request_at(fd, "GET", "/v1/kv/" + k + "?raw", "", reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("consul: kv not found (status " + str(resp.status_code) + ")")
+        >>> errors.new("consul: kv not found (status " + str(resp.status_code) + ")")
     }
     << resp.body
 }
@@ -45,7 +45,7 @@ fn (c $&Client) delete_kv_at(fd int, key string, reusable $&bool) bool {
     if k.len > 0 && (k[0] & 255) == 47 {
         k = k[1:k.len]
     }
-    resp := c.request_at(fd, "DELETE", "/v1/kv/" + k, "", reusable) or (err) {
+    resp := c.request_at(fd, "DELETE", "/v1/kv/" + k, "", reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200

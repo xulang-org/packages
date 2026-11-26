@@ -19,11 +19,11 @@ fn read_exact(fd int, need int) string {
     $buf := ""
     while buf.len < need {
         want := need - buf.len
-        chunk := net.conn_read(fd, want) or (err) {
-            >> errors.new("ws read error: " + err.msg())
+        chunk := net.conn_read(fd, want) >>> (err) {
+            >>> errors.new("ws read error: " + err.msg())
         }
         if chunk.len == 0 {
-            >> errors.new("ws read unexpected EOF")
+            >>> errors.new("ws read unexpected EOF")
         }
         buf = buf + chunk
     }
@@ -34,8 +34,8 @@ fn write_all(fd int, data string) bool {
     $off := 0
     while off < data.len {
         part := data[off:data.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("ws write error: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("ws write error: " + err.msg())
         }
         if n <= 0 {
             <-
@@ -47,7 +47,7 @@ fn write_all(fd int, data string) bool {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -55,7 +55,7 @@ fn safe_close(fd int) {
 
 pub fn new_client(endpoint string) WsClient {
     if strings.has_prefix(&endpoint, "wss://") {
-        ep := transport.parse_endpoint("https://" + endpoint[6:endpoint.len], 443) or (err) {
+        ep := transport.parse_endpoint("https://" + endpoint[6:endpoint.len], 443) >>> (err) {
             << WsClient{host: "127.0.0.1", port: 443, path: "/", secure: true}
         }
         $path0 := ep.path
@@ -86,7 +86,7 @@ pub fn new_client(endpoint string) WsClient {
     if colon >= 0 {
         host = ep[0:colon]
         port_str := ep[(colon + 1):ep.len]
-        p_val := parse_int(port_str) or (err) {
+        p_val := parse_int(port_str) >>> (err) {
             port = 8080
             << WsClient{host: host, port: 8080, path: path, secure: false}
         }
@@ -108,65 +108,65 @@ pub fn new_client(endpoint string) WsClient {
 fn read_exact_secure(c $&transport.Conn, need int) string {
     $buf := ""
     while buf.len < need {
-        chunk := c.read(need - buf.len) or >>
-        if chunk.len == 0 { >> errors.new("wss read unexpected EOF") }
+        chunk := c.read(need - buf.len) >>>
+        if chunk.len == 0 { >>> errors.new("wss read unexpected EOF") }
         buf = buf + chunk
     }
     << buf
 }
 
 fn write_secure(c $&transport.Conn, data string) int {
-    << c.write_all(data) or >>
+    << c.write_all(data) >>>
 }
 
 pub fn (c WsClient) connect_secure() transport.Conn {
-    if !c.secure { >> errors.new("ws: endpoint is not wss") }
+    if !c.secure { >>> errors.new("ws: endpoint is not wss") }
     ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: c.path + "", secure: true}
     cfg := tls.new_config(c.host + "")
-    $tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) or >>
-    nonce := rand.read(16) or >>
+    $tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) >>>
+    nonce := rand.read(16) >>>
     key := base64.encode_to_string(nonce)
     req := build_handshake_request(c.host, c.port, c.path, key + "")
-    write_secure($&tc, req) or (err) {
+    write_secure($&tc, req) >>> (err) {
         tc.close()
-        >> err
+        >>> err
     }
     $resp := ""
     while strings.index_of(&resp, "\r\n\r\n") < 0 {
-        chunk := tc.read(256) or (err) {
+        chunk := tc.read(256) >>> (err) {
             tc.close()
-            >> err
+            >>> err
         }
         if chunk.len == 0 {
             tc.close()
-            >> errors.new("wss handshake unexpected EOF")
+            >>> errors.new("wss handshake unexpected EOF")
         }
         resp = resp + chunk
     }
     parsed := parse_handshake_response(resp)
     if parsed.status_code != 101 {
         tc.close()
-        >> errors.new("wss handshake rejected")
+        >>> errors.new("wss handshake rejected")
     }
     if parsed.accept_key != compute_accept_key(key) {
         tc.close()
-        >> errors.new("wss handshake accept mismatch")
+        >>> errors.new("wss handshake accept mismatch")
     }
     << tc
 }
 
 pub fn (c WsClient) send_text_secure(tc $&transport.Conn, text string) bool {
-    write_secure(tc, build_frame(OPCODE_TEXT, text, true, true)) or (err) { << false }
+    write_secure(tc, build_frame(OPCODE_TEXT, text, true, true)) >>> (err) { << false }
     << true
 }
 
 pub fn (c WsClient) send_pong_secure(tc $&transport.Conn, payload string) bool {
-    write_secure(tc, build_frame(OPCODE_PONG, payload, true, true)) or (err) { << false }
+    write_secure(tc, build_frame(OPCODE_PONG, payload, true, true)) >>> (err) { << false }
     << true
 }
 
 pub fn (c WsClient) read_frame_secure(tc $&transport.Conn) Frame {
-    hdr := read_exact_secure(tc, 2) or >>
+    hdr := read_exact_secure(tc, 2) >>>
     b0 := hdr[0] & 255
     b1 := hdr[1] & 255
     fin := (b0 & 128) != 0
@@ -175,10 +175,10 @@ pub fn (c WsClient) read_frame_secure(tc $&transport.Conn) Frame {
     code := b1 & 127
     $n := code
     if code == 126 {
-        ext := read_exact_secure(tc, 2) or >>
+        ext := read_exact_secure(tc, 2) >>>
         n = ((ext[0] & 255) << 8) | (ext[1] & 255)
     } else if code == 127 {
-        ext := read_exact_secure(tc, 8) or >>
+        ext := read_exact_secure(tc, 8) >>>
         n = 0
         for i in 0:8 { n = (n << 8) | (ext[i] & 255) }
     }
@@ -187,59 +187,59 @@ pub fn (c WsClient) read_frame_secure(tc $&transport.Conn) Frame {
     $m2 := 0
     $m3 := 0
     if masked {
-        mask := read_exact_secure(tc, 4) or >>
+        mask := read_exact_secure(tc, 4) >>>
         m0 = mask[0] & 255
         m1 = mask[1] & 255
         m2 = mask[2] & 255
         m3 = mask[3] & 255
     }
     $payload := ""
-    if n > 0 { payload = read_exact_secure(tc, n) or >> }
+    if n > 0 { payload = read_exact_secure(tc, n) >>> }
     if masked { payload = apply_mask(payload, m0, m1, m2, m3) }
-    if opcode == OPCODE_PING { c.send_pong_secure(tc, payload) or (err) { << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload} } }
+    if opcode == OPCODE_PING { c.send_pong_secure(tc, payload) >>> (err) { << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload} } }
     << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload}
 }
 
 pub fn (c WsClient) read_text_secure(tc $&transport.Conn) string {
     while true {
-        f := c.read_frame_secure(tc) or >>
+        f := c.read_frame_secure(tc) >>>
         if f.opcode == OPCODE_TEXT { << f.payload }
-        if f.opcode == OPCODE_CLOSE { >> errors.new("wss connection closed by peer") }
+        if f.opcode == OPCODE_CLOSE { >>> errors.new("wss connection closed by peer") }
     }
     << ""
 }
 
 pub fn (c WsClient) close_secure(tc $&transport.Conn) {
-    write_secure(tc, build_frame(OPCODE_CLOSE, "", true, true)) or (err) { << }
+    write_secure(tc, build_frame(OPCODE_CLOSE, "", true, true)) >>> (err) { << }
     tc.close()
 }
 
 pub fn (c WsClient) connect() int {
-    if c.secure { >> errors.new("ws: use connect_secure for wss endpoint") }
+    if c.secure { >>> errors.new("ws: use connect_secure for wss endpoint") }
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("ws dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("ws dial failed: " + err.msg())
     }
 
-    nonce := rand.read(16) or >>
+    nonce := rand.read(16) >>>
     client_key := base64.encode_to_string(nonce)
     req := build_handshake_request(c.host, c.port, c.path, client_key + "")
-    write_all(fd, req) or (err) {
+    write_all(fd, req) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
 
     // Read HTTP response headers until "\r\n\r\n"
     $resp := ""
     $found_header_end := false
     while !found_header_end {
-        chunk := net.conn_read(fd, 256) or (err) {
+        chunk := net.conn_read(fd, 256) >>> (err) {
             safe_close(fd)
-            >> errors.new("ws handshake read error: " + err.msg())
+            >>> errors.new("ws handshake read error: " + err.msg())
         }
         if chunk.len == 0 {
             safe_close(fd)
-            >> errors.new("ws handshake unexpected EOF")
+            >>> errors.new("ws handshake unexpected EOF")
         }
         resp = resp + chunk
         if strings.index_of(&resp, "\r\n\r\n") >= 0 {
@@ -250,13 +250,13 @@ pub fn (c WsClient) connect() int {
     res := parse_handshake_response(resp)
     if res.status_code != 101 {
         safe_close(fd)
-        >> errors.new("ws handshake rejected, status: " + str(res.status_code))
+        >>> errors.new("ws handshake rejected, status: " + str(res.status_code))
     }
 
     expected_accept := compute_accept_key(client_key)
     if res.accept_key != expected_accept {
         safe_close(fd)
-        >> errors.new("ws handshake Sec-WebSocket-Accept mismatch: expected " + expected_accept + ", got " + res.accept_key)
+        >>> errors.new("ws handshake Sec-WebSocket-Accept mismatch: expected " + expected_accept + ", got " + res.accept_key)
     }
 
     << fd
@@ -285,7 +285,7 @@ pub fn (c WsClient) send_pong(fd int, payload string) bool {
 pub fn (c WsClient) close_conn(fd int) {
     if fd >= 0 {
         f := build_frame(OPCODE_CLOSE, "", true, true)
-        write_all(fd, f) or (e) {
+        write_all(fd, f) >>> (e) {
             <<
         }
         safe_close(fd)
@@ -293,7 +293,7 @@ pub fn (c WsClient) close_conn(fd int) {
 }
 
 pub fn (c WsClient) read_frame(fd int) Frame {
-    hdr := read_exact(fd, 2) or >>
+    hdr := read_exact(fd, 2) >>>
     b0 := hdr[0] & 255
     b1 := hdr[1] & 255
 
@@ -304,12 +304,12 @@ pub fn (c WsClient) read_frame(fd int) Frame {
 
     $payload_len := len_code
     if len_code == 126 {
-        ext := read_exact(fd, 2) or >>
+        ext := read_exact(fd, 2) >>>
         e0 := ext[0] & 255
         e1 := ext[1] & 255
         payload_len = (e0 << 8) | e1
     } else if len_code == 127 {
-        ext := read_exact(fd, 8) or >>
+        ext := read_exact(fd, 8) >>>
         $l := 0
         $i := 0
         while i < 8 {
@@ -325,7 +325,7 @@ pub fn (c WsClient) read_frame(fd int) Frame {
     $m2 := 0
     $m3 := 0
     if masked {
-        mbytes := read_exact(fd, 4) or >>
+        mbytes := read_exact(fd, 4) >>>
         m0 = mbytes[0] & 255
         m1 = mbytes[1] & 255
         m2 = mbytes[2] & 255
@@ -334,7 +334,7 @@ pub fn (c WsClient) read_frame(fd int) Frame {
 
     $payload := ""
     if payload_len > 0 {
-        raw_payload := read_exact(fd, payload_len) or >>
+        raw_payload := read_exact(fd, payload_len) >>>
         if masked {
             payload = apply_mask(raw_payload, m0, m1, m2, m3)
         } else {
@@ -344,7 +344,7 @@ pub fn (c WsClient) read_frame(fd int) Frame {
 
     // Auto-respond to Ping frames with Pong
     if opcode == OPCODE_PING {
-        c.send_pong(fd, payload) or (err) {
+        c.send_pong(fd, payload) >>> (err) {
             << Frame{fin: fin, opcode: opcode, masked: masked, payload: payload}
         }
     }
@@ -359,12 +359,12 @@ pub fn (c WsClient) read_frame(fd int) Frame {
 
 pub fn (c WsClient) read_text(fd int) string {
     while true {
-        f := c.read_frame(fd) or >>
+        f := c.read_frame(fd) >>>
         if f.opcode == OPCODE_TEXT {
             << f.payload
         }
         if f.opcode == OPCODE_CLOSE {
-            >> errors.new("ws connection closed by peer")
+            >>> errors.new("ws connection closed by peer")
         }
     }
     << ""

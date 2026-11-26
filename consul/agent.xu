@@ -9,7 +9,7 @@ pub fn (c $&Client) register_service(id string, name string, address string, por
 
 fn (c $&Client) register_service_at(fd int, id string, name string, address string, port int, reusable $&bool) bool {
     body := "{\"ID\":\"" + id + "\",\"Name\":\"" + name + "\",\"Address\":\"" + address + "\",\"Port\":" + str(port) + "}"
-    resp := c.request_at(fd, "PUT", "/v1/agent/service/register", body, reusable) or (err) {
+    resp := c.request_at(fd, "PUT", "/v1/agent/service/register", body, reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200
@@ -21,7 +21,7 @@ pub fn (c $&Client) deregister_service(id string) bool {
 }
 
 fn (c $&Client) deregister_service_at(fd int, id string, reusable $&bool) bool {
-    resp := c.request_at(fd, "PUT", "/v1/agent/service/deregister/" + id, "", reusable) or (err) {
+    resp := c.request_at(fd, "PUT", "/v1/agent/service/deregister/" + id, "", reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200
@@ -29,13 +29,13 @@ fn (c $&Client) deregister_service_at(fd int, id string, reusable $&bool) bool {
 
 pub fn (c $&Client) get_service(name string) string {
     $reusable := false
-    << c.get_service_at(-1, name, $&reusable) or >>
+    << c.get_service_at(-1, name, $&reusable) >>>
 }
 
 fn (c $&Client) get_service_at(fd int, name string, reusable $&bool) string {
-    resp := c.request_at(fd, "GET", "/v1/catalog/service/" + name, "", reusable) or >>
+    resp := c.request_at(fd, "GET", "/v1/catalog/service/" + name, "", reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("consul: get_service failed with status " + str(resp.status_code))
+        >>> errors.new("consul: get_service failed with status " + str(resp.status_code))
     }
     << resp.body
 }

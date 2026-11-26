@@ -27,19 +27,19 @@ fn main() {
     $ch := clickhouse.open("http://127.0.0.1:8123", "default", "", "default")
 
     // 执行 DDL
-    ch.exec("CREATE TABLE IF NOT EXISTS demo (id UInt64, val Float64) ENGINE = Memory") or (err) {
+    ch.exec("CREATE TABLE IF NOT EXISTS demo (id UInt64, val Float64) ENGINE = Memory") >>> (err) {
         println("建表失败: " + err.msg())
         <<
     }
 
     // 批量写入
-    ch.insert("demo", "(1, 10.5), (2, 20.8)") or (err) {
+    ch.insert("demo", "(1, 10.5), (2, 20.8)") >>> (err) {
         println("写入失败: " + err.msg())
         <<
     }
 
     // 查询分析
-    res := ch.query("SELECT avg(val) FROM demo") or (err) {
+    res := ch.query("SELECT avg(val) FROM demo") >>> (err) {
         println("查询失败: " + err.msg())
         <<
     }

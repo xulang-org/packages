@@ -9,7 +9,7 @@
 pub fn compute_accept_key(sec_key string) string {
     magic := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
     h := sha1.sum(sec_key + magic)
-    raw := hex.decode_string(h) or (err) {
+    raw := hex.decode_string(h) >>> (err) {
         << ""
     }
     << base64.encode_to_string(raw)
@@ -45,7 +45,7 @@ pub fn parse_handshake_response(resp string) HandshakeResult {
         sp2 := strings.index_of(&after_sp1, " ")
         if sp2 > 0 {
             code_str := after_sp1[0:sp2]
-            p_code := parse_int(code_str) or (err) {
+            p_code := parse_int(code_str) >>> (err) {
                 code = 0
                 << HandshakeResult{status_code: 0, accept_key: ""}
             }

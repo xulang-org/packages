@@ -6,9 +6,9 @@
 
 fn native_token(password string, scramble string) string {
     if password.len == 0 { << "" }
-    a := hex.decode_string(sha1.sum(password)) or (err) { << "" }
-    b := hex.decode_string(sha1.sum(strings.clone(&a))) or (err) { << "" }
-    c := hex.decode_string(sha1.sum(scramble + b)) or (err) { << "" }
+    a := hex.decode_string(sha1.sum(password)) >>> (err) { << "" }
+    b := hex.decode_string(sha1.sum(strings.clone(&a))) >>> (err) { << "" }
+    c := hex.decode_string(sha1.sum(scramble + b)) >>> (err) { << "" }
     $out := ""
     $i := 0
     while i < a.len && i < c.len {

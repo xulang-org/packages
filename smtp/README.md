@@ -23,7 +23,7 @@ msg := smtp.Message{
     subject: "Hello from Xu SMTP Driver",
     body: "This is a native SMTP test from Xu programming language."
 }
-p.send_mail(msg) or panic
+p.send_mail(msg) >>>
 
 // 释放连接池
 p.close()

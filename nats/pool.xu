@@ -47,10 +47,10 @@ pub fn (p &Pool) get() Client {
         else {}
     }
     if p.auth_user.len > 0 {
-        $c := connect_auth(p.url + "", p.auth_user + "", p.auth_pass + "") or >>
+        $c := connect_auth(p.url + "", p.auth_user + "", p.auth_pass + "") >>>
         << c
     }
-    $c := connect(p.url + "") or >>
+    $c := connect(p.url + "") >>>
     << c
 }
 
@@ -73,11 +73,11 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) publish(subject string, data string) int {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.publish(subject + "", data + "") or (err) {
+    res := c.publish(subject + "", data + "") >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res

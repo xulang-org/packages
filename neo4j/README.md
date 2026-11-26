@@ -20,7 +20,7 @@ fn main() {
     defer p.close()
 
     // 创建节点
-    res := p.execute("CREATE (p:Person {name: 'Alice', age: 30}) RETURN p.name, p.age") or (err) {
+    res := p.execute("CREATE (p:Person {name: 'Alice', age: 30}) RETURN p.name, p.age") >>> (err) {
         println("Cypher error: " + err.msg())
         <<
     }

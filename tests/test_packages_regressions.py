@@ -200,7 +200,7 @@ fn main() int {
 fn main() int {
     p := milvus.open_pool(os.getenv("AUDIT_ENDPOINT"), 1)
     for i in 0:2 {
-        result := p.search("demo", ["1"], 1) or (err) { println(err.msg())
+        result := p.search("demo", ["1"], 1) >>> (err) { println(err.msg())
             << 1 }
         if result.hits.len != 0 { << 2 }
     }
@@ -222,7 +222,7 @@ fn main() int {
 fn main() int {
     p := qdrant.open_pool(os.getenv("AUDIT_ENDPOINT"), "secret", 1)
     for i in 0:2 {
-        result := p.search("demo", ["1"], 1) or (err) { println(err.msg())
+        result := p.search("demo", ["1"], 1) >>> (err) { println(err.msg())
             << 1 }
         if result.len != 0 { << 2 }
     }
@@ -266,7 +266,7 @@ fn main() int {{
     endpoint := os.getenv("AUDIT_ENDPOINT")
     p := {constructor}
     for i in 0:2 {{
-        result := {call} or (err) {{ println(err.msg())
+        result := {call} >>> (err) {{ println(err.msg())
             << 1 }}
         if {invalid} {{ << 2 }}
     }}
@@ -276,7 +276,7 @@ fn main() int {{
 '''
                 # Pushgateway preserves its boolean failure API.
                 if package == "prometheus":
-                    source = source.replace(' or (err) { println(err.msg())\n            << 1 }', '')
+                    source = source.replace(' >>> (err) { println(err.msg())\n            << 1 }', '')
                 response = b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
                 with self.http_pool_peer([(response, False)] * 2) as (endpoint, stats):
                     self.run_xu(source, [package], endpoint)
@@ -305,7 +305,7 @@ fn main() int {{
 #{package}
 #os
 fn check_call(p &{package}.Pool, expected bool) int {{
-    result := {call} or (err) {{
+    result := {call} >>> (err) {{
         if expected {{ println(err.msg())
             << 1 }}
         << 0
@@ -356,7 +356,7 @@ fn main() int {{
     copy.put_conn(fd)
     if p.get_conn() >= 0 || copy.get_conn() >= 0 {{ << 2 }}
     text := "probe"
-    written := net.conn_write(fd, &text) or (err) {{ << 0 }}
+    written := net.conn_write(fd, &text) >>> (err) {{ << 0 }}
     if written > 0 {{ << 3 }}
     << 0
 }}
@@ -429,7 +429,7 @@ fn main() int {{
             with self.subTest(package=package):
                 statements, responses = [], []
                 for i, (call, throwing, invalid, status, body, path) in enumerate(methods[package]):
-                    handling = ' or (err) { println(err.msg())\n        << 1 }' if throwing else ''
+                    handling = ' >>> (err) { println(err.msg())\n        << 1 }' if throwing else ''
                     statements.append(f'    r{i} := {call}{handling}\n    if {invalid.replace("r", "r" + str(i))} {{ << 2 }}')
                     length = 999 if path.startswith(b"HEAD ") else len(body)
                     responses.append((f"HTTP/1.1 {status} OK\r\nContent-Length: {length}\r\n\r\n".encode() + body, False))
@@ -455,7 +455,7 @@ fn main() int {{
         }
         for package, constructor, _, _, _, _, _ in self.remaining_http_pool_cases():
             with self.subTest(package=package):
-                handling = ' or (err) { << false }' if package in ("elasticsearch", "etcd", "influxdb") else ''
+                handling = ' >>> (err) { << false }' if package in ("elasticsearch", "etcd", "influxdb") else ''
                 source = f'''@main
 #{package}
 #os
@@ -492,7 +492,7 @@ fn worker(p {package}.Pool, start chan int, ready chan int, done chan int) {{
     _ := <-start
     $failed := 0
     for i in 0:3 {{
-        result := {call} or (err) {{ failed = 1
+        result := {call} >>> (err) {{ failed = 1
             done <- failed
             << }}
         if {invalid} {{ failed = 2 }}
@@ -515,7 +515,7 @@ fn main() int {{
 }}
 '''
                 if package == "prometheus":
-                    source = source.replace(' or (err) { failed = 1\n            done <- failed\n            << }', '')
+                    source = source.replace(' >>> (err) { failed = 1\n            done <- failed\n            << }', '')
                 response = b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
                 with self.http_pool_peer([(response, False)] * 9) as (endpoint, stats):
                     self.run_xu(source, [package], endpoint)
@@ -538,7 +538,7 @@ fn main() int {
     if p.get_conn() >= 0 { println("closed pool opened a connection")
         << 2 }
     text := "probe"
-    n := net.conn_write(fd, &text) or (err) { << 0 }
+    n := net.conn_write(fd, &text) >>> (err) { << 0 }
     if n > 0 { println("returned socket survived close")
         << 3 }
     << 0
@@ -557,7 +557,7 @@ fn main() int {
 fn main() int {
     p := milvus.open_pool(os.getenv("AUDIT_ENDPOINT"), 1)
     for i in 0:2 {
-        result := p.search("demo", ["1"], 1) or (err) { println(err.msg())
+        result := p.search("demo", ["1"], 1) >>> (err) { println(err.msg())
             << 1 }
     }
     p.close()
@@ -585,7 +585,7 @@ fn main() int {
 fn main() int {{
     p := {constructor}
     for i in 0:2 {{
-        result := {call} or (err) {{ println(err.msg())
+        result := {call} >>> (err) {{ println(err.msg())
             << 1 }}
     }}
     p.close()
@@ -614,7 +614,7 @@ fn main() int {{
 fn main() int {{
     p := {constructor}
     for i in 0:2 {{
-        result := {call} or (err) {{ println(err.msg())
+        result := {call} >>> (err) {{ println(err.msg())
             << 1 }}
     }}
     p.close()
@@ -631,16 +631,16 @@ fn main() int {{
         cases = [
             ("chroma", 'chroma.open_pool(os.getenv("AUDIT_ENDPOINT"), 1)', '\n'.join([
                 '    if !p.heartbeat() { << 1 }',
-                '    id := p.create_collection("demo") or (err) { << 2 }',
+                '    id := p.create_collection("demo") >>> (err) { << 2 }',
                 '    if id != "demo" { << 3 }',
                 '    if !p.add(id, "[1]", "[[1]]", "[]") { << 4 }',
-                '    p.query(id, "[[1]]", 1) or (err) { << 5 }',
+                '    p.query(id, "[[1]]", 1) >>> (err) { << 5 }',
                 '    if !p.delete_collection("demo") { << 6 }']),
                 [b'{}', b'{"id":"demo"}', b'{}', b'{"ids":[[1]]}', b'{}']),
             ("clickhouse", 'clickhouse.open_pool(os.getenv("AUDIT_ENDPOINT"), "", "", "", 1)', '\n'.join([
-                '    p.exec("CREATE TABLE demo") or (err) { << 1 }',
-                '    p.query("SELECT 1") or (err) { << 2 }',
-                '    rows := p.query_tsv("SELECT 1, 2") or (err) { << 3 }',
+                '    p.exec("CREATE TABLE demo") >>> (err) { << 1 }',
+                '    p.query("SELECT 1") >>> (err) { << 2 }',
+                '    rows := p.query_tsv("SELECT 1, 2") >>> (err) { << 3 }',
                 '    if rows.len != 1 || rows[0].len != 2 || rows[0][1] != "2" { << 4 }']),
                 [b'', b'1\n', b'1\t2\n']),
         ]
@@ -668,7 +668,7 @@ fn main() int {{
             ]
             for response, closes, fails in first_responses:
                 with self.subTest(package=package, response=response):
-                    source = f'@main\n#{package}\n#os\nfn failed(p &{package}.Pool) bool {{\n    {call} or (err) {{ << true }}\n    << false\n}}\nfn main() int {{\n    p := {constructor}\n    if failed(&p) != {str(fails).lower()} {{ << 1 }}\n    {call} or (err) {{ << 2 }}\n    p.close()\n    << 0\n}}\n'
+                    source = f'@main\n#{package}\n#os\nfn failed(p &{package}.Pool) bool {{\n    {call} >>> (err) {{ << true }}\n    << false\n}}\nfn main() int {{\n    p := {constructor}\n    if failed(&p) != {str(fails).lower()} {{ << 1 }}\n    {call} >>> (err) {{ << 2 }}\n    p.close()\n    << 0\n}}\n'
                     with self.http_pool_peer([(response, closes), (good, False)]) as (endpoint, stats):
                         self.run_xu(source, [package], endpoint)
                     self.assertEqual(stats["connections"], 2)
@@ -676,18 +676,18 @@ fn main() int {{
     def test_pool_mutations_and_health_share_business_connection(self):
         cases = [
             ("milvus", 'milvus.open_pool(os.getenv("AUDIT_ENDPOINT"), 1)', '''
-    p.create_collection(milvus.CollectionConfig{name: "demo", dimension: 1, metric_type: "L2"}) or (err) { << 1 }
-    p.insert("demo", [milvus.VectorEntity{id: 1, vector: ["1"], text: "demo"}]) or (err) { << 2 }
-    p.drop_collection("demo") or (err) { << 3 }
-    p.search("demo", ["1"], 1) or (err) { << 4 }
+    p.create_collection(milvus.CollectionConfig{name: "demo", dimension: 1, metric_type: "L2"}) >>> (err) { << 1 }
+    p.insert("demo", [milvus.VectorEntity{id: 1, vector: ["1"], text: "demo"}]) >>> (err) { << 2 }
+    p.drop_collection("demo") >>> (err) { << 3 }
+    p.search("demo", ["1"], 1) >>> (err) { << 4 }
 ''', [b'{"code":0}'] * 3 + [b'{"code":0,"data":[]}'],
              ["/v2/vectordb/collections/create", "/v2/vectordb/entities/insert", "/v2/vectordb/collections/drop", "/v2/vectordb/entities/search"]),
             ("meilisearch", 'meilisearch.open_pool(os.getenv("AUDIT_ENDPOINT"), "", 1)', '''
     if !p.health() { << 1 }
-    p.create_index("demo", "id") or (err) { << 2 }
-    p.add_documents("demo", "[]") or (err) { << 3 }
-    p.delete_index("demo") or (err) { << 4 }
-    p.search("demo", "query", 1) or (err) { << 5 }
+    p.create_index("demo", "id") >>> (err) { << 2 }
+    p.add_documents("demo", "[]") >>> (err) { << 3 }
+    p.delete_index("demo") >>> (err) { << 4 }
+    p.search("demo", "query", 1) >>> (err) { << 5 }
 ''', [b'{"status":"available"}'] + [b'{"taskUid":1}'] * 3 + [b'{"hits":[]}'],
              ["/health", "/indexes", "/indexes/demo/documents", "/indexes/demo", "/indexes/demo/search"]),
         ]
@@ -731,13 +731,13 @@ fn main() int {{
 #{package}
 #os
 fn failed(p &{pool_type}) bool {{
-    first := {call} or (err) {{ << true }}
+    first := {call} >>> (err) {{ << true }}
     << false
 }}
 fn main() int {{
     p := {constructor}
     if !failed(&p) {{ << 1 }}
-    second := {call} or (err) {{ println(err.msg())
+    second := {call} >>> (err) {{ println(err.msg())
         << 2 }}
     p.close()
     << 0
@@ -773,7 +773,7 @@ fn main() int {
 #os
 fn closed(fd int) bool {
     text := "probe"
-    n := net.conn_write(fd, &text) or (err) { << true }
+    n := net.conn_write(fd, &text) >>> (err) { << true }
     << n <= 0
 }
 fn main() int {
@@ -781,14 +781,14 @@ fn main() int {
     p := pool.SocketPool{state: state, max_idle: 1}
     copy := p
     if p.take() != -1 { << 1 }
-    first := net.dial(os.getenv("AUDIT_ENDPOINT")) or (err) { << 2 }
-    second := net.dial(os.getenv("AUDIT_ENDPOINT")) or (err) { << 3 }
+    first := net.dial(os.getenv("AUDIT_ENDPOINT")) >>> (err) { << 2 }
+    second := net.dial(os.getenv("AUDIT_ENDPOINT")) >>> (err) { << 3 }
     if !p.adopt(first) || !p.adopt(second) { << 4 }
     p.release(first, true)
     p.release(second, true)
     if !closed(second) { << 5 }
     if copy.take() != first { << 6 }
-    late := net.dial(os.getenv("AUDIT_ENDPOINT")) or (err) { << 9 }
+    late := net.dial(os.getenv("AUDIT_ENDPOINT")) >>> (err) { << 9 }
     copy.close()
     if p.take() != -2 { << 7 }
     p.release(first, true)
@@ -833,7 +833,7 @@ fn worker(p milvus.MilvusPool, start chan int, ready chan int, done chan int) {
     ready <- 1
     _ := <-start
     for i in 0:3 {
-        result := p.search("demo", ["1"], 1) or (err) { done <- 1
+        result := p.search("demo", ["1"], 1) >>> (err) { done <- 1
             << }
     }
     done <- 0
@@ -880,7 +880,7 @@ fn main() int {
 fn main() int {{
     p := {constructor}
     for i in 0:2 {{
-        result := {call} or (err) {{ println(err.msg())
+        result := {call} >>> (err) {{ println(err.msg())
             << 1 }}
     }}
     p.close()
@@ -936,14 +936,14 @@ fn main() int {{
 #os/exec
 fn main() int {
     $cmd := exec.command("python3", "-u", "-c", "import sys,os; os.closerange(3,65536); print(sys.stdin.readline().strip(),flush=True)")
-    $input := cmd.stdin_pipe() or (err) { << 1 }
-    $output := cmd.stdout_pipe() or (err) { << 2 }
-    cmd.start() or (err) { << 3 }
-    input.write("ready\\n") or (err) { << 4 }
-    input.close() or (err) { << 5 }
-    value := output.read(64) or (err) { << 6 }
-    output.close() or (err) { << 7 }
-    cmd.wait() or (err) { << 8 }
+    $input := cmd.stdin_pipe() >>> (err) { << 1 }
+    $output := cmd.stdout_pipe() >>> (err) { << 2 }
+    cmd.start() >>> (err) { << 3 }
+    input.write("ready\\n") >>> (err) { << 4 }
+    input.close() >>> (err) { << 5 }
+    value := output.read(64) >>> (err) { << 6 }
+    output.close() >>> (err) { << 7 }
+    cmd.wait() >>> (err) { << 8 }
     if value != "ready\\n" { << 9 }
     println("start returned before child exit")
     << 0
@@ -979,9 +979,9 @@ fn main() int {
 #redis
 fn main() int {
     $c := redis.Client{fd: -1, addr: "", buf: "*3\\r\\n:7\\r\\n$$-1\\r\\n$$0\\r\\n\\r\\n"}
-    v := c.read_value() or (err) { println(err.msg())
+    v := c.read_value() >>> (err) { println(err.msg())
         << 1 }
-    v.as_strings() or (err) { println("mixed array rejected")
+    v.as_strings() >>> (err) { println("mixed array rejected")
         << 0 }
     println("mixed array silently converted")
     << 2
@@ -994,19 +994,19 @@ fn main() int {
 #redis
 fn main() int {
     $c := redis.Client{fd: -1, addr: "", buf: "%1\\r\\n+k\\r\\n*4\\r\\n:7\\r\\n_\\r\\n$$0\\r\\n\\r\\n*1\\r\\n#t\\r\\n"}
-    v := c.read_value() or (err) { println(err.msg())
+    v := c.read_value() >>> (err) { println(err.msg())
         << 1 }
     if v.typ != redis.TYPE_MAP { << 2 }
-    entries := v.elements() or (err) { << 3 }
+    entries := v.elements() >>> (err) { << 3 }
     if entries.len != 2 { << 4 }
-    key := entries[0].as_string() or (err) { << 5 }
+    key := entries[0].as_string() >>> (err) { << 5 }
     if key != "k" { << 6 }
-    items := entries[1].elements() or (err) { << 7 }
-    n := items[0].as_int() or (err) { << 8 }
-    empty := items[2].as_string() or (err) { << 9 }
+    items := entries[1].elements() >>> (err) { << 7 }
+    n := items[0].as_int() >>> (err) { << 8 }
+    empty := items[2].as_string() >>> (err) { << 9 }
     if n != 7 || !items[1].is_nil() || empty.len != 0 { << 10 }
-    nested := items[3].elements() or (err) { << 11 }
-    truth := nested[0].as_bool() or (err) { << 12 }
+    nested := items[3].elements() >>> (err) { << 11 }
+    truth := nested[0].as_bool() >>> (err) { << 12 }
     if !truth { << 13 }
     println("RESP types preserved")
     << 0
@@ -1019,7 +1019,7 @@ fn main() int {
 #redis
 fn main() int {
     $c := redis.Client{fd: -1, addr: "", buf: "$$1\\r\\nx!!"}
-    c.read_value() or (err) { println("bad CRLF rejected")
+    c.read_value() >>> (err) { println("bad CRLF rejected")
         << 0 }
     << 1
 }
@@ -1091,9 +1091,9 @@ fn main() int {
 #mongodb
 #os
 fn main() int {
-    $c := mongodb.connect(os.getenv("AUDIT_ENDPOINT")) or (err) { println(err.msg())
+    $c := mongodb.connect(os.getenv("AUDIT_ENDPOINT")) >>> (err) { println(err.msg())
         << 1 }
-    c.insert_one("test", "test", mongodb.build_doc(mongodb.bson_int32("x", 1))) or (err) {
+    c.insert_one("test", "test", mongodb.build_doc(mongodb.bson_int32("x", 1))) >>> (err) {
         println("write rejected: " + err.msg())
         c.close()
         << 0
@@ -1134,7 +1134,7 @@ fn main() int {
 #os
 fn main() int {
     c := grpc.new_client(os.getenv("AUDIT_ENDPOINT"))
-    r := c.call_unary("/test.Service/Call", "") or (err) { println(err.msg())
+    r := c.call_unary("/test.Service/Call", "") >>> (err) { println(err.msg())
         << 1 }
     if r.status != 7 || r.message != "denied" || r.payload != "abcdef" {
         println("status=" + str(r.status) + " payload=" + r.payload)
@@ -1192,7 +1192,7 @@ fn main() int {
 #os
 fn main() int {
     c := grpc.new_client(os.getenv("AUDIT_ENDPOINT"))
-    r := c.call_unary("PATH", "") or (err) { println(err.msg())
+    r := c.call_unary("PATH", "") >>> (err) { println(err.msg())
         << 0 }
     if r.status != 0 || r.payload != "abc" || r.message != "denied" { << 1 }
     println("Huffman trailers preserved")
@@ -1223,7 +1223,7 @@ fn main() int {
 #os
 fn main() {
     $c := elasticsearch.open(os.getenv("AUDIT_ENDPOINT"))
-    r := c.info() or (err) { println("rejected: " + err.msg())
+    r := c.info() >>> (err) { println("rejected: " + err.msg())
         << }
     println("body=" + r)
 }
@@ -1250,18 +1250,18 @@ fn main() {
 #net
 #os
 fn main() int {
-    fd := net.dial(os.getenv("AUDIT_ENDPOINT")) or (err) { << 1 }
+    fd := net.dial(os.getenv("AUDIT_ENDPOINT")) >>> (err) { << 1 }
     methods := ["HEAD", "POST", "GET"]
     for i in 0:3 {
         req := methods[i] + " / HTTP/1.1\\r\\nHost: test\\r\\nContent-Length: 0\\r\\n\\r\\n"
-        net.conn_write(fd, &req) or (err) { << 2 }
-        resp := http.read_response(fd, methods[i] + "") or (err) { println(err.msg())
+        net.conn_write(fd, &req) >>> (err) { << 2 }
+        resp := http.read_response(fd, methods[i] + "") >>> (err) { println(err.msg())
             << 3 }
         if i < 2 && resp.body.len != 0 { << 4 }
         if i == 1 && resp.status_code != 204 { << 5 }
         if i == 2 && resp.body != "{}" { << 6 }
     }
-    net.conn_close(fd) or (err) { << 7 }
+    net.conn_close(fd) >>> (err) { << 7 }
     println("keepalive framing preserved")
     << 0
 }
@@ -1302,7 +1302,7 @@ fn main() int {
 #os
 fn main() int {
     c := milvus.new_client(os.getenv("AUDIT_ENDPOINT"))
-    r := c.search("demo", ["0.1"], 1) or (err) { println(err.msg())
+    r := c.search("demo", ["0.1"], 1) >>> (err) { println(err.msg())
         << 1 }
     if r.hits.len != 1 || r.hits[0].id != 1 || r.hits[0].distance != "0.125" || r.hits[0].text != "actual text" {
         println("incorrect search result")
@@ -1318,13 +1318,13 @@ fn main() int {
     def test_search_results_follow_json_structure(self):
         cases = [
             ("elasticsearch", '{"value":999,"hits":{"hits":[{"_source":{"nested":{"_id":"decoy"},"text":"a\\\"b"},"_score":0.125,"_id":"actual"}],"total":{"value":42,"relation":"eq"}}}',
-             '$c := elasticsearch.open(endpoint)\n    r := c.search("test", "") or (err) { println(err.msg())\n        << 1 }\n    if r.total != 42 || r.hits.len != 1 || r.hits[0].id != "actual" || r.hits[0].score != "0.125" { << 2 }\n    println(r.hits[0].source)',
+             '$c := elasticsearch.open(endpoint)\n    r := c.search("test", "") >>> (err) { println(err.msg())\n        << 1 }\n    if r.total != 42 || r.hits.len != 1 || r.hits[0].id != "actual" || r.hits[0].score != "0.125" { << 2 }\n    println(r.hits[0].source)',
              {"nested": {"_id": "decoy"}, "text": 'a"b'}),
             ("qdrant", '{"result":[{"payload":{"nested":{"id":99},"text":"payload"},"score":1.25e-2,"id":7}]}',
-             '$c := qdrant.open(endpoint)\n    r := c.search("test", ["0.1"], 1) or (err) { println(err.msg())\n        << 1 }\n    if r.len != 1 || r[0].id != 7 || r[0].score != "1.25e-2" { << 2 }\n    println(r[0].payload_json)',
+             '$c := qdrant.open(endpoint)\n    r := c.search("test", ["0.1"], 1) >>> (err) { println(err.msg())\n        << 1 }\n    if r.len != 1 || r[0].id != 7 || r[0].score != "1.25e-2" { << 2 }\n    println(r[0].payload_json)',
              {"nested": {"id": 99}, "text": "payload"}),
             ("meilisearch", '{"estimatedTotalHits":42,"hits":[{"title":"actual title","id":7,"nested":{"id":99}}]}',
-             'c := meilisearch.client(endpoint, "")\n    r := c.search("test", "query", 1) or (err) { println(err.msg())\n        << 1 }\n    if r.total_hits != 42 || r.hits.len != 1 || r.hits[0].id != 7 || r.hits[0].title != "actual title" { << 2 }\n    println(r.hits[0].raw)',
+             'c := meilisearch.client(endpoint, "")\n    r := c.search("test", "query", 1) >>> (err) { println(err.msg())\n        << 1 }\n    if r.total_hits != 42 || r.hits.len != 1 || r.hits[0].id != 7 || r.hits[0].title != "actual title" { << 2 }\n    println(r.hits[0].raw)',
              {"title": "actual title", "id": 7, "nested": {"id": 99}}),
         ]
         for package, body_text, statements, expected in cases:
@@ -1342,9 +1342,9 @@ fn main() int {
     def test_search_query_quotes_control_characters(self):
         query = "a\n\t\"b\\c"
         cases = [
-            ("elasticsearch", '$c := elasticsearch.open(endpoint)\n    c.search_match("test", "field", "a\\n\\t\\\"b\\\\c") or (err) { println(err.msg())\n        << 1 }',
+            ("elasticsearch", '$c := elasticsearch.open(endpoint)\n    c.search_match("test", "field", "a\\n\\t\\\"b\\\\c") >>> (err) { println(err.msg())\n        << 1 }',
              {"query": {"match": {"field": query}}}, {"hits": {"hits": [], "total": 0}}),
-            ("meilisearch", 'c := meilisearch.client(endpoint, "")\n    c.search("test", "a\\n\\t\\\"b\\\\c", 1) or (err) { println(err.msg())\n        << 1 }',
+            ("meilisearch", 'c := meilisearch.client(endpoint, "")\n    c.search("test", "a\\n\\t\\\"b\\\\c", 1) >>> (err) { println(err.msg())\n        << 1 }',
              {"q": query, "limit": 1}, {"hits": [], "totalHits": 0}),
         ]
         for package, statements, expected, response in cases:

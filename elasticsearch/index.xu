@@ -4,22 +4,22 @@
 
 pub fn (c $&Client) create_index(index string, mapping_json string) bool {
     $reusable := false
-    << c.create_index_at(-1, index, mapping_json, $&reusable) or >>
+    << c.create_index_at(-1, index, mapping_json, $&reusable) >>>
 }
 
 fn (c $&Client) create_index_at(fd int, index string, mapping_json string, reusable $&bool) bool {
-    resp := c.request_at(fd, "PUT", "/" + index, mapping_json, reusable) or >>
+    resp := c.request_at(fd, "PUT", "/" + index, mapping_json, reusable) >>>
     code := resp.status_code
     << code == 200 || code == 201
 }
 
 pub fn (c $&Client) delete_index(index string) bool {
     $reusable := false
-    << c.delete_index_at(-1, index, $&reusable) or >>
+    << c.delete_index_at(-1, index, $&reusable) >>>
 }
 
 fn (c $&Client) delete_index_at(fd int, index string, reusable $&bool) bool {
-    resp := c.request_at(fd, "DELETE", "/" + index, "", reusable) or >>
+    resp := c.request_at(fd, "DELETE", "/" + index, "", reusable) >>>
     << resp.status_code == 200
 }
 
@@ -29,7 +29,7 @@ pub fn (c $&Client) index_exists(index string) bool {
 }
 
 fn (c $&Client) index_exists_at(fd int, index string, reusable $&bool) bool {
-    resp := c.request_at(fd, "GET", "/" + index, "", reusable) or (err) {
+    resp := c.request_at(fd, "GET", "/" + index, "", reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200
@@ -37,10 +37,10 @@ fn (c $&Client) index_exists_at(fd int, index string, reusable $&bool) bool {
 
 pub fn (c $&Client) refresh(index string) bool {
     $reusable := false
-    << c.refresh_at(-1, index, $&reusable) or >>
+    << c.refresh_at(-1, index, $&reusable) >>>
 }
 
 fn (c $&Client) refresh_at(fd int, index string, reusable $&bool) bool {
-    resp := c.request_at(fd, "POST", "/" + index + "/_refresh", "", reusable) or >>
+    resp := c.request_at(fd, "POST", "/" + index + "/_refresh", "", reusable) >>>
     << resp.status_code == 200
 }

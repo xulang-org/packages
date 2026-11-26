@@ -52,18 +52,18 @@ fn parse_int_or(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
 }
 
 fn (c $&Client) fill() int {
-    chunk := net.conn_read(c.fd, 4096) or (err) {
-        >> errors.new("nats: read error: " + err.msg())
+    chunk := net.conn_read(c.fd, 4096) >>> (err) {
+        >>> errors.new("nats: read error: " + err.msg())
     }
     if chunk.len == 0 {
-        >> errors.new("nats: connection closed")
+        >>> errors.new("nats: connection closed")
     }
     c.buf = c.buf + chunk
     << chunk.len
@@ -81,7 +81,7 @@ pub fn (c $&Client) read_line() string {
             }
             << line
         }
-        c.fill() or >>
+        c.fill() >>>
     }
     << ""
 }
@@ -91,7 +91,7 @@ pub fn (c $&Client) read_bytes(n int) string {
         << ""
     }
     while c.buf.len < n {
-        c.fill() or >>
+        c.fill() >>>
     }
     res := c.buf[0:n]
     if n < c.buf.len {
@@ -106,11 +106,11 @@ pub fn (c $&Client) write_raw(data string) int {
     $off := 0
     while off < data.len {
         part := data[off:data.len]
-        n := net.conn_write(c.fd, &part) or (err) {
-            >> errors.new("nats: write failed: " + err.msg())
+        n := net.conn_write(c.fd, &part) >>> (err) {
+            >>> errors.new("nats: write failed: " + err.msg())
         }
         if n <= 0 {
-            >> errors.new("nats: connection closed")
+            >>> errors.new("nats: connection closed")
         }
         off = off + n
     }
@@ -119,7 +119,7 @@ pub fn (c $&Client) write_raw(data string) int {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -130,8 +130,8 @@ pub fn connect(addr string) Client {
 }
 
 pub fn connect_auth(addr string, user string, pass string) Client {
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("nats: dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("nats: dial failed: " + err.msg())
     }
     $c := Client{
         fd: fd,
@@ -141,7 +141,7 @@ pub fn connect_auth(addr string, user string, pass string) Client {
         server_info: ""
     }
     // Read initial INFO line from NATS server
-    info_line := c.read_line() or >>
+    info_line := c.read_line() >>>
     c.server_info = info_line
 
     // Send CONNECT command
@@ -150,33 +150,33 @@ pub fn connect_auth(addr string, user string, pass string) Client {
         connect_cmd = connect_cmd + ",\"user\":\"" + user + "\",\"pass\":\"" + pass + "\""
     }
     connect_cmd = connect_cmd + "}\r\n"
-    c.write_raw(connect_cmd) or >>
+    c.write_raw(connect_cmd) >>>
 
     // Ping to verify handshake
-    c.write_raw("PING\r\n") or >>
-    pong_line := c.read_line() or >>
+    c.write_raw("PING\r\n") >>>
+    pong_line := c.read_line() >>>
     if pong_line != "PONG" {
         safe_close(c.fd)
-        >> errors.new("nats: unexpected handshake response: " + pong_line)
+        >>> errors.new("nats: unexpected handshake response: " + pong_line)
     }
     << c
 }
 
 pub fn (c $&Client) ping() bool {
-    c.write_raw("PING\r\n") or >>
-    line := c.read_line() or >>
+    c.write_raw("PING\r\n") >>>
+    line := c.read_line() >>>
     << line == "PONG"
 }
 
 pub fn (c $&Client) publish(subject string, data string) int {
     wire := "PUB " + subject + " " + str(data.len) + "\r\n" + data + "\r\n"
-    c.write_raw(wire) or >>
+    c.write_raw(wire) >>>
     << 0
 }
 
 pub fn (c $&Client) publish_request(subject string, reply_to string, data string) int {
     wire := "PUB " + subject + " " + reply_to + " " + str(data.len) + "\r\n" + data + "\r\n"
-    c.write_raw(wire) or >>
+    c.write_raw(wire) >>>
     << 0
 }
 
@@ -184,7 +184,7 @@ pub fn (c $&Client) subscribe(subject string) Subscription {
     c.next_sid = c.next_sid + 1
     sid := str(c.next_sid)
     wire := "SUB " + subject + " " + sid + "\r\n"
-    c.write_raw(wire) or >>
+    c.write_raw(wire) >>>
     << new_sub(sid, subject, "")
 }
 
@@ -192,21 +192,21 @@ pub fn (c $&Client) queue_subscribe(subject string, queue_group string) Subscrip
     c.next_sid = c.next_sid + 1
     sid := str(c.next_sid)
     wire := "SUB " + subject + " " + queue_group + " " + sid + "\r\n"
-    c.write_raw(wire) or >>
+    c.write_raw(wire) >>>
     << new_sub(sid, subject, queue_group)
 }
 
 pub fn (c $&Client) unsubscribe(sub Subscription) int {
     wire := "UNSUB " + sub.sid + "\r\n"
-    c.write_raw(wire) or >>
+    c.write_raw(wire) >>>
     << 0
 }
 
 pub fn (c $&Client) next_msg() Message {
     while true {
-        line := c.read_line() or >>
+        line := c.read_line() >>>
         if line == "PING" {
-            c.write_raw("PONG\r\n") or >>
+            c.write_raw("PONG\r\n") >>>
             ->
         }
         if line == "+OK" || line == "PONG" {
@@ -225,12 +225,12 @@ pub fn (c $&Client) next_msg() Message {
             } else if tokens.len >= 4 {
                 bytes_count = parse_int_or(tokens[3], 0)
             }
-            body := c.read_bytes(bytes_count) or >>
-            _ := c.read_bytes(2) or >> // read trailing \r\n
+            body := c.read_bytes(bytes_count) >>>
+            _ := c.read_bytes(2) >>> // read trailing \r\n
             << new_msg(subj, sid, reply_to, body)
         }
         if line.len >= 4 && line[0:4] == "-ERR" {
-            >> errors.new("nats error: " + line)
+            >>> errors.new("nats error: " + line)
         }
     }
     << new_msg("", "", "", "")
@@ -239,17 +239,17 @@ pub fn (c $&Client) next_msg() Message {
 pub fn (c $&Client) request(subject string, data string) Message {
     c.next_sid = c.next_sid + 1
     inbox := "_INBOX." + str(c.fd) + "." + str(c.next_sid)
-    sub := c.subscribe(inbox + "") or >>
-    c.publish_request(subject, inbox + "", data) or >>
+    sub := c.subscribe(inbox + "") >>>
+    c.publish_request(subject, inbox + "", data) >>>
     $target_msg := new_msg("", "", "", "")
     while true {
-        msg := c.next_msg() or >>
+        msg := c.next_msg() >>>
         if msg.subject == inbox {
             target_msg = new_msg(msg.subject + "", msg.sid + "", msg.reply_to + "", msg.data + "")
             <-
         }
     }
-    c.unsubscribe(sub) or >>
+    c.unsubscribe(sub) >>>
     << target_msg
 }
 

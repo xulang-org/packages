@@ -18,7 +18,7 @@ fn parse_int_def(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -26,7 +26,7 @@ fn parse_int_def(s string, def int) int {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -34,7 +34,7 @@ fn safe_close(fd int) {
 
 pub fn new_pusher(endpoint string, job string) Pusher {
     if strings.has_prefix(&endpoint, "https://") {
-        ep := transport.parse_endpoint(endpoint, 9091) or (err) { << Pusher{host: "127.0.0.1", port: 9091, secure: true, job: job + ""} }
+        ep := transport.parse_endpoint(endpoint, 9091) >>> (err) { << Pusher{host: "127.0.0.1", port: 9091, secure: true, job: job + ""} }
         << Pusher{host: ep.host, port: ep.port, secure: true, job: job + ""}
     }
     $ep := endpoint
@@ -75,11 +75,11 @@ pub fn (p &Pusher) push(metrics_text string) bool {
         req = req + "Connection: close\r\n\r\n" + metrics_text
         ep := transport.Endpoint{scheme: "https", host: p.host + "", port: p.port, path: "", secure: true}
         cfg := tls.new_config(p.host + "")
-        resp := transport.request_raw(ep, cfg, req, "POST") or (err) { << false }
+        resp := transport.request_raw(ep, cfg, req, "POST") >>> (err) { << false }
         << resp.status_code >= 200 && resp.status_code < 300
     }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << false }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << false }
     $reusable := false
     result := p.push_on_fd(fd, metrics_text, $&reusable)
     safe_close(fd)
@@ -102,7 +102,7 @@ fn (p &Pusher) push_on_fd(fd int, metrics_text string, reusable $&bool) bool {
     $off := 0
     while off < req.len {
         part := req[off:req.len]
-        n := net.conn_write(fd, &part) or (err) {
+        n := net.conn_write(fd, &part) >>> (err) {
             << false
         }
         if n <= 0 {
@@ -111,7 +111,7 @@ fn (p &Pusher) push_on_fd(fd int, metrics_text string, reusable $&bool) bool {
         off = off + n
     }
 
-    resp := http.read_response(fd, "POST") or (err) {
+    resp := http.read_response(fd, "POST") >>> (err) {
         << false
     }
     *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable("POST")

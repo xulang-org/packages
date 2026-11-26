@@ -74,16 +74,16 @@ pub fn (p &Pool) get() Client {
             }
         }
         else {
-            $c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
+            $c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") >>>
             << c
         }
     }
-    $c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") or >>
+    $c := connect(p.host + "", p.port, p.user + "", p.password + "", p.vhost + "") >>>
     << c
 }
 
 pub fn (p &Pool) get_conn() int {
-    $c := p.get() or (err) {
+    $c := p.get() >>> (err) {
         << -1
     }
     << c.fd
@@ -108,22 +108,22 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) declare_queue(queue_name string, durable bool) int {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.declare_queue(queue_name, durable) or (err) {
+    res := c.declare_queue(queue_name, durable) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res
 }
 
 pub fn (p &Pool) publish(exchange_name string, routing_key string, body string) int {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.publish(exchange_name, routing_key, body) or (err) {
+    res := c.publish(exchange_name, routing_key, body) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res
@@ -133,11 +133,11 @@ pub fn (p &Pool) get_message(queue_name string, auto_ack bool) string {
     $attempts := 0
     while attempts < 5 {
         attempts = attempts + 1
-        $c := p.get() or >>
+        $c := p.get() >>>
         fd := c.fd
-        res := c.get(queue_name, auto_ack) or (err) {
+        res := c.get(queue_name, auto_ack) >>> (err) {
             p.put_conn(fd)
-            >> err
+            >>> err
         }
         p.put_conn(fd)
         if res.len > 0 {
@@ -151,7 +151,7 @@ pub fn (p &Pool) get_message(queue_name string, auto_ack bool) string {
 }
 
 pub fn (p &Pool) ping() bool {
-    $c := p.get() or (err) {
+    $c := p.get() >>> (err) {
         << false
     }
     fd := c.fd

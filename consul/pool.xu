@@ -58,7 +58,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -78,7 +78,7 @@ pub fn (p &Pool) discard_conn(fd int) {
 pub fn (p &Pool) put_kv(key string, val string) bool {
     if p.secure {
         $c := p.get()
-        result := c.put_kv(key, val) or (err) { << false }
+        result := c.put_kv(key, val) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -93,16 +93,16 @@ pub fn (p &Pool) put_kv(key string, val string) bool {
 pub fn (p &Pool) get_kv(key string) string {
     if p.secure {
         $c := p.get()
-        result := c.get_kv(key) or (err) { << "" }
+        result := c.get_kv(key) >>> (err) { << "" }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("consul: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.get_kv_at(fd, key, $&reusable) or (err) {
+    result := c.get_kv_at(fd, key, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -111,7 +111,7 @@ pub fn (p &Pool) get_kv(key string) string {
 pub fn (p &Pool) delete_kv(key string) bool {
     if p.secure {
         $c := p.get()
-        result := c.delete_kv(key) or (err) { << false }
+        result := c.delete_kv(key) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -126,7 +126,7 @@ pub fn (p &Pool) delete_kv(key string) bool {
 pub fn (p &Pool) register_service(id string, name string, address string, port int) bool {
     if p.secure {
         $c := p.get()
-        result := c.register_service(id, name, address, port) or (err) { << false }
+        result := c.register_service(id, name, address, port) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -141,7 +141,7 @@ pub fn (p &Pool) register_service(id string, name string, address string, port i
 pub fn (p &Pool) deregister_service(id string) bool {
     if p.secure {
         $c := p.get()
-        result := c.deregister_service(id) or (err) { << false }
+        result := c.deregister_service(id) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -156,16 +156,16 @@ pub fn (p &Pool) deregister_service(id string) bool {
 pub fn (p &Pool) get_service(name string) string {
     if p.secure {
         $c := p.get()
-        result := c.get_service(name) or (err) { << "" }
+        result := c.get_service(name) >>> (err) { << "" }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("consul: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("consul: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.get_service_at(fd, name, $&reusable) or (err) {
+    result := c.get_service_at(fd, name, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -174,7 +174,7 @@ pub fn (p &Pool) get_service(name string) string {
 pub fn (p &Pool) ping() bool {
     if p.secure {
         $c := p.get()
-        result := c.ping() or (err) { << false }
+        result := c.ping() >>> (err) { << false }
         << result
     }
     fd := p.get_conn()

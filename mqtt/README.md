@@ -29,7 +29,7 @@ mqtt #github.com/xulang-org/packages/mqtt
 
 fn main() int {
     // 1. 连接 MQTT Broker
-    $client := mqtt.open("127.0.0.1:1883", "xu_iot_node_1") or >>
+    $client := mqtt.open("127.0.0.1:1883", "xu_iot_node_1") >>>
 
     // 2. 心跳探测
     if client.ping() {
@@ -37,13 +37,13 @@ fn main() int {
     }
 
     // 3. 订阅主题
-    client.subscribe("sensor/temperature", 0) or >>
+    client.subscribe("sensor/temperature", 0) >>>
 
     // 4. 发布遥测数据 (QoS 0)
-    client.publish("sensor/temperature", "{\"temp\": 23.5, \"unit\": \"C\"}", 0) or >>
+    client.publish("sensor/temperature", "{\"temp\": 23.5, \"unit\": \"C\"}", 0) >>>
 
     // 5. 发布重要控制指令 (QoS 1，带 PUBACK 确认)
-    client.publish("device/command", "{\"action\": \"reboot\"}", 1) or >>
+    client.publish("device/command", "{\"action\": \"reboot\"}", 1) >>>
 
     // 6. 优雅断开
     client.disconnect()

@@ -28,21 +28,21 @@ require:
 memcached #github.com/xulang-org/packages/memcached
 
 fn main() int {
-    $mc := memcached.open("127.0.0.1:11211") or >>
+    $mc := memcached.open("127.0.0.1:11211") >>>
 
     // 1. 设置与读取
-    mc.set("user:token", "xyz_token_value", 0, 3600) or >>
-    tok := mc.get("user:token") or >>
+    mc.set("user:token", "xyz_token_value", 0, 3600) >>>
+    tok := mc.get("user:token") >>>
     println("Token: " + tok)
 
     // 2. 原子计数
-    mc.set("counter", "100", 0, 0) or >>
-    new_val := mc.incr("counter", 5) or >> // 105
+    mc.set("counter", "100", 0, 0) >>>
+    new_val := mc.incr("counter", 5) >>> // 105
 
     // 3. 连接池
     pool := memcached.new_pool("127.0.0.1:11211", 5)
-    $conn := pool.get() or >>
-    ver := conn.version() or >>
+    $conn := pool.get() >>>
+    ver := conn.version() >>>
     pool.put(conn)
 
     mc.close()

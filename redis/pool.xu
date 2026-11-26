@@ -13,7 +13,7 @@ pub struct Pool {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -53,17 +53,17 @@ pub fn (p &Pool) get() Client {
             << Client{fd: fd, buf: "", addr: p.addr}
         }
         else {
-            $c := dial(p.addr) or >>
+            $c := dial(p.addr) >>>
             if p.auth.len > 0 {
-                c.auth(p.auth) or >>
+                c.auth(p.auth) >>>
             }
             if p.db > 0 {
-                c.select_db(p.db) or >>
+                c.select_db(p.db) >>>
             }
             << c
         }
     }
-    $c := dial(p.addr) or >>
+    $c := dial(p.addr) >>>
     << c
 }
 

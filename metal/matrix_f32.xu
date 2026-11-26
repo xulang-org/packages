@@ -9,46 +9,46 @@ pub struct F32Matrix { handle int }
 pub struct F32Snapshot { handle int }
 
 pub fn (d &Device) supports_f32_gemm() bool {
-    value := checked(metal_native.device_info(d.handle, 7)) or >>
+    value := checked(metal_native.device_info(d.handle, 7)) >>>
     << value == 1
 }
-pub fn (d &Device) matrix_kernel_count() int { << checked(metal_native.device_info(d.handle, 5)) or >> }
-pub fn (d &Device) matrix_cache_size() int { << checked(metal_native.device_info(d.handle, 6)) or >> }
+pub fn (d &Device) matrix_kernel_count() int { << checked(metal_native.device_info(d.handle, 5)) >>> }
+pub fn (d &Device) matrix_cache_size() int { << checked(metal_native.device_info(d.handle, 6)) >>> }
 
 // Row-major logical shape; MPS row padding is owned by the runtime.
 // Dimensions <=16384; at most 16777216 logical elements per matrix.
 pub fn (d &Device) matrix_f32(rows int, columns int) F32Matrix {
-    handle := checked(metal_native.matrix_f32_new(d.handle, rows, columns)) or >>
+    handle := checked(metal_native.matrix_f32_new(d.handle, rows, columns)) >>>
     << F32Matrix{handle: handle}
 }
-pub fn (m &F32Matrix) rows() int { << checked(metal_native.matrix_f32_info(m.handle, 1)) or >> }
-pub fn (m &F32Matrix) columns() int { << checked(metal_native.matrix_f32_info(m.handle, 2)) or >> }
-pub fn (m &F32Matrix) row_bytes() int { << checked(metal_native.matrix_f32_info(m.handle, 3)) or >> }
+pub fn (m &F32Matrix) rows() int { << checked(metal_native.matrix_f32_info(m.handle, 1)) >>> }
+pub fn (m &F32Matrix) columns() int { << checked(metal_native.matrix_f32_info(m.handle, 2)) >>> }
+pub fn (m &F32Matrix) row_bytes() int { << checked(metal_native.matrix_f32_info(m.handle, 3)) >>> }
 
 // Exact storage transfer, including NaN payloads. Rejects noncanonical upper
 // bits and mismatched lengths before any write; storage is never retained.
 pub fn (m $&F32Matrix) write_bits(values &[]int) int {
-    << checked(metal_native.matrix_f32_write(m.handle, values)) or >>
+    << checked(metal_native.matrix_f32_write(m.handle, values)) >>>
 }
 pub fn (m &F32Matrix) snapshot() F32Snapshot {
-    handle := checked(metal_native.matrix_f32_snapshot(m.handle)) or >>
+    handle := checked(metal_native.matrix_f32_snapshot(m.handle)) >>>
     << F32Snapshot{handle: handle}
 }
 pub fn (m &F32Matrix) bits() []int {
-    count := checked(metal_native.matrix_f32_info(m.handle, 4)) or >>
+    count := checked(metal_native.matrix_f32_info(m.handle, 4)) >>>
     $out := []int{}
     for i in 0:count { out.push(0) }
-    m.copy_bits($&out) or >>
+    m.copy_bits($&out) >>>
     << out
 }
 // Synchronous read into existing elements, without a temporary Snapshot.
 // Wait first; rejected reads leave all destination elements unchanged.
 pub fn (m &F32Matrix) copy_bits(out $&[]int) int {
-    << checked(metal_native.matrix_f32_copy(m.handle, out)) or >>
+    << checked(metal_native.matrix_f32_copy(m.handle, out)) >>>
 }
 pub fn (m $&F32Matrix) close() int {
     if m.handle == 0 { << 0 }
-    checked(metal_native.matrix_f32_close(m.handle)) or >>
+    checked(metal_native.matrix_f32_close(m.handle)) >>>
     m.handle = 0
     << 0
 }
@@ -57,20 +57,20 @@ fn (m $&F32Matrix) drop() {
 }
 
 pub fn (s &F32Snapshot) bits() []int {
-    bytes := checked(metal_native.snapshot_len(s.handle)) or >>
-    if (bytes & 3) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not a binary32 matrix") }
+    bytes := checked(metal_native.snapshot_len(s.handle)) >>>
+    if (bytes & 3) != 0 { >>> errors.code(BOUNDS, "metal: snapshot is not a binary32 matrix") }
     $out := []int{}
     for i in 0:bytes/4 { out.push(0) }
-    s.copy_bits($&out) or >>
+    s.copy_bits($&out) >>>
     << out
 }
 // Writes existing elements only; trailing destination elements stay intact.
 pub fn (s &F32Snapshot) copy_bits(out $&[]int) int {
-    << checked(metal_native.snapshot_f32_copy(s.handle, out)) or >>
+    << checked(metal_native.snapshot_f32_copy(s.handle, out)) >>>
 }
 pub fn (s $&F32Snapshot) close() int {
     if s.handle == 0 { << 0 }
-    checked(metal_native.snapshot_close(s.handle)) or >>
+    checked(metal_native.snapshot_close(s.handle)) >>>
     s.handle = 0
     << 0
 }
@@ -84,6 +84,6 @@ fn (s $&F32Snapshot) drop() {
 // are rejected before dispatch. Results may overflow/underflow in binary32.
 // Storage transfer above preserves all bits, without f64 narrowing.
 pub fn gemm_f32(dst $&F32Matrix, a &F32Matrix, b &F32Matrix) Fence {
-    handle := checked(metal_native.gemm_f32(dst.handle, a.handle, b.handle)) or >>
+    handle := checked(metal_native.gemm_f32(dst.handle, a.handle, b.handle)) >>>
     << Fence{handle: handle}
 }

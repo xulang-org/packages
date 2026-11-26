@@ -30,7 +30,7 @@ fn main() int {
     }
 
     // Search nearest neighbors
-    results := client.search("products", ["0.04", "0.60", "0.75", "0.70"], 3) or (err) {
+    results := client.search("products", ["0.04", "0.60", "0.75", "0.70"], 3) >>> (err) {
         println(err.msg())
         << 1
     }

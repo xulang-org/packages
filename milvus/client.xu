@@ -18,7 +18,7 @@ pub struct MilvusClient {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -28,10 +28,10 @@ fn write_all(fd int, data string) bool {
     $off := 0
     while off < data.len {
         part := data[off:data.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("milvus write error: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("milvus write error: " + err.msg())
         }
-        if n <= 0 { >> errors.new("milvus: connection closed during write") }
+        if n <= 0 { >>> errors.new("milvus: connection closed during write") }
         off = off + n
     }
     << true
@@ -41,7 +41,7 @@ fn parse_int_def(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -49,7 +49,7 @@ fn parse_int_def(s string, def int) int {
 
 pub fn new_client(endpoint string) MilvusClient {
     if strings.has_prefix(&endpoint, "https://") {
-        ep := transport.parse_endpoint(endpoint, 19530) or (err) {
+        ep := transport.parse_endpoint(endpoint, 19530) >>> (err) {
             << MilvusClient{host: "127.0.0.1", port: 19530, secure: true, token: ""}
         }
         << MilvusClient{host: ep.host, port: ep.port, secure: true, token: ""}
@@ -83,8 +83,8 @@ pub fn new_client(endpoint string) MilvusClient {
 
 pub fn (c MilvusClient) connect() int {
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("milvus dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("milvus dial failed: " + err.msg())
     }
     << fd
 }
@@ -92,7 +92,7 @@ pub fn (c MilvusClient) connect() int {
 // Executes HTTP/1.1 REST v2 request on an established socket
 pub fn (c MilvusClient) do_request_on_fd(fd int, method string, path string, body string) string {
     $reusable := false
-    << c.request_on_fd(fd, method, path, body, $&reusable) or >>
+    << c.request_on_fd(fd, method, path, body, $&reusable) >>>
 }
 
 fn (c MilvusClient) request_on_fd(fd int, method string, path string, body string, reusable $&bool) string {
@@ -106,11 +106,11 @@ fn (c MilvusClient) request_on_fd(fd int, method string, path string, body strin
     req = req + "Connection: keep-alive\r\n\r\n"
     req = req + body
 
-    write_all(fd, req) or >>
+    write_all(fd, req) >>>
 
-    resp := http.read_response(fd, method + "") or >>
+    resp := http.read_response(fd, method + "") >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body)
+        >>> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body)
     }
     *reusable = resp.reusable(method)
     << resp.body
@@ -127,14 +127,14 @@ pub fn (c MilvusClient) do_request(method string, path string, body string) stri
         req = req + "Connection: close\r\n\r\n" + body
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
-        resp := transport.request_raw(ep, cfg, req, method + "") or >>
-        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body) }
+        resp := transport.request_raw(ep, cfg, req, method + "") >>>
+        if resp.status_code < 200 || resp.status_code >= 300 { >>> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body) }
         << resp.body
     }
-    fd := c.connect() or >>
-    res := c.do_request_on_fd(fd, method, path, body) or (err) {
+    fd := c.connect() >>>
+    res := c.do_request_on_fd(fd, method, path, body) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     safe_close(fd)
     << res
@@ -143,15 +143,15 @@ pub fn (c MilvusClient) do_request(method string, path string, body string) stri
 fn (c MilvusClient) request_at(fd int, method string, path string, body string, reusable $&bool) string {
     if c.secure {
         *reusable = false
-        << c.do_request(method, path, body) or >>
+        << c.do_request(method, path, body) >>>
     }
-    if fd < 0 { << c.do_request(method, path, body) or >> }
-    << c.request_on_fd(fd, method, path, body, reusable) or >>
+    if fd < 0 { << c.do_request(method, path, body) >>> }
+    << c.request_on_fd(fd, method, path, body, reusable) >>>
 }
 
 pub fn (c MilvusClient) create_collection(cfg CollectionConfig) bool {
     $reusable := false
-    << c.create_collection_at(-1, cfg, $&reusable) or >>
+    << c.create_collection_at(-1, cfg, $&reusable) >>>
 }
 
 fn (c MilvusClient) create_collection_at(fd int, cfg CollectionConfig, reusable $&bool) bool {
@@ -160,25 +160,25 @@ fn (c MilvusClient) create_collection_at(fd int, cfg CollectionConfig, reusable 
         m_type = "COSINE"
     }
     body := "{\"collectionName\":\"" + cfg.name + "\",\"dimension\":" + str(cfg.dimension) + ",\"metricType\":\"" + m_type + "\"}"
-    resp := c.request_at(fd, "POST", "/v2/vectordb/collections/create", body, reusable) or >>
+    resp := c.request_at(fd, "POST", "/v2/vectordb/collections/create", body, reusable) >>>
     // Status 0 indicates success in Milvus REST v2
     << strings.index_of(&resp, "\"code\":0") >= 0 || strings.index_of(&resp, "{}") >= 0
 }
 
 pub fn (c MilvusClient) drop_collection(name string) bool {
     $reusable := false
-    << c.drop_collection_at(-1, name, $&reusable) or >>
+    << c.drop_collection_at(-1, name, $&reusable) >>>
 }
 
 fn (c MilvusClient) drop_collection_at(fd int, name string, reusable $&bool) bool {
     body := "{\"collectionName\":\"" + name + "\"}"
-    resp := c.request_at(fd, "POST", "/v2/vectordb/collections/drop", body, reusable) or >>
+    resp := c.request_at(fd, "POST", "/v2/vectordb/collections/drop", body, reusable) >>>
     << strings.index_of(&resp, "\"code\":0") >= 0 || strings.index_of(&resp, "{}") >= 0
 }
 
 pub fn (c MilvusClient) insert(collection string, entities []VectorEntity) bool {
     $reusable := false
-    << c.insert_at(-1, collection, entities, $&reusable) or >>
+    << c.insert_at(-1, collection, entities, $&reusable) >>>
 }
 
 fn (c MilvusClient) insert_at(fd int, collection string, entities []VectorEntity, reusable $&bool) bool {
@@ -205,13 +205,13 @@ fn (c MilvusClient) insert_at(fd int, collection string, entities []VectorEntity
     data_json = data_json + "]"
 
     body := "{\"collectionName\":\"" + collection + "\",\"data\":" + data_json + "}"
-    resp := c.request_at(fd, "POST", "/v2/vectordb/entities/insert", body, reusable) or >>
+    resp := c.request_at(fd, "POST", "/v2/vectordb/entities/insert", body, reusable) >>>
     << strings.index_of(&resp, "\"insertCount\"") >= 0 || strings.index_of(&resp, "\"code\":0") >= 0
 }
 
 pub fn (c MilvusClient) search(collection string, query_vec []string, limit int) SearchResult {
     $reusable := false
-    << c.search_at(-1, collection, query_vec, limit, $&reusable) or >>
+    << c.search_at(-1, collection, query_vec, limit, $&reusable) >>>
 }
 
 fn (c MilvusClient) search_at(fd int, collection string, query_vec []string, limit int, reusable $&bool) SearchResult {
@@ -227,27 +227,27 @@ fn (c MilvusClient) search_at(fd int, collection string, query_vec []string, lim
     vec_str = vec_str + "]"
 
     body := "{\"collectionName\":\"" + collection + "\",\"data\":[" + vec_str + "],\"limit\":" + str(limit) + ",\"outputFields\":[\"id\",\"text\"]}"
-    resp := c.request_at(fd, "POST", "/v2/vectordb/entities/search", body, reusable) or >>
+    resp := c.request_at(fd, "POST", "/v2/vectordb/entities/search", body, reusable) >>>
 
     d := json.parse(&resp)
-    if !d.ok() { >> errors.new("milvus: invalid JSON: " + d.error()) }
+    if !d.ok() { >>> errors.new("milvus: invalid JSON: " + d.error()) }
     code := d.get(d.root(), "code")
-    if code < 0 || !d.is_number(code) || d.text(code) != "0" { >> errors.new("milvus: service error: " + resp) }
+    if code < 0 || !d.is_number(code) || d.text(code) != "0" { >>> errors.new("milvus: service error: " + resp) }
     data := d.get(d.root(), "data")
-    if data < 0 || !d.is_list(data) { >> errors.new("milvus: missing search data") }
+    if data < 0 || !d.is_list(data) { >>> errors.new("milvus: missing search data") }
     $hits := []SearchHit{}
     for i in 0:d.count(data) {
         hit := d.at(data, i)
-        if !d.is_dict(hit) { >> errors.new("milvus: invalid search hit") }
+        if !d.is_dict(hit) { >>> errors.new("milvus: invalid search hit") }
         id := d.get(hit, "id")
         distance := d.get(hit, "distance")
         text := d.get(hit, "text")
-        if id < 0 || !d.is_number(id) { >> errors.new("milvus: this API requires integer ids") }
-        if distance < 0 || !d.is_number(distance) { >> errors.new("milvus: missing hit distance") }
+        if id < 0 || !d.is_number(id) { >>> errors.new("milvus: this API requires integer ids") }
+        if distance < 0 || !d.is_number(distance) { >>> errors.new("milvus: missing hit distance") }
         id_text := d.text(id)
-        hid := strconv.atoi(&id_text) or >>
+        hid := strconv.atoi(&id_text) >>>
         $content := ""
-        if text >= 0 && !d.is_null(text) { content = d.as_string(text) or >> }
+        if text >= 0 && !d.is_null(text) { content = d.as_string(text) >>> }
         hits.push(SearchHit{id: hid, distance: d.text(distance), text: content})
     }
     << SearchResult{hits: hits}

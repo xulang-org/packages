@@ -22,7 +22,7 @@ fn parse_int_def(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -30,7 +30,7 @@ fn parse_int_def(s string, def int) int {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -40,7 +40,7 @@ pub fn new_client(endpoint string, user string, pass string, db string) Neo4jCli
     $secure := false
     if strings.has_prefix(&endpoint, "https://") {
         secure = true
-        ep0 := transport.parse_endpoint(endpoint, 7474) or (err) {
+        ep0 := transport.parse_endpoint(endpoint, 7474) >>> (err) {
             << Neo4jClient{host: "127.0.0.1", port: 7474, secure: true, user: user, password: pass, database: "neo4j", auth_header: "Basic " + base64.encode_to_string(user + ":" + pass)}
         }
         $database0 := db
@@ -131,20 +131,20 @@ pub fn (c Neo4jClient) execute(stmt string) string {
         req = req + "Connection: close\r\n\r\n" + payload
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
-        resp := transport.request_raw(ep, cfg, req, "POST") or >>
-        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("neo4j: HTTP status " + str(resp.status_code) + ": " + resp.body) }
+        resp := transport.request_raw(ep, cfg, req, "POST") >>>
+        if resp.status_code < 200 || resp.status_code >= 300 { >>> errors.new("neo4j: HTTP status " + str(resp.status_code) + ": " + resp.body) }
         needle := "\"errors\":["
         pos := strings.index_of(&resp.body, needle + "")
-        if pos >= 0 && pos + needle.len < resp.body.len && (resp.body[pos + needle.len] & 255) != 93 { >> errors.new("neo4j cypher error: " + resp.body) }
+        if pos >= 0 && pos + needle.len < resp.body.len && (resp.body[pos + needle.len] & 255) != 93 { >>> errors.new("neo4j cypher error: " + resp.body) }
         << resp.body
     }
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("neo4j dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("neo4j dial failed: " + err.msg())
     }
-    res := c.execute_on_fd(fd, stmt, false) or (err) {
+    res := c.execute_on_fd(fd, stmt, false) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     safe_close(fd)
     << res
@@ -152,7 +152,7 @@ pub fn (c Neo4jClient) execute(stmt string) string {
 
 pub fn (c Neo4jClient) execute_on_fd(fd int, stmt string, keep_alive bool) string {
     $reusable := false
-    << c.execute_response(fd, stmt, keep_alive, $&reusable) or >>
+    << c.execute_response(fd, stmt, keep_alive, $&reusable) >>>
 }
 
 fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusable $&bool) string {
@@ -176,16 +176,16 @@ fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusab
     $off := 0
     while off < req.len {
         part := req[off:req.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("neo4j write failed: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("neo4j write failed: " + err.msg())
         }
-        if n <= 0 { >> errors.new("neo4j: connection closed during write") }
+        if n <= 0 { >>> errors.new("neo4j: connection closed during write") }
         off = off + n
     }
 
-    resp := http.read_response(fd, "POST") or >>
+    resp := http.read_response(fd, "POST") >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >> errors.new("neo4j: HTTP status " + str(resp.status_code) + ": " + resp.body)
+        >>> errors.new("neo4j: HTTP status " + str(resp.status_code) + ": " + resp.body)
     }
     body := resp.body
 
@@ -202,7 +202,7 @@ fn (c Neo4jClient) execute_response(fd int, stmt string, keep_alive bool, reusab
     }
     if err_pos >= 0 && err_pos < body.len {
         if (body[err_pos] & 255) != 93 { // not ']'
-            >> errors.new("neo4j cypher error: " + body)
+            >>> errors.new("neo4j cypher error: " + body)
         }
     }
 

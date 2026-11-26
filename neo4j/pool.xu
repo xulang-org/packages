@@ -50,7 +50,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.client.host + ":" + str(p.client.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -73,14 +73,14 @@ pub fn open_pool(endpoint string, user string, pass string, db string, max_idle 
 
 pub fn (p &Pool) execute(stmt string) string {
     if p.client.secure {
-        << p.client.execute(stmt) or >>
+        << p.client.execute(stmt) >>>
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("neo4j: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("neo4j: pool closed or dial failed") }
     $reusable := false
-    result := p.client.execute_response(fd, stmt, true, $&reusable) or (err) {
+    result := p.client.execute_response(fd, stmt, true, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result

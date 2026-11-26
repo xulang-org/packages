@@ -18,7 +18,7 @@ pub struct Pool {
 
 pub fn new_pool(endpoint string, max_idle int) Pool {
     if strings.has_prefix(&endpoint, "https://") {
-        ep := transport.parse_endpoint(endpoint, 9091) or (err) {
+        ep := transport.parse_endpoint(endpoint, 9091) >>> (err) {
             << Pool{host: "127.0.0.1", port: 9091, secure: true, state: pool.new_state(), max_idle: max_idle}
         }
         $cap_val0 := max_idle
@@ -81,7 +81,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }

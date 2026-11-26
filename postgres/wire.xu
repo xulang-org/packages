@@ -26,10 +26,10 @@ fn wire_from_qr(qr QueryResult) WireResult {
 }
 
 pub fn query_sql(dsn string, q string) WireResult {
-    cfg := parse_dsn(dsn) or (err) {
+    cfg := parse_dsn(dsn) >>> (err) {
         << wire_fail(err.msg())
     }
-    fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
+    fd := net.dial(cfg.host + ":" + str(cfg.port)) >>> (err) {
         << wire_fail(err.msg())
     }
     serr := startup(fd, &cfg)
@@ -43,10 +43,10 @@ pub fn query_sql(dsn string, q string) WireResult {
 }
 
 pub fn exec_sql(dsn string, q string) WireResult {
-    cfg := parse_dsn(dsn) or (err) {
+    cfg := parse_dsn(dsn) >>> (err) {
         << wire_fail(err.msg())
     }
-    fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
+    fd := net.dial(cfg.host + ":" + str(cfg.port)) >>> (err) {
         << wire_fail(err.msg())
     }
     serr := startup(fd, &cfg)

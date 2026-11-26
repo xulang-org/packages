@@ -36,7 +36,7 @@ pub fn (p &Pool) get_conn() int {
             }
         }
         else {
-            fd := p.client.connect() or (err) {
+            fd := p.client.connect() >>> (err) {
                 << -1
             }
             << fd
@@ -60,7 +60,7 @@ pub fn (p &Pool) put_conn(fd int) {
 }
 
 pub fn (p &Pool) call_unary(path string, req_bytes string) Response {
-    << p.client.call_unary(path, req_bytes) or >>
+    << p.client.call_unary(path, req_bytes) >>>
 }
 
 pub fn (p &Pool) close() {

@@ -18,7 +18,7 @@ websocket #github.com/xulang-org/packages/websocket
 $p := websocket.pool("ws://127.0.0.1:8080/ws", 5)
 
 // 借还连接并发送文本消息
-echoed := p.echo_text("Hello WebSocket!") or panic
+echoed := p.echo_text("Hello WebSocket!") >>>
 
 // 关闭连接池
 p.close()

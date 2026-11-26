@@ -25,7 +25,7 @@ fn parse_int_def(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -33,7 +33,7 @@ fn parse_int_def(s string, def int) int {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -41,7 +41,7 @@ fn safe_close(fd int) {
 
 pub fn new_client(endpoint string) Client {
     if strings.has_prefix(&endpoint, "https://") {
-        ep := transport.parse_endpoint(endpoint, 8000) or (err) {
+        ep := transport.parse_endpoint(endpoint, 8000) >>> (err) {
             << Client{host: "127.0.0.1", port: 8000, secure: true, tenant: "default_tenant", database: "default_database"}
         }
         << Client{host: ep.host, port: ep.port, secure: true, tenant: "default_tenant", database: "default_database"}
@@ -90,15 +90,15 @@ pub fn (c Client) request(method string, path string, body string) Response {
         if body.len > 0 { req = req + body }
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
-        resp := transport.request_raw(ep, cfg, req, method + "") or >>
+        resp := transport.request_raw(ep, cfg, req, method + "") >>>
         << Response{status_code: resp.status_code, headers: resp.headers, body: resp.body}
     }
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { >> err }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { >>> err }
     $reusable := false
-    result := c.request_on_fd(fd, method, path, body, $&reusable) or (err) {
+    result := c.request_on_fd(fd, method, path, body, $&reusable) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     safe_close(fd)
     << result
@@ -117,16 +117,16 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
     $off := 0
     while off < req.len {
         part := req[off:req.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("chroma write failed: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("chroma write failed: " + err.msg())
         }
         if n <= 0 {
-            >> errors.new("chroma: connection closed during write") }
+            >>> errors.new("chroma: connection closed during write") }
         off = off + n
     }
 
-    resp := http.read_response(fd, method + "") or (err) {
-        >> err
+    resp := http.read_response(fd, method + "") >>> (err) {
+        >>> err
     }
     *reusable = resp.reusable(method) && resp.status_code >= 200 && resp.status_code < 300
     << Response{status_code: resp.status_code, headers: resp.headers, body: resp.body}
@@ -136,33 +136,33 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
 fn (c Client) request_at(fd int, method string, path string, body string, reusable $&bool) Response {
     if c.secure {
         *reusable = false
-        << c.request(method, path, body) or >>
+        << c.request(method, path, body) >>>
     }
-    if fd < 0 { << c.request(method, path, body) or >> }
-    << c.request_on_fd(fd, method, path, body, reusable) or >>
+    if fd < 0 { << c.request(method, path, body) >>> }
+    << c.request_on_fd(fd, method, path, body, reusable) >>>
 }
 
 pub fn (c Client) heartbeat() bool {
     $reusable := false
-    result := c.heartbeat_at(-1, $&reusable) or (err) { << false }
+    result := c.heartbeat_at(-1, $&reusable) >>> (err) { << false }
     << result
 }
 
 fn (c Client) heartbeat_at(fd int, reusable $&bool) bool {
-    resp := c.request_at(fd, "GET", "/api/v1/heartbeat", "", reusable) or >>
+    resp := c.request_at(fd, "GET", "/api/v1/heartbeat", "", reusable) >>>
     << resp.status_code == 200
 }
 
 pub fn (c Client) create_collection(name string) string {
     $reusable := false
-    << c.create_collection_at(-1, name, $&reusable) or >>
+    << c.create_collection_at(-1, name, $&reusable) >>>
 }
 
 fn (c Client) create_collection_at(fd int, name string, reusable $&bool) string {
     body := "{\"name\":\"" + name + "\"}"
-    resp := c.request_at(fd, "POST", "/api/v1/collections", body, reusable) or >>
+    resp := c.request_at(fd, "POST", "/api/v1/collections", body, reusable) >>>
     if resp.status_code != 200 && resp.status_code != 201 {
-        >> errors.new("chroma: create_collection failed (" + str(resp.status_code) + "): " + resp.body)
+        >>> errors.new("chroma: create_collection failed (" + str(resp.status_code) + "): " + resp.body)
     }
     // Extract "id" from {"name":"...","id":"uuid",...}
     needle := "\"id\":\""
@@ -194,7 +194,7 @@ fn (c Client) create_collection_at(fd int, name string, reusable $&bool) string 
 
 pub fn (c Client) add(col_id string, ids_json string, embeddings_json string, documents_json string) bool {
     $reusable := false
-    result := c.add_at(-1, col_id, ids_json, embeddings_json, documents_json, $&reusable) or (err) { << false }
+    result := c.add_at(-1, col_id, ids_json, embeddings_json, documents_json, $&reusable) >>> (err) { << false }
     << result
 }
 
@@ -205,33 +205,33 @@ fn (c Client) add_at(fd int, col_id string, ids_json string, embeddings_json str
     }
     body = body + "}"
     path := "/api/v1/collections/" + col_id + "/add"
-    resp := c.request_at(fd, "POST", path, body, reusable) or >>
+    resp := c.request_at(fd, "POST", path, body, reusable) >>>
     << resp.status_code == 200 || resp.status_code == 201
 }
 
 pub fn (c Client) query(col_id string, query_embeddings_json string, n_results int) string {
     $reusable := false
-    << c.query_at(-1, col_id, query_embeddings_json, n_results, $&reusable) or >>
+    << c.query_at(-1, col_id, query_embeddings_json, n_results, $&reusable) >>>
 }
 
 fn (c Client) query_at(fd int, col_id string, query_embeddings_json string, n_results int, reusable $&bool) string {
     body := "{\"query_embeddings\":" + query_embeddings_json + ",\"n_results\":" + str(n_results) + "}"
     path := "/api/v1/collections/" + col_id + "/query"
-    resp := c.request_at(fd, "POST", path, body, reusable) or >>
+    resp := c.request_at(fd, "POST", path, body, reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("chroma: query failed (" + str(resp.status_code) + "): " + resp.body)
+        >>> errors.new("chroma: query failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << resp.body
 }
 
 pub fn (c Client) delete_collection(name string) bool {
     $reusable := false
-    result := c.delete_collection_at(-1, name, $&reusable) or (err) { << false }
+    result := c.delete_collection_at(-1, name, $&reusable) >>> (err) { << false }
     << result
 }
 
 fn (c Client) delete_collection_at(fd int, name string, reusable $&bool) bool {
     path := "/api/v1/collections/" + name
-    resp := c.request_at(fd, "DELETE", path, "", reusable) or >>
+    resp := c.request_at(fd, "DELETE", path, "", reusable) >>>
     << resp.status_code == 200
 }

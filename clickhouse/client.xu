@@ -25,7 +25,7 @@ fn parse_int_def(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -33,7 +33,7 @@ fn parse_int_def(s string, def int) int {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -70,7 +70,7 @@ fn parse_endpoint(raw string) []string {
 
 pub fn new_client(endpoint string, user string, password string, database string) Client {
     if strings.has_prefix(&endpoint, "https://") {
-        ep := transport.parse_endpoint(endpoint, 8123) or (err) {
+        ep := transport.parse_endpoint(endpoint, 8123) >>> (err) {
             << Client{host: "127.0.0.1", port: 8123, secure: true, user: user, password: password, database: database}
         }
         $u := user
@@ -170,15 +170,15 @@ pub fn (c $&Client) request(sql_query string) Response {
         if sql_query.len > 0 { req = req + sql_query }
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
-        resp := transport.request_raw(ep, cfg, req, "POST") or >>
+        resp := transport.request_raw(ep, cfg, req, "POST") >>>
         << Response{status_code: resp.status_code, body: resp.body}
     }
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { >> err }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { >>> err }
     $reusable := false
-    result := c.request_on_fd(fd, sql_query, $&reusable) or (err) {
+    result := c.request_on_fd(fd, sql_query, $&reusable) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     safe_close(fd)
     << result
@@ -206,16 +206,16 @@ fn (c $&Client) request_on_fd(fd int, sql_query string, reusable $&bool) Respons
     $off := 0
     while off < req.len {
         part := req[off:req.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("clickhouse: write failed: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("clickhouse: write failed: " + err.msg())
         }
         if n <= 0 {
-            >> errors.new("clickhouse: connection closed during write") }
+            >>> errors.new("clickhouse: connection closed during write") }
         off = off + n
     }
 
-    resp := http.read_response(fd, "POST") or (err) {
-        >> err
+    resp := http.read_response(fd, "POST") >>> (err) {
+        >>> err
     }
     *reusable = resp.reusable("POST") && resp.status_code >= 200 && resp.status_code < 300
     << Response{status_code: resp.status_code, body: resp.body}
@@ -223,6 +223,6 @@ fn (c $&Client) request_on_fd(fd int, sql_query string, reusable $&bool) Respons
 }
 
 fn (c $&Client) request_at(fd int, sql_query string, reusable $&bool) Response {
-    if fd < 0 { << c.request(sql_query) or >> }
-    << c.request_on_fd(fd, sql_query, reusable) or >>
+    if fd < 0 { << c.request(sql_query) >>> }
+    << c.request_on_fd(fd, sql_query, reusable) >>>
 }

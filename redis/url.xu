@@ -25,7 +25,7 @@ fn parse_int_def(s &string, def int) int {
     if s.len == 0 {
         << def
     }
-    v := parse_int(*s) or (err) {
+    v := parse_int(*s) >>> (err) {
         << def
     }
     << v

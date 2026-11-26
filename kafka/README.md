@@ -17,7 +17,7 @@
 kafka #github.com/xulang-org/packages/kafka
 
 fn main() {
-    $client := kafka.open("127.0.0.1:9092") or (err) {
+    $client := kafka.open("127.0.0.1:9092") >>> (err) {
         println("Connect failed: " + err.msg())
         <<
     }
@@ -29,7 +29,7 @@ fn main() {
 
     // 2. 生产消息
     topic := "xu-events"
-    offset := client.produce(topic, 0, "Hello Kafka from Xu!") or (err) {
+    offset := client.produce(topic, 0, "Hello Kafka from Xu!") >>> (err) {
         println("Produce failed: " + err.msg())
         client.close()
         <<
@@ -55,7 +55,7 @@ fn main() {
     pool := kafka.open_pool_client("127.0.0.1:9092", "my-app", 5)
 
     // 从连接池获取客户端实例
-    $client := pool.get() or (err) {
+    $client := pool.get() >>> (err) {
         println("Pool get failed: " + err.msg())
         <<
     }

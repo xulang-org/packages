@@ -27,31 +27,31 @@ fn main() {
     $client := etcd.open("http://127.0.0.1:2379")
 
     // 1. 写入配置
-    client.put("/config/app/title", "Xu High-Performance Service") or (err) {
+    client.put("/config/app/title", "Xu High-Performance Service") >>> (err) {
         println("写入失败: " + err.msg())
         <<
     }
 
     // 2. 读取配置
-    val := client.get("/config/app/title") or (err) {
+    val := client.get("/config/app/title") >>> (err) {
         println("读取失败: " + err.msg())
         <<
     }
     println("配置值: " + val)
 
     // 3. 创建 30 秒分布式租约
-    lease_id := client.lease_grant(30) or (err) {
+    lease_id := client.lease_grant(30) >>> (err) {
         println("申请租约失败: " + err.msg())
         <<
     }
-    client.put_with_lease("/services/node-1", "127.0.0.1:8080", lease_id) or (err) {
+    client.put_with_lease("/services/node-1", "127.0.0.1:8080", lease_id) >>> (err) {
         println("服务注册失败: " + err.msg())
         <<
     }
 
     // 4. 清理
-    client.delete("/config/app/title") or (err) { }
-    client.lease_revoke(lease_id) or (err) { }
+    client.delete("/config/app/title") >>> (err) { }
+    client.lease_revoke(lease_id) >>> (err) { }
 }
 ```
 

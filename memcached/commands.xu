@@ -29,7 +29,7 @@ fn parse_int_or(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -37,13 +37,13 @@ fn parse_int_or(s string, def int) int {
 
 fn validate_key(key &string) bool {
     if key.len == 0 || key.len > 250 {
-        >> errors.new("memcached: invalid key length (must be 1-250 bytes)")
+        >>> errors.new("memcached: invalid key length (must be 1-250 bytes)")
     }
     $i := 0
     while i < key.len {
         c := key[i] & 255
         if c <= 32 || c == 127 {
-            >> errors.new("memcached: key contains invalid character (space, newline or control char)")
+            >>> errors.new("memcached: key contains invalid character (space, newline or control char)")
         }
         i = i + 1
     }
@@ -52,15 +52,15 @@ fn validate_key(key &string) bool {
 
 fn check_error_line(line &string) bool {
     if *line == "ERROR" {
-        >> errors.new("memcached: server error")
+        >>> errors.new("memcached: server error")
     }
     prefix_c := "CLIENT_ERROR "
     if line.len >= prefix_c.len && line[0:prefix_c.len] == prefix_c {
-        >> errors.new(*line)
+        >>> errors.new(*line)
     }
     prefix_s := "SERVER_ERROR "
     if line.len >= prefix_s.len && line[0:prefix_s.len] == prefix_s {
-        >> errors.new(*line)
+        >>> errors.new(*line)
     }
     << true
 }
@@ -68,63 +68,63 @@ fn check_error_line(line &string) bool {
 // ---- Storage Commands ----
 
 fn (c $&Client) store(cmd string, key string, val string, flags int, exptime int) bool {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := cmd + " " + key + " " + str(flags) + " " + str(exptime) + " " + str(val.len) + "\r\n" + val + "\r\n"
-    c.write_raw(wire) or >>
-    line := c.read_line() or >>
-    check_error_line(&line) or >>
+    c.write_raw(wire) >>>
+    line := c.read_line() >>>
+    check_error_line(&line) >>>
     << line == "STORED"
 }
 
 pub fn (c $&Client) set(key string, val string, flags int, exptime int) bool {
-    << c.store("set", key, val, flags, exptime) or >>
+    << c.store("set", key, val, flags, exptime) >>>
 }
 
 pub fn (c $&Client) add(key string, val string, flags int, exptime int) bool {
-    << c.store("add", key, val, flags, exptime) or >>
+    << c.store("add", key, val, flags, exptime) >>>
 }
 
 pub fn (c $&Client) replace(key string, val string, flags int, exptime int) bool {
-    << c.store("replace", key, val, flags, exptime) or >>
+    << c.store("replace", key, val, flags, exptime) >>>
 }
 
 pub fn (c $&Client) append(key string, val string) bool {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := "append " + key + " 0 0 " + str(val.len) + "\r\n" + val + "\r\n"
-    c.write_raw(wire) or >>
-    line := c.read_line() or >>
-    check_error_line(&line) or >>
+    c.write_raw(wire) >>>
+    line := c.read_line() >>>
+    check_error_line(&line) >>>
     << line == "STORED"
 }
 
 pub fn (c $&Client) prepend(key string, val string) bool {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := "prepend " + key + " 0 0 " + str(val.len) + "\r\n" + val + "\r\n"
-    c.write_raw(wire) or >>
-    line := c.read_line() or >>
-    check_error_line(&line) or >>
+    c.write_raw(wire) >>>
+    line := c.read_line() >>>
+    check_error_line(&line) >>>
     << line == "STORED"
 }
 
 // ---- Retrieval Commands ----
 
 pub fn (c $&Client) get(key string) string {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := "get " + key + "\r\n"
-    c.write_raw(wire) or >>
+    c.write_raw(wire) >>>
     $result := ""
     $found := false
     while true {
-        line := c.read_line() or >>
-        check_error_line(&line) or >>
+        line := c.read_line() >>>
+        check_error_line(&line) >>>
         if line == "END" {
             <-
         }
         tokens := split_space_tokens(&line)
         if tokens.len >= 4 && tokens[0] == "VALUE" {
             bytes_count := parse_int_or(tokens[3], 0)
-            data := c.read_bytes(bytes_count) or >>
-            _ := c.read_bytes(2) or >> // read trailing \r\n
+            data := c.read_bytes(bytes_count) >>>
+            _ := c.read_bytes(2) >>> // read trailing \r\n
             if tokens[1] == key {
                 result = data
                 found = true
@@ -132,7 +132,7 @@ pub fn (c $&Client) get(key string) string {
         }
     }
     if !found {
-        >> errors.new("memcached: key not found: " + key)
+        >>> errors.new("memcached: key not found: " + key)
     }
     << result
 }
@@ -144,25 +144,25 @@ pub fn (c $&Client) get_multi(keys []string) []string {
     $cmd := "get"
     $k := 0
     while k < keys.len {
-        validate_key(&keys[k]) or >>
+        validate_key(&keys[k]) >>>
         cmd = cmd + " " + keys[k]
         k = k + 1
     }
     cmd = cmd + "\r\n"
-    c.write_raw(cmd) or >>
+    c.write_raw(cmd) >>>
 
     $results := []string{}
     while true {
-        line := c.read_line() or >>
-        check_error_line(&line) or >>
+        line := c.read_line() >>>
+        check_error_line(&line) >>>
         if line == "END" {
             <-
         }
         tokens := split_space_tokens(&line)
         if tokens.len >= 4 && tokens[0] == "VALUE" {
             bytes_count := parse_int_or(tokens[3], 0)
-            data := c.read_bytes(bytes_count) or >>
-            _ := c.read_bytes(2) or >>
+            data := c.read_bytes(bytes_count) >>>
+            _ := c.read_bytes(2) >>>
             results.push(data)
         }
     }
@@ -172,52 +172,52 @@ pub fn (c $&Client) get_multi(keys []string) []string {
 // ---- Deletion & Arithmetic ----
 
 pub fn (c $&Client) delete(key string) bool {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := "delete " + key + "\r\n"
-    c.write_raw(wire) or >>
-    line := c.read_line() or >>
-    check_error_line(&line) or >>
+    c.write_raw(wire) >>>
+    line := c.read_line() >>>
+    check_error_line(&line) >>>
     << line == "DELETED"
 }
 
 pub fn (c $&Client) incr(key string, delta int) int {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := "incr " + key + " " + str(delta) + "\r\n"
-    c.write_raw(wire) or >>
-    line := c.read_line() or >>
-    check_error_line(&line) or >>
+    c.write_raw(wire) >>>
+    line := c.read_line() >>>
+    check_error_line(&line) >>>
     if line == "NOT_FOUND" {
-        >> errors.new("memcached: key not found for incr: " + key)
+        >>> errors.new("memcached: key not found for incr: " + key)
     }
-    << parse_int(line) or >>
+    << parse_int(line) >>>
 }
 
 pub fn (c $&Client) decr(key string, delta int) int {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := "decr " + key + " " + str(delta) + "\r\n"
-    c.write_raw(wire) or >>
-    line := c.read_line() or >>
-    check_error_line(&line) or >>
+    c.write_raw(wire) >>>
+    line := c.read_line() >>>
+    check_error_line(&line) >>>
     if line == "NOT_FOUND" {
-        >> errors.new("memcached: key not found for decr: " + key)
+        >>> errors.new("memcached: key not found for decr: " + key)
     }
-    << parse_int(line) or >>
+    << parse_int(line) >>>
 }
 
 pub fn (c $&Client) touch(key string, exptime int) bool {
-    validate_key(&key) or >>
+    validate_key(&key) >>>
     wire := "touch " + key + " " + str(exptime) + "\r\n"
-    c.write_raw(wire) or >>
-    line := c.read_line() or >>
-    check_error_line(&line) or >>
+    c.write_raw(wire) >>>
+    line := c.read_line() >>>
+    check_error_line(&line) >>>
     << line == "TOUCHED"
 }
 
 // ---- Admin & Stats ----
 
 pub fn (c $&Client) version() string {
-    c.write_raw("version\r\n") or >>
-    line := c.read_line() or >>
+    c.write_raw("version\r\n") >>>
+    line := c.read_line() >>>
     prefix := "VERSION "
     if line.len >= prefix.len && line[0:prefix.len] == prefix {
         << line[prefix.len:line.len]
@@ -226,16 +226,16 @@ pub fn (c $&Client) version() string {
 }
 
 pub fn (c $&Client) flush_all() bool {
-    c.write_raw("flush_all\r\n") or >>
-    line := c.read_line() or >>
+    c.write_raw("flush_all\r\n") >>>
+    line := c.read_line() >>>
     << line == "OK"
 }
 
 pub fn (c $&Client) stats() []string {
-    c.write_raw("stats\r\n") or >>
+    c.write_raw("stats\r\n") >>>
     $lines := []string{}
     while true {
-        line := c.read_line() or >>
+        line := c.read_line() >>>
         if line == "END" {
             <-
         }

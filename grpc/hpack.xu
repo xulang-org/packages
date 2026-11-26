@@ -18,15 +18,15 @@ fn decode_huffman(raw string) string {
                     <- }
             }
             if matched >= 0 {
-                if matched == 256 { >> errors.new("grpc: HPACK Huffman EOS in string") }
+                if matched == 256 { >>> errors.new("grpc: HPACK Huffman EOS in string") }
                 out.push_byte(matched)
                 bits = 0
                 word = 0
-                if out.len > 65536 { >> errors.new("grpc: HPACK string too large") }
-            } else if bits >= 30 { >> errors.new("grpc: invalid HPACK Huffman code") }
+                if out.len > 65536 { >>> errors.new("grpc: HPACK string too large") }
+            } else if bits >= 30 { >>> errors.new("grpc: invalid HPACK Huffman code") }
         }
     }
-    if bits > 7 || word != (1 << bits) - 1 { >> errors.new("grpc: invalid HPACK Huffman padding") }
+    if bits > 7 || word != (1 << bits) - 1 { >>> errors.new("grpc: invalid HPACK Huffman padding") }
     << out
 }
 
@@ -41,7 +41,7 @@ struct HpackHeaders {
 }
 
 fn (r $&HpackReader) integer(prefix int) int {
-    if r.i >= r.raw.len { >> errors.new("grpc: truncated HPACK integer") }
+    if r.i >= r.raw.len { >>> errors.new("grpc: truncated HPACK integer") }
     mask := (1 << prefix) - 1
     $n := r.raw[r.i] & mask
     r.i += 1
@@ -51,22 +51,22 @@ fn (r $&HpackReader) integer(prefix int) int {
         b := r.raw[r.i] & 255
         r.i += 1
         n += (b & 127) << shift
-        if n > 2147483647 { >> errors.new("grpc: HPACK integer too large") }
+        if n > 2147483647 { >>> errors.new("grpc: HPACK integer too large") }
         if (b & 128) == 0 { << n }
         shift += 7
-        if shift > 28 { >> errors.new("grpc: HPACK integer too large") }
+        if shift > 28 { >>> errors.new("grpc: HPACK integer too large") }
     }
-    >> errors.new("grpc: truncated HPACK integer")
+    >>> errors.new("grpc: truncated HPACK integer")
 }
 
 fn (r $&HpackReader) text() string {
-    if r.i >= r.raw.len { >> errors.new("grpc: truncated HPACK string") }
+    if r.i >= r.raw.len { >>> errors.new("grpc: truncated HPACK string") }
     huffman := (r.raw[r.i] & 128) != 0
-    n := r.integer(7) or >>
-    if n > 65536 || n > r.raw.len - r.i { >> errors.new("grpc: truncated HPACK string") }
+    n := r.integer(7) >>>
+    if n > 65536 || n > r.raw.len - r.i { >>> errors.new("grpc: truncated HPACK string") }
     text := r.raw[r.i:r.i + n] + ""
     r.i += n
-    if huffman { << decode_huffman(text) or >> }
+    if huffman { << decode_huffman(text) >>> }
     << text
 }
 
@@ -79,33 +79,33 @@ fn decode_hpack(raw string) HpackHeaders {
     while r.i < r.raw.len {
         b := r.raw[r.i] & 255
         if (b & 224) == 32 {
-            if saw_field { >> errors.new("grpc: HPACK table update after field") }
-            size := r.integer(5) or >>
-            if size != 0 { >> errors.new("grpc: HPACK exceeds advertised table size") }
+            if saw_field { >>> errors.new("grpc: HPACK table update after field") }
+            size := r.integer(5) >>>
+            if size != 0 { >>> errors.new("grpc: HPACK exceeds advertised table size") }
             ->
         }
         $name := ""
         $value := ""
         if (b & 128) != 0 {
-            idx := r.integer(7) or >>
-            if idx < 1 || idx > 61 { >> errors.new("grpc: invalid HPACK index") }
+            idx := r.integer(7) >>>
+            if idx < 1 || idx > 61 { >>> errors.new("grpc: invalid HPACK index") }
             name = names[idx - 1] + ""
             value = values[idx - 1] + ""
         } else {
             $prefix := 4
             if (b & 64) != 0 { prefix = 6 }
-            idx := r.integer(prefix) or >>
-            if idx == 0 { name = r.text() or >> }
+            idx := r.integer(prefix) >>>
+            if idx == 0 { name = r.text() >>> }
             else {
-                if idx > 61 { >> errors.new("grpc: invalid HPACK name index") }
+                if idx > 61 { >>> errors.new("grpc: invalid HPACK name index") }
                 name = names[idx - 1] + ""
             }
-            value = r.text() or >>
+            value = r.text() >>>
         }
-        if name.len == 0 { >> errors.new("grpc: empty HPACK header name") }
+        if name.len == 0 { >>> errors.new("grpc: empty HPACK header name") }
         out.names.push(name)
         out.values.push(value)
-        if out.names.len > 1024 { >> errors.new("grpc: too many headers") }
+        if out.names.len > 1024 { >>> errors.new("grpc: too many headers") }
         saw_field = true
     }
     << out

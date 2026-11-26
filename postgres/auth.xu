@@ -17,7 +17,7 @@ fn md5_password(user string, pass string, salt string) string {
 }
 
 fn raw_hash_hex(hexs string) string {
-    raw := hex.decode_string(hexs) or (err) { << "" }
+    raw := hex.decode_string(hexs) >>> (err) { << "" }
     << raw
 }
 
@@ -49,7 +49,7 @@ fn pbkdf2_sha256(password string, salt string, rounds int) string {
 }
 
 fn xor_raw(a string, b string) string {
-    r := subtle.xor_bytes(&a, &b) or (err) { << "" }
+    r := subtle.xor_bytes(&a, &b) >>> (err) { << "" }
     << r
 }
 
@@ -57,7 +57,7 @@ fn scram_auth(fd int, cfg &Config, initial_body string) string {
     mech := cstring(&initial_body, 4)
     if mech.err.len > 0 { << mech.err }
     if !strings.contains(&initial_body, "SCRAM-SHA-256") { << "postgres: server does not offer SCRAM-SHA-256" }
-    nonce_raw := rand.read(18) or (err) { << err.msg() }
+    nonce_raw := rand.read(18) >>> (err) { << err.msg() }
     nonce := base64.encode_raw(nonce_raw)
     $bare := "n=" + strings.replace_all(&cfg.user, "=", "=3D")
     bare = strings.replace_all(&bare, ",", "=2C") + ",r=" + nonce
@@ -73,9 +73,9 @@ fn scram_auth(fd int, cfg &Config, initial_body string) string {
     salt64 := scram_attr(&server_first, "s")
     rounds_s := scram_attr(&server_first, "i")
     if !strings.has_prefix(&snonce, nonce) || salt64.len == 0 || rounds_s.len == 0 { << "postgres: invalid SCRAM challenge" }
-    rounds := strconv.atoi(&rounds_s) or (err) { << "postgres: invalid SCRAM iteration count" }
+    rounds := strconv.atoi(&rounds_s) >>> (err) { << "postgres: invalid SCRAM iteration count" }
     if rounds < 1 || rounds > 1000000 { << "postgres: invalid SCRAM iteration count" }
-    salt := base64.decode_raw(salt64) or (err) { << err.msg() }
+    salt := base64.decode_raw(salt64) >>> (err) { << err.msg() }
     salted := pbkdf2_sha256(cfg.password, salt, rounds)
     client_key := hmac_raw(salted + "", "Client Key")
     stored_key := raw_hash_hex(sha256.sum256(client_key + ""))

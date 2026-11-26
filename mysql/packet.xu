@@ -62,7 +62,7 @@ fn read_exact(fd int, n int) ReadResult {
     if n < 0 || n > 16777216 { << ReadResult{data: "", err: "mysql: invalid packet length"} }
     $out := ""
     while out.len < n {
-        part := net.conn_read(fd, n - out.len) or (err) { << ReadResult{data: "", err: "mysql: connection: " + err.msg()} }
+        part := net.conn_read(fd, n - out.len) >>> (err) { << ReadResult{data: "", err: "mysql: connection: " + err.msg()} }
         if part.len == 0 { << ReadResult{data: "", err: "mysql: connection closed"} }
         out = out + part
     }
@@ -73,7 +73,7 @@ fn write_all(fd int, data string) string {
     $off := 0
     while off < data.len {
         part := data[off:data.len]
-        n := net.conn_write(fd, &part) or (err) { << "mysql: connection: " + err.msg() }
+        n := net.conn_write(fd, &part) >>> (err) { << "mysql: connection: " + err.msg() }
         if n <= 0 { << "mysql: connection closed" }
         off += n
     }

@@ -33,33 +33,33 @@ postgres #github.com/xulang-org/packages/postgres
 fn main() int {
     dsn := "postgres://postgres:postgres@127.0.0.1:5432/xu_demo?sslmode=disable"
     $db := sql.open(postgres.driver(), dsn)
-    db.ping() or (err) {
+    db.ping() >>> (err) {
         println(err.msg())
         << 1
     }
 
-    db.exec("CREATE TABLE IF NOT EXISTS demo (id INT, name TEXT)") or (err) {
+    db.exec("CREATE TABLE IF NOT EXISTS demo (id INT, name TEXT)") >>> (err) {
         println(err.msg())
         << 1
     }
-    db.exec("INSERT INTO demo (id, name) VALUES ($$1, $$2)", 1, "Xu") or (err) {
+    db.exec("INSERT INTO demo (id, name) VALUES ($$1, $$2)", 1, "Xu") >>> (err) {
         println(err.msg())
         << 1
     }
 
-    $rows := db.query("SELECT id, name FROM demo") or (err) {
+    $rows := db.query("SELECT id, name FROM demo") >>> (err) {
         println(err.msg())
         << 1
     }
     while rows.next() {
-        cells := rows.take() or (err) {
+        cells := rows.take() >>> (err) {
             println(err.msg())
             << 1
         }
         println(str(cells[0] as int) + ": " + (cells[1] as string))
     }
     rows.close()
-    db.close() or (err) {
+    db.close() >>> (err) {
         println(err.msg())
         << 1
     }

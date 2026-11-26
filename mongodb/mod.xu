@@ -10,7 +10,7 @@
 // - Connection pooling via reusable TCP socket channels.
 
 pub fn open(addr string) Client {
-    << connect(addr) or >>
+    << connect(addr) >>>
 }
 
 pub fn open_pool(addr string, max_idle int) Pool {

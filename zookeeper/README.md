@@ -20,7 +20,7 @@ fn main() {
     if p.ruok() {
         println("ZooKeeper is healthy (imok)")
     }
-    stats := p.stat() or (err) {
+    stats := p.stat() >>> (err) {
         <<
     }
     println("Stats:\n" + stats)

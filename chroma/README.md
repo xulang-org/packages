@@ -19,7 +19,7 @@ fn main() {
     defer p.close()
 
     // 创建集合
-    col_id := p.create_collection("tech_docs") or (err) {
+    col_id := p.create_collection("tech_docs") >>> (err) {
         println("Create failed")
         <<
     }
@@ -28,7 +28,7 @@ fn main() {
     p.add(col_id, "[\"doc1\"]", "[[0.05, 0.61, 0.76]]", "[\"Xu Language Guide\"]")
 
     // 向量近邻检索
-    res := p.query(col_id, "[[0.05, 0.61, 0.76]]", 1) or (err) {
+    res := p.query(col_id, "[[0.05, 0.61, 0.76]]", 1) >>> (err) {
         println("Query failed")
         <<
     }

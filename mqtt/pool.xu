@@ -63,12 +63,12 @@ pub fn (p &Pool) get() Client {
         }
         else {
             cid := p.next_client_id()
-            $c := connect(p.addr + "", cid) or >>
+            $c := connect(p.addr + "", cid) >>>
             << c
         }
     }
     cid := p.next_client_id()
-    $c := connect(p.addr + "", cid) or >>
+    $c := connect(p.addr + "", cid) >>>
     << c
 }
 
@@ -91,11 +91,11 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) publish(topic string, payload string, qos int) int {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.publish(topic + "", payload + "", qos) or (err) {
+    res := c.publish(topic + "", payload + "", qos) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res

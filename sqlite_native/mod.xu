@@ -700,7 +700,7 @@ pub fn column_float(id int, column int) int {
         // bridge's 17-digit text transfer with Xu formatting.
         // Conn methods must not throw: handle format_float's rare verb error.
         v := sq_column_double(sym(SYM_COLUMN_DOUBLE), ffi.read_ptr(o, O_PTR), i32(column))
-        text := strconv.format_float(v, 103, 17) or (err) {
+        text := strconv.format_float(v, 103, 17) >>> (err) {
             _ := err
             << 0
         }

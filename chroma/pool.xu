@@ -42,7 +42,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.client.host + ":" + str(p.client.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -66,13 +66,13 @@ pub fn open_pool(endpoint string, max_idle int) Pool {
 pub fn (p &Pool) heartbeat() bool {
     if p.client.secure {
         c := p.get()
-        result := c.heartbeat() or (err) { << false }
+        result := c.heartbeat() >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
     $reusable := false
-    result := p.client.heartbeat_at(fd, $&reusable) or (err) {
+    result := p.client.heartbeat_at(fd, $&reusable) >>> (err) {
         p.discard_conn(fd)
         << false
     }
@@ -83,15 +83,15 @@ pub fn (p &Pool) heartbeat() bool {
 pub fn (p &Pool) create_collection(name string) string {
     if p.client.secure {
         c := p.get()
-        result := c.create_collection(name) or (err) { << "" }
+        result := c.create_collection(name) >>> (err) { << "" }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("chroma: pool closed or dial failed") }
     $reusable := false
-    result := p.client.create_collection_at(fd, name, $&reusable) or (err) {
+    result := p.client.create_collection_at(fd, name, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -100,13 +100,13 @@ pub fn (p &Pool) create_collection(name string) string {
 pub fn (p &Pool) add(col_id string, ids_json string, embeddings_json string, documents_json string) bool {
     if p.client.secure {
         c := p.get()
-        result := c.add(col_id, ids_json, embeddings_json, documents_json) or (err) { << false }
+        result := c.add(col_id, ids_json, embeddings_json, documents_json) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
     $reusable := false
-    result := p.client.add_at(fd, col_id, ids_json, embeddings_json, documents_json, $&reusable) or (err) {
+    result := p.client.add_at(fd, col_id, ids_json, embeddings_json, documents_json, $&reusable) >>> (err) {
         p.discard_conn(fd)
         << false
     }
@@ -117,15 +117,15 @@ pub fn (p &Pool) add(col_id string, ids_json string, embeddings_json string, doc
 pub fn (p &Pool) query(col_id string, query_embeddings_json string, n_results int) string {
     if p.client.secure {
         c := p.get()
-        result := c.query(col_id, query_embeddings_json, n_results) or (err) { << "" }
+        result := c.query(col_id, query_embeddings_json, n_results) >>> (err) { << "" }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("chroma: pool closed or dial failed") }
     $reusable := false
-    result := p.client.query_at(fd, col_id, query_embeddings_json, n_results, $&reusable) or (err) {
+    result := p.client.query_at(fd, col_id, query_embeddings_json, n_results, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -134,13 +134,13 @@ pub fn (p &Pool) query(col_id string, query_embeddings_json string, n_results in
 pub fn (p &Pool) delete_collection(name string) bool {
     if p.client.secure {
         c := p.get()
-        result := c.delete_collection(name) or (err) { << false }
+        result := c.delete_collection(name) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
     if fd < 0 { << false }
     $reusable := false
-    result := p.client.delete_collection_at(fd, name, $&reusable) or (err) {
+    result := p.client.delete_collection_at(fd, name, $&reusable) >>> (err) {
         p.discard_conn(fd)
         << false
     }

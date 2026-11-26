@@ -4,55 +4,55 @@
 
 pub fn (c $&Client) index_doc(index string, id string, doc_json string) string {
     $reusable := false
-    << c.index_doc_at(-1, index, id, doc_json, $&reusable) or >>
+    << c.index_doc_at(-1, index, id, doc_json, $&reusable) >>>
 }
 
 fn (c $&Client) index_doc_at(fd int, index string, id string, doc_json string, reusable $&bool) string {
     path := "/" + index + "/_doc/" + id
-    resp := c.request_at(fd, "PUT", path, doc_json, reusable) or >>
+    resp := c.request_at(fd, "PUT", path, doc_json, reusable) >>>
     code := resp.status_code
     if code != 200 && code != 201 {
-        >> errors.new("elasticsearch: index_doc failed with status " + str(code) + ": " + resp.body)
+        >>> errors.new("elasticsearch: index_doc failed with status " + str(code) + ": " + resp.body)
     }
     << resp.body
 }
 
 pub fn (c $&Client) get_doc(index string, id string) string {
     $reusable := false
-    << c.get_doc_at(-1, index, id, $&reusable) or >>
+    << c.get_doc_at(-1, index, id, $&reusable) >>>
 }
 
 fn (c $&Client) get_doc_at(fd int, index string, id string, reusable $&bool) string {
     path := "/" + index + "/_doc/" + id
-    resp := c.request_at(fd, "GET", path, "", reusable) or >>
+    resp := c.request_at(fd, "GET", path, "", reusable) >>>
     code := resp.status_code
     if code != 200 {
-        >> errors.new("elasticsearch: doc not found (status " + str(code) + ")")
+        >>> errors.new("elasticsearch: doc not found (status " + str(code) + ")")
     }
     << resp.body
 }
 
 pub fn (c $&Client) delete_doc(index string, id string) bool {
     $reusable := false
-    << c.delete_doc_at(-1, index, id, $&reusable) or >>
+    << c.delete_doc_at(-1, index, id, $&reusable) >>>
 }
 
 fn (c $&Client) delete_doc_at(fd int, index string, id string, reusable $&bool) bool {
     path := "/" + index + "/_doc/" + id
-    resp := c.request_at(fd, "DELETE", path, "", reusable) or >>
+    resp := c.request_at(fd, "DELETE", path, "", reusable) >>>
     code := resp.status_code
     << code == 200
 }
 
 pub fn (c $&Client) update_doc(index string, id string, doc_json string) bool {
     $reusable := false
-    << c.update_doc_at(-1, index, id, doc_json, $&reusable) or >>
+    << c.update_doc_at(-1, index, id, doc_json, $&reusable) >>>
 }
 
 fn (c $&Client) update_doc_at(fd int, index string, id string, doc_json string, reusable $&bool) bool {
     path := "/" + index + "/_update/" + id
     body := "{\"doc\":" + doc_json + "}"
-    resp := c.request_at(fd, "POST", path, body, reusable) or >>
+    resp := c.request_at(fd, "POST", path, body, reusable) >>>
     code := resp.status_code
     << code == 200
 }

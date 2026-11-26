@@ -62,7 +62,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -82,16 +82,16 @@ pub fn (p &Pool) discard_conn(fd int) {
 pub fn (p &Pool) make_bucket(bucket string) int {
     if p.secure {
         $c := p.get()
-        result := c.make_bucket(bucket) or (err) { << 0 }
+        result := c.make_bucket(bucket) >>> (err) { << 0 }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("s3: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.make_bucket_at(fd, bucket, $&reusable) or (err) {
+    result := c.make_bucket_at(fd, bucket, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -100,7 +100,7 @@ pub fn (p &Pool) make_bucket(bucket string) int {
 pub fn (p &Pool) bucket_exists(bucket string) bool {
     if p.secure {
         $c := p.get()
-        result := c.bucket_exists(bucket) or (err) { << false }
+        result := c.bucket_exists(bucket) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -115,16 +115,16 @@ pub fn (p &Pool) bucket_exists(bucket string) bool {
 pub fn (p &Pool) remove_bucket(bucket string) int {
     if p.secure {
         $c := p.get()
-        result := c.remove_bucket(bucket) or (err) { << 0 }
+        result := c.remove_bucket(bucket) >>> (err) { << 0 }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("s3: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.remove_bucket_at(fd, bucket, $&reusable) or (err) {
+    result := c.remove_bucket_at(fd, bucket, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -133,16 +133,16 @@ pub fn (p &Pool) remove_bucket(bucket string) int {
 pub fn (p &Pool) put_object(bucket string, key string, data string, content_type string) int {
     if p.secure {
         $c := p.get()
-        result := c.put_object(bucket, key, data, content_type) or (err) { << 0 }
+        result := c.put_object(bucket, key, data, content_type) >>> (err) { << 0 }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("s3: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.put_object_at(fd, bucket, key, data, content_type, $&reusable) or (err) {
+    result := c.put_object_at(fd, bucket, key, data, content_type, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -151,16 +151,16 @@ pub fn (p &Pool) put_object(bucket string, key string, data string, content_type
 pub fn (p &Pool) get_object(bucket string, key string) string {
     if p.secure {
         $c := p.get()
-        result := c.get_object(bucket, key) or (err) { << "" }
+        result := c.get_object(bucket, key) >>> (err) { << "" }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("s3: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.get_object_at(fd, bucket, key, $&reusable) or (err) {
+    result := c.get_object_at(fd, bucket, key, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -169,16 +169,16 @@ pub fn (p &Pool) get_object(bucket string, key string) string {
 pub fn (p &Pool) remove_object(bucket string, key string) int {
     if p.secure {
         $c := p.get()
-        result := c.remove_object(bucket, key) or (err) { << 0 }
+        result := c.remove_object(bucket, key) >>> (err) { << 0 }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("s3: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("s3: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.remove_object_at(fd, bucket, key, $&reusable) or (err) {
+    result := c.remove_object_at(fd, bucket, key, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -187,7 +187,7 @@ pub fn (p &Pool) remove_object(bucket string, key string) int {
 pub fn (p &Pool) object_exists(bucket string, key string) bool {
     if p.secure {
         $c := p.get()
-        result := c.object_exists(bucket, key) or (err) { << false }
+        result := c.object_exists(bucket, key) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()

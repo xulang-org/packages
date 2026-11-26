@@ -36,7 +36,7 @@ pub fn (p &Pool) get_conn() int {
             }
         }
         else {
-            fd := p.client.connect() or (err) {
+            fd := p.client.connect() >>> (err) {
                 << -1
             }
             << fd
@@ -62,11 +62,11 @@ pub fn (p &Pool) put_conn(fd int) {
 pub fn (p &Pool) execute(cql string) string {
     fd := p.get_conn()
     if fd < 0 {
-        >> errors.new("cassandra pool: failed to get connection")
+        >>> errors.new("cassandra pool: failed to get connection")
     }
-    res := p.client.execute_on_fd(fd, cql) or (err) {
+    res := p.client.execute_on_fd(fd, cql) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res

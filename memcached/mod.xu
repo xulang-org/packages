@@ -11,5 +11,5 @@
 // - Channel-based concurrency-safe connection pooling.
 
 pub fn open(addr string) Client {
-    << dial(addr) or >>
+    << dial(addr) >>>
 }

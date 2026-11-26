@@ -8,7 +8,7 @@ fn read_exact_tls(tc $&transport.Conn, n int) ReadResult {
     $out := ""
     while out.len < n {
         need := n - out.len
-        part := tc.read(need) or (err) { << ReadResult{data: "", err: err.msg()} }
+        part := tc.read(need) >>> (err) { << ReadResult{data: "", err: err.msg()} }
         if part.len == 0 { << ReadResult{data: "", err: "postgres: connection closed"} }
         out = out + part
     }
@@ -19,7 +19,7 @@ fn write_all_tls(tc $&transport.Conn, data string) string {
     $off := 0
     while off < data.len {
         part := data[off:data.len] + ""
-        n := tc.write(&part) or (err) { << err.msg() }
+        n := tc.write(&part) >>> (err) { << err.msg() }
         if n <= 0 { << "postgres: connection closed" }
         off += n
     }

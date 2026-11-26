@@ -23,7 +23,7 @@ fn main() {
     req := grpc.encode_string_field(1, "Xu Language")
 
     // 发起 gRPC Unary RPC 调用
-    resp := p.call_unary("/grpcbin.GRPCBin/DummyUnary", req) or (err) {
+    resp := p.call_unary("/grpcbin.GRPCBin/DummyUnary", req) >>> (err) {
         println("gRPC error: " + err.msg())
         <<
     }

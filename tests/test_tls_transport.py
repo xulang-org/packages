@@ -102,12 +102,12 @@ transport #github.com/xulang-org/packages/transport
 #crypto/tls
 #crypto/x509
 fn main() {{
-    cert := read_file("{cert}") or (err) {{
+    cert := read_file("{cert}") >>> (err) {{
         println(err.msg())
         <<
     }}
     $cfg := tls.new_config("localhost")
-    n := x509.append_certificates($&cfg.root_cas, &cert) or (err) {{
+    n := x509.append_certificates($&cfg.root_cas, &cert) >>> (err) {{
         println(err.msg())
         <<
     }}
@@ -117,7 +117,7 @@ fn main() {{
     }}
     req := "GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n"
     ep1 := transport.Endpoint{{scheme: "https", host: "localhost", port: {port}, path: "", secure: true}}
-    a := transport.request_raw(ep1, cfg, req, "GET") or (err) {{
+    a := transport.request_raw(ep1, cfg, req, "GET") >>> (err) {{
         println(err.msg())
         <<
     }}
@@ -126,13 +126,13 @@ fn main() {{
         <<
     }}
     $cfg2 := tls.new_config("localhost")
-    x509.append_certificates($&cfg2.root_cas, &cert) or (err) {{
+    x509.append_certificates($&cfg2.root_cas, &cert) >>> (err) {{
         println(err.msg())
         <<
     }}
     ep2 := transport.Endpoint{{scheme: "https", host: "localhost", port: {port}, path: "", secure: true}}
     req2 := "GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n"
-    b := transport.request_raw(ep2, cfg2, req2, "GET") or (err) {{
+    b := transport.request_raw(ep2, cfg2, req2, "GET") >>> (err) {{
         println(err.msg())
         <<
     }}
@@ -141,7 +141,7 @@ fn main() {{
         <<
     }}
     $bad := tls.new_config("wrong.test")
-    x509.append_certificates($&bad.root_cas, &cert) or (err) {{
+    x509.append_certificates($&bad.root_cas, &cert) >>> (err) {{
         println(err.msg())
         <<
     }}
@@ -156,7 +156,7 @@ fn main() {{
 }}
 
 fn hostname_fails(ep transport.Endpoint, cfg tls.Config, req string) bool {{
-    transport.request_raw(ep, cfg, req, "GET") or (err) {{
+    transport.request_raw(ep, cfg, req, "GET") >>> (err) {{
         << true
     }}
     << false

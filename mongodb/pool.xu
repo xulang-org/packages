@@ -32,11 +32,11 @@ pub fn (p &Pool) get() Client {
             }
         }
         else {
-            $c := connect(p.addr + "") or >>
+            $c := connect(p.addr + "") >>>
             << c
         }
     }
-    $c := connect(p.addr + "") or >>
+    $c := connect(p.addr + "") >>>
     << c
 }
 
@@ -59,7 +59,7 @@ pub fn (p &Pool) put(c Client) {
 }
 
 pub fn (p &Pool) hello() bool {
-    $c := p.get() or (err) {
+    $c := p.get() >>> (err) {
         << false
     }
     fd := c.fd
@@ -69,29 +69,29 @@ pub fn (p &Pool) hello() bool {
 }
 
 pub fn (p &Pool) insert_one(db_name string, col_name string, doc_bytes string) int {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.insert_one(db_name, col_name, doc_bytes) or (err) {
+    res := c.insert_one(db_name, col_name, doc_bytes) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res
 }
 
 pub fn (p &Pool) find_first_string(db_name string, col_name string, target_field string) string {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.find_first_string(db_name, col_name, target_field) or (err) {
+    res := c.find_first_string(db_name, col_name, target_field) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res
 }
 
 pub fn (p &Pool) drop_collection(db_name string, col_name string) bool {
-    $c := p.get() or (err) {
+    $c := p.get() >>> (err) {
         << false
     }
     fd := c.fd

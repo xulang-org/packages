@@ -49,7 +49,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -69,16 +69,16 @@ pub fn (p &Pool) discard_conn(fd int) {
 pub fn (p &Pool) put(key string, value string) int {
     if p.secure {
         $c := p.get()
-        result := c.put(key, value) or (err) { << 0 }
+        result := c.put(key, value) >>> (err) { << 0 }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("etcd: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.put_at(fd, key, value, $&reusable) or (err) {
+    result := c.put_at(fd, key, value, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -87,16 +87,16 @@ pub fn (p &Pool) put(key string, value string) int {
 pub fn (p &Pool) get_key(key string) string {
     if p.secure {
         $c := p.get()
-        result := c.get(key) or (err) { << "" }
+        result := c.get(key) >>> (err) { << "" }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("etcd: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.get_at(fd, key, $&reusable) or (err) {
+    result := c.get_at(fd, key, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -105,16 +105,16 @@ pub fn (p &Pool) get_key(key string) string {
 pub fn (p &Pool) delete(key string) int {
     if p.secure {
         $c := p.get()
-        result := c.delete(key) or (err) { << 0 }
+        result := c.delete(key) >>> (err) { << 0 }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("etcd: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("etcd: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.delete_at(fd, key, $&reusable) or (err) {
+    result := c.delete_at(fd, key, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -123,7 +123,7 @@ pub fn (p &Pool) delete(key string) int {
 pub fn (p &Pool) exists(key string) bool {
     if p.secure {
         $c := p.get()
-        result := c.exists(key) or (err) { << false }
+        result := c.exists(key) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()

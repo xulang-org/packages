@@ -64,7 +64,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -84,16 +84,16 @@ pub fn (p &Pool) discard_conn(fd int) {
 pub fn (p &Pool) write_point(point Point) bool {
     if p.secure {
         $c := p.get()
-        result := c.write_point(point) or (err) { << false }
+        result := c.write_point(point) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("influxdb: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.write_point_at(fd, point, $&reusable) or (err) {
+    result := c.write_point_at(fd, point, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -102,16 +102,16 @@ pub fn (p &Pool) write_point(point Point) bool {
 pub fn (p &Pool) write_line(line string) bool {
     if p.secure {
         $c := p.get()
-        result := c.write_line(line) or (err) { << false }
+        result := c.write_line(line) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("influxdb: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.write_line_at(fd, line, $&reusable) or (err) {
+    result := c.write_line_at(fd, line, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -120,16 +120,16 @@ pub fn (p &Pool) write_line(line string) bool {
 pub fn (p &Pool) write_raw(lines string) bool {
     if p.secure {
         $c := p.get()
-        result := c.write_raw(lines) or (err) { << false }
+        result := c.write_raw(lines) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("influxdb: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.write_raw_at(fd, lines, $&reusable) or (err) {
+    result := c.write_raw_at(fd, lines, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -138,16 +138,16 @@ pub fn (p &Pool) write_raw(lines string) bool {
 pub fn (p &Pool) query_flux(flux string) string {
     if p.secure {
         $c := p.get()
-        result := c.query_flux(flux) or (err) { << "" }
+        result := c.query_flux(flux) >>> (err) { << "" }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("influxdb: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.query_flux_at(fd, flux, $&reusable) or (err) {
+    result := c.query_flux_at(fd, flux, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -156,16 +156,16 @@ pub fn (p &Pool) query_flux(flux string) string {
 pub fn (p &Pool) ping() bool {
     if p.secure {
         $c := p.get()
-        result := c.ping() or (err) { << false }
+        result := c.ping() >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("influxdb: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("influxdb: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.ping_at(fd, $&reusable) or (err) {
+    result := c.ping_at(fd, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result

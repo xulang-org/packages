@@ -13,7 +13,7 @@ fn (c $&Client) create_collection_at(fd int, name string, vector_size int, dista
         dist = "Cosine"
     }
     body := "{\"vectors\":{\"size\":" + str(vector_size) + ",\"distance\":\"" + dist + "\"}}"
-    resp := c.request_at(fd, "PUT", "/collections/" + name, body, reusable) or (err) {
+    resp := c.request_at(fd, "PUT", "/collections/" + name, body, reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200
@@ -25,7 +25,7 @@ pub fn (c $&Client) collection_exists(name string) bool {
 }
 
 fn (c $&Client) collection_exists_at(fd int, name string, reusable $&bool) bool {
-    resp := c.request_at(fd, "GET", "/collections/" + name, "", reusable) or (err) {
+    resp := c.request_at(fd, "GET", "/collections/" + name, "", reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200
@@ -37,7 +37,7 @@ pub fn (c $&Client) delete_collection(name string) bool {
 }
 
 fn (c $&Client) delete_collection_at(fd int, name string, reusable $&bool) bool {
-    resp := c.request_at(fd, "DELETE", "/collections/" + name, "", reusable) or (err) {
+    resp := c.request_at(fd, "DELETE", "/collections/" + name, "", reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200

@@ -24,7 +24,7 @@ require:
 mongodb #github.com/xulang-org/packages/mongodb
 
 fn main() {
-    $client := mongodb.open("127.0.0.1:27017") or (err) { println(err.msg())
+    $client := mongodb.open("127.0.0.1:27017") >>> (err) { println(err.msg())
         << }
     defer client.close()
 
@@ -35,13 +35,13 @@ fn main() {
     )
 
     // 写入文档
-    client.insert_one("testdb", "users", doc) or (err) {
+    client.insert_one("testdb", "users", doc) >>> (err) {
         println("写入失败: " + err.msg())
         <<
     }
 
     // 查询文档
-    role := client.find_first_string("testdb", "users", "role") or (err) {
+    role := client.find_first_string("testdb", "users", "role") >>> (err) {
         println("查询失败: " + err.msg())
         <<
     }

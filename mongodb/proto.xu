@@ -24,19 +24,19 @@ pub fn encode_op_msg(request_id int, doc_bytes string) string {
 
 pub fn decode_op_msg_doc(raw string) string {
     if raw.len < 26 || decode_i32(&raw, 0) != raw.len || decode_i32(&raw, 12) != 2013 {
-        >> errors.new("mongodb: malformed OP_MSG")
+        >>> errors.new("mongodb: malformed OP_MSG")
     }
     if decode_i32(&raw, 16) != 0 {
-        >> errors.new("mongodb: unsupported OP_MSG flags")
+        >>> errors.new("mongodb: unsupported OP_MSG flags")
     }
     // offset 16..20: flagBits
     // offset 20: section kind (0)
     // offset 21..: BSON document
     kind := raw[20] & 255
     if kind != 0 {
-        >> errors.new("mongodb: unsupported OP_MSG section")
+        >>> errors.new("mongodb: unsupported OP_MSG section")
     }
     doc := raw[21:raw.len] + ""
-    if !valid_bson(&doc) { >> errors.new("mongodb: malformed BSON response") }
+    if !valid_bson(&doc) { >>> errors.new("mongodb: malformed BSON response") }
     << doc
 }

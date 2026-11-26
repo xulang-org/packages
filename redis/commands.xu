@@ -4,33 +4,33 @@
 #strconv
 
 pub fn (c $&Client) ping() string {
-    v := c.do(["PING"]) or >>
-    << v.as_string() or >>
+    v := c.do(["PING"]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) echo(msg string) string {
-    v := c.do(["ECHO", msg]) or >>
-    << v.as_string() or >>
+    v := c.do(["ECHO", msg]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) get(key string) string {
-    v := c.do(["GET", key]) or >>
-    << v.as_string() or >>
+    v := c.do(["GET", key]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) set(key string, val string) string {
-    v := c.do(["SET", key, val]) or >>
-    << v.as_string() or >>
+    v := c.do(["SET", key, val]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) set_ex(key string, seconds int, val string) string {
-    v := c.do(["SETEX", key, str(seconds), val]) or >>
-    << v.as_string() or >>
+    v := c.do(["SETEX", key, str(seconds), val]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) del(key string) int {
-    v := c.do(["DEL", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["DEL", key]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) del_many(keys []string) int {
@@ -40,148 +40,148 @@ pub fn (c $&Client) del_many(keys []string) int {
         args.push(keys[i])
         i = i + 1
     }
-    v := c.do(args) or >>
-    << v.as_int() or >>
+    v := c.do(args) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) exists(key string) bool {
-    v := c.do(["EXISTS", key]) or >>
-    n := v.as_int() or >>
+    v := c.do(["EXISTS", key]) >>>
+    n := v.as_int() >>>
     << n > 0
 }
 
 pub fn (c $&Client) incr(key string) int {
-    v := c.do(["INCR", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["INCR", key]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) decr(key string) int {
-    v := c.do(["DECR", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["DECR", key]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) incr_by(key string, delta int) int {
-    v := c.do(["INCRBY", key, str(delta)]) or >>
-    << v.as_int() or >>
+    v := c.do(["INCRBY", key, str(delta)]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) decr_by(key string, delta int) int {
-    v := c.do(["DECRBY", key, str(delta)]) or >>
-    << v.as_int() or >>
+    v := c.do(["DECRBY", key, str(delta)]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) expire(key string, seconds int) bool {
-    v := c.do(["EXPIRE", key, str(seconds)]) or >>
-    n := v.as_int() or >>
+    v := c.do(["EXPIRE", key, str(seconds)]) >>>
+    n := v.as_int() >>>
     << n == 1
 }
 
 pub fn (c $&Client) ttl(key string) int {
-    v := c.do(["TTL", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["TTL", key]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) keys(pattern string) []string {
-    v := c.do(["KEYS", pattern]) or >>
-    << v.as_strings() or >>
+    v := c.do(["KEYS", pattern]) >>>
+    << v.as_strings() >>>
 }
 
 // ---- Hash operations ----
 
 pub fn (c $&Client) hget(key string, field string) string {
-    v := c.do(["HGET", key, field]) or >>
-    << v.as_string() or >>
+    v := c.do(["HGET", key, field]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) hset(key string, field string, val string) int {
-    v := c.do(["HSET", key, field, val]) or >>
-    << v.as_int() or >>
+    v := c.do(["HSET", key, field, val]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) hdel(key string, field string) int {
-    v := c.do(["HDEL", key, field]) or >>
-    << v.as_int() or >>
+    v := c.do(["HDEL", key, field]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) hexists(key string, field string) bool {
-    v := c.do(["HEXISTS", key, field]) or >>
-    n := v.as_int() or >>
+    v := c.do(["HEXISTS", key, field]) >>>
+    n := v.as_int() >>>
     << n > 0
 }
 
 pub fn (c $&Client) hgetall(key string) []string {
-    v := c.do(["HGETALL", key]) or >>
-    << v.as_strings() or >>
+    v := c.do(["HGETALL", key]) >>>
+    << v.as_strings() >>>
 }
 
 pub fn (c $&Client) hkeys(key string) []string {
-    v := c.do(["HKEYS", key]) or >>
-    << v.as_strings() or >>
+    v := c.do(["HKEYS", key]) >>>
+    << v.as_strings() >>>
 }
 
 pub fn (c $&Client) hlen(key string) int {
-    v := c.do(["HLEN", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["HLEN", key]) >>>
+    << v.as_int() >>>
 }
 
 // ---- List operations ----
 
 pub fn (c $&Client) lpush(key string, val string) int {
-    v := c.do(["LPUSH", key, val]) or >>
-    << v.as_int() or >>
+    v := c.do(["LPUSH", key, val]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) rpush(key string, val string) int {
-    v := c.do(["RPUSH", key, val]) or >>
-    << v.as_int() or >>
+    v := c.do(["RPUSH", key, val]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) lpop(key string) string {
-    v := c.do(["LPOP", key]) or >>
-    << v.as_string() or >>
+    v := c.do(["LPOP", key]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) rpop(key string) string {
-    v := c.do(["RPOP", key]) or >>
-    << v.as_string() or >>
+    v := c.do(["RPOP", key]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) llen(key string) int {
-    v := c.do(["LLEN", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["LLEN", key]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) lrange(key string, start int, stop int) []string {
-    v := c.do(["LRANGE", key, str(start), str(stop)]) or >>
-    << v.as_strings() or >>
+    v := c.do(["LRANGE", key, str(start), str(stop)]) >>>
+    << v.as_strings() >>>
 }
 
 // ---- Set operations ----
 
 pub fn (c $&Client) sadd(key string, member string) int {
-    v := c.do(["SADD", key, member]) or >>
-    << v.as_int() or >>
+    v := c.do(["SADD", key, member]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) srem(key string, member string) int {
-    v := c.do(["SREM", key, member]) or >>
-    << v.as_int() or >>
+    v := c.do(["SREM", key, member]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) sismember(key string, member string) bool {
-    v := c.do(["SISMEMBER", key, member]) or >>
-    n := v.as_int() or >>
+    v := c.do(["SISMEMBER", key, member]) >>>
+    n := v.as_int() >>>
     << n > 0
 }
 
 pub fn (c $&Client) smembers(key string) []string {
-    v := c.do(["SMEMBERS", key]) or >>
-    << v.as_strings() or >>
+    v := c.do(["SMEMBERS", key]) >>>
+    << v.as_strings() >>>
 }
 
 pub fn (c $&Client) scard(key string) int {
-    v := c.do(["SCARD", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["SCARD", key]) >>>
+    << v.as_int() >>>
 }
 
 // ---- Batch operations ----
@@ -193,8 +193,8 @@ pub fn (c $&Client) mget(keys []string) []string {
         args.push(keys[i])
         i = i + 1
     }
-    v := c.do(args) or >>
-    << v.as_strings() or >>
+    v := c.do(args) >>>
+    << v.as_strings() >>>
 }
 
 pub fn (c $&Client) mset(pairs []string) string {
@@ -204,41 +204,41 @@ pub fn (c $&Client) mset(pairs []string) string {
         args.push(pairs[i])
         i = i + 1
     }
-    v := c.do(args) or >>
-    << v.as_string() or >>
+    v := c.do(args) >>>
+    << v.as_string() >>>
 }
 
 // ---- Sorted Set (ZSet) operations ----
 
 pub fn (c $&Client) zadd(key string, score f64, member string) int {
-    fs := strconv.format_float(score, 103, -1) or (err) {
+    fs := strconv.format_float(score, 103, -1) >>> (err) {
         << 0
     }
-    v := c.do(["ZADD", key, fs, member]) or >>
-    << v.as_int() or >>
+    v := c.do(["ZADD", key, fs, member]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) zrange(key string, start int, stop int) []string {
-    v := c.do(["ZRANGE", key, str(start), str(stop)]) or >>
-    << v.as_strings() or >>
+    v := c.do(["ZRANGE", key, str(start), str(stop)]) >>>
+    << v.as_strings() >>>
 }
 
 pub fn (c $&Client) zrevrange(key string, start int, stop int) []string {
-    v := c.do(["ZREVRANGE", key, str(start), str(stop)]) or >>
-    << v.as_strings() or >>
+    v := c.do(["ZREVRANGE", key, str(start), str(stop)]) >>>
+    << v.as_strings() >>>
 }
 
 pub fn (c $&Client) zscore(key string, member string) string {
-    v := c.do(["ZSCORE", key, member]) or >>
-    << v.as_string() or >>
+    v := c.do(["ZSCORE", key, member]) >>>
+    << v.as_string() >>>
 }
 
 pub fn (c $&Client) zrem(key string, member string) int {
-    v := c.do(["ZREM", key, member]) or >>
-    << v.as_int() or >>
+    v := c.do(["ZREM", key, member]) >>>
+    << v.as_int() >>>
 }
 
 pub fn (c $&Client) zcard(key string) int {
-    v := c.do(["ZCARD", key]) or >>
-    << v.as_int() or >>
+    v := c.do(["ZCARD", key]) >>>
+    << v.as_int() >>>
 }

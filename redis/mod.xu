@@ -13,27 +13,27 @@
 // - Full URL format parsing (redis://:password@host:port/db).
 
 pub fn open(addr string) Client {
-    << dial(addr) or >>
+    << dial(addr) >>>
 }
 
 pub fn open_auth(addr string, password string) Client {
-    $c := dial(addr) or >>
-    c.auth(password) or >>
+    $c := dial(addr) >>>
+    c.auth(password) >>>
     << c
 }
 
 pub fn open_url(raw string) Client {
     opt := parse_url(raw)
-    $c := dial(opt.addr) or >>
+    $c := dial(opt.addr) >>>
     if opt.password.len > 0 {
-        c.auth(opt.password) or >>
+        c.auth(opt.password) >>>
     }
     if opt.db > 0 {
-        c.select_db(opt.db) or >>
+        c.select_db(opt.db) >>>
     }
     << c
 }
 
 pub fn dial_url(raw string) Client {
-    << open_url(raw) or >>
+    << open_url(raw) >>>
 }

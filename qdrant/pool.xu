@@ -58,7 +58,7 @@ pub fn (p &Pool) get_conn() int {
     if cached == -2 { << -1 }
     if cached >= 0 { << cached }
     addr := p.host + ":" + str(p.port)
-    fd := net.dial(strings.clone(&addr)) or (err) { << -1 }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { << -1 }
     if !sockets.adopt(fd) { << -1 }
     << fd
 }
@@ -78,7 +78,7 @@ pub fn (p &Pool) discard_conn(fd int) {
 pub fn (p &Pool) create_collection(name string, vector_size int, distance string) bool {
     if p.secure {
         $c := p.get()
-        result := c.create_collection(name, vector_size, distance) or (err) { << false }
+        result := c.create_collection(name, vector_size, distance) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -93,7 +93,7 @@ pub fn (p &Pool) create_collection(name string, vector_size int, distance string
 pub fn (p &Pool) collection_exists(name string) bool {
     if p.secure {
         $c := p.get()
-        result := c.collection_exists(name) or (err) { << false }
+        result := c.collection_exists(name) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -108,7 +108,7 @@ pub fn (p &Pool) collection_exists(name string) bool {
 pub fn (p &Pool) delete_collection(name string) bool {
     if p.secure {
         $c := p.get()
-        result := c.delete_collection(name) or (err) { << false }
+        result := c.delete_collection(name) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -123,7 +123,7 @@ pub fn (p &Pool) delete_collection(name string) bool {
 pub fn (p &Pool) upsert_point(collection string, id int, vector []string, payload_json string) bool {
     if p.secure {
         $c := p.get()
-        result := c.upsert_point(collection, id, vector, payload_json) or (err) { << false }
+        result := c.upsert_point(collection, id, vector, payload_json) >>> (err) { << false }
         << result
     }
     fd := p.get_conn()
@@ -137,12 +137,12 @@ pub fn (p &Pool) upsert_point(collection string, id int, vector []string, payloa
 
 pub fn (p &Pool) search(collection string, vector []string, limit int) []ScoredPoint {
     fd := p.get_conn()
-    if fd < 0 { >> errors.new("qdrant: pool closed or dial failed") }
+    if fd < 0 { >>> errors.new("qdrant: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
-    result := c.search_at(fd, collection, vector, limit, $&reusable) or (err) {
+    result := c.search_at(fd, collection, vector, limit, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >> err
+        >>> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -151,7 +151,7 @@ pub fn (p &Pool) search(collection string, vector []string, limit int) []ScoredP
 pub fn (p &Pool) ping() bool {
     if p.secure {
         $c := p.get()
-        result := c.ping() or (err) { << false }
+        result := c.ping() >>> (err) { << false }
         << result
     }
     fd := p.get_conn()

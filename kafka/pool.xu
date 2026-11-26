@@ -48,16 +48,16 @@ pub fn (p &Pool) get() Client {
             }
         }
         else {
-            $c := connect(p.broker + "", p.client_id + "") or >>
+            $c := connect(p.broker + "", p.client_id + "") >>>
             << c
         }
     }
-    $c := connect(p.broker + "", p.client_id + "") or >>
+    $c := connect(p.broker + "", p.client_id + "") >>>
     << c
 }
 
 pub fn (p &Pool) ping() bool {
-    $c := p.get() or (err) {
+    $c := p.get() >>> (err) {
         << false
     }
     fd := c.fd
@@ -67,33 +67,33 @@ pub fn (p &Pool) ping() bool {
 }
 
 pub fn (p &Pool) produce(topic string, partition int, message string) int {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.produce(topic, partition, message) or (err) {
+    res := c.produce(topic, partition, message) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res
 }
 
 pub fn (p &Pool) produce_key_value(topic string, partition int, key string, val string) int {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.produce_key_value(topic, partition, key, val) or (err) {
+    res := c.produce_key_value(topic, partition, key, val) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res
 }
 
 pub fn (p &Pool) fetch(topic string, partition int, offset int) []string {
-    $c := p.get() or >>
+    $c := p.get() >>>
     fd := c.fd
-    res := c.fetch(topic, partition, offset) or (err) {
+    res := c.fetch(topic, partition, offset) >>> (err) {
         p.put_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << res

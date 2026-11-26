@@ -56,20 +56,20 @@ XU_ROOT=/path/to/xu python3 metal/native/build.py
 @main
 metal #"github.com/xulang-org/packages/metal"
 fn run() int {
-    d := metal.open() or >>
-    $a := d.buffer_i64(1) or >>
-    $b := d.buffer_i64(1) or >>
-    $dst := d.buffer_i64(1) or >>
-    a.put(0, 3) or >>
-    b.put(0, 4) or >>
-    f := metal.madd_i64($&dst, &a, &b, 3, 1) or >>
-    f.wait() or >>
-    values := dst.ints() or >>
+    d := metal.open() >>>
+    $a := d.buffer_i64(1) >>>
+    $b := d.buffer_i64(1) >>>
+    $dst := d.buffer_i64(1) >>>
+    a.put(0, 3) >>>
+    b.put(0, 4) >>>
+    f := metal.madd_i64($&dst, &a, &b, 3, 1) >>>
+    f.wait() >>>
+    values := dst.ints() >>>
     println(values[0]) // 13
     << 0
 }
 fn main() int {
-    run() or (err) {
+    run() >>> (err) {
         eprintln(err.msg())
         << 1
     }
@@ -109,21 +109,21 @@ GPU 内核时间判断是否优于 CPU。
 @main
 metal #"github.com/xulang-org/packages/metal"
 fn run() int {
-    d := metal.open() or >>
-    $a := d.matrix_f32(1, 1) or >>
-    $b := d.matrix_f32(1, 1) or >>
-    $c := d.matrix_f32(1, 1) or >>
-    a.write_bits(&[1065353216]) or >> // 1.0f
-    b.write_bits(&[1073741824]) or >> // 2.0f
-    f := metal.gemm_f32($&c, &a, &b) or >>
-    f.wait() or >>
+    d := metal.open() >>>
+    $a := d.matrix_f32(1, 1) >>>
+    $b := d.matrix_f32(1, 1) >>>
+    $c := d.matrix_f32(1, 1) >>>
+    a.write_bits(&[1065353216]) >>> // 1.0f
+    b.write_bits(&[1073741824]) >>> // 2.0f
+    f := metal.gemm_f32($&c, &a, &b) >>>
+    f.wait() >>>
     $bits := [0] // Reuse this array on later iterations.
-    c.copy_bits($&bits) or >>
+    c.copy_bits($&bits) >>>
     println(bits[0]) // 1073741824: 2.0f
     << 0
 }
 fn main() int {
-    run() or (err) {
+    run() >>> (err) {
         eprintln(err.msg())
         << 1
     }

@@ -58,7 +58,7 @@ fn read_exact(fd int, n int) ReadResult {
     $out := ""
     while out.len < n {
         need := n - out.len
-        part := net.conn_read(fd, need) or (err) { << ReadResult{data: "", err: err.msg()} }
+        part := net.conn_read(fd, need) >>> (err) { << ReadResult{data: "", err: err.msg()} }
         if part.len == 0 { << ReadResult{data: "", err: "postgres: connection closed"} }
         out = out + part
     }
@@ -69,7 +69,7 @@ fn write_all(fd int, data string) string {
     $off := 0
     while off < data.len {
         part := data[off:data.len] + ""
-        n := net.conn_write(fd, &part) or (err) { << err.msg() }
+        n := net.conn_write(fd, &part) >>> (err) { << err.msg() }
         if n <= 0 { << "postgres: connection closed" }
         off += n
     }

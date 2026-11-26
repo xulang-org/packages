@@ -24,11 +24,11 @@ pub fn (p &Pool) get() Client {
             << Client{fd: fd, buf: "", addr: p.addr}
         }
         else {
-            $c := dial(p.addr) or >>
+            $c := dial(p.addr) >>>
             << c
         }
     }
-    $c := dial(p.addr) or >>
+    $c := dial(p.addr) >>>
     << c
 }
 

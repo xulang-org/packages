@@ -32,7 +32,7 @@ pub fn (p &WsPool) get_conn() int {
             }
         }
         else {
-            fd := p.client.connect() or (err) {
+            fd := p.client.connect() >>> (err) {
                 << -1
             }
             << fd
@@ -58,29 +58,29 @@ pub fn (p &WsPool) put_conn(fd int) {
 // Executes an echo round-trip borrowing from pool
 pub fn (p &WsPool) echo_text(text string) string {
     if p.client.secure {
-        $tc := p.client.connect_secure() or >>
-        result := p.client.send_text_secure($&tc, text) or (err) {
+        $tc := p.client.connect_secure() >>>
+        result := p.client.send_text_secure($&tc, text) >>> (err) {
             p.client.close_secure($&tc)
-            >> err
+            >>> err
         }
-        out := p.client.read_text_secure($&tc) or (err) {
+        out := p.client.read_text_secure($&tc) >>> (err) {
             p.client.close_secure($&tc)
-            >> err
+            >>> err
         }
         p.client.close_secure($&tc)
         << out
     }
     fd := p.get_conn()
     if fd < 0 {
-        >> errors.new("ws pool failed to get connection")
+        >>> errors.new("ws pool failed to get connection")
     }
-    p.client.send_text(fd, text) or (err) {
+    p.client.send_text(fd, text) >>> (err) {
         p.client.close_conn(fd)
-        >> err
+        >>> err
     }
-    resp := p.client.read_text(fd) or (err) {
+    resp := p.client.read_text(fd) >>> (err) {
         p.client.close_conn(fd)
-        >> err
+        >>> err
     }
     p.put_conn(fd)
     << resp

@@ -11,7 +11,7 @@ pub struct DnsClient {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -21,11 +21,11 @@ fn read_exact(fd int, need int) string {
     $buf := ""
     while buf.len < need {
         want := need - buf.len
-        chunk := net.conn_read(fd, want) or (err) {
-            >> errors.new("dns read error: " + err.msg())
+        chunk := net.conn_read(fd, want) >>> (err) {
+            >>> errors.new("dns read error: " + err.msg())
         }
         if chunk.len == 0 {
-            >> errors.new("dns read unexpected EOF")
+            >>> errors.new("dns read unexpected EOF")
         }
         buf = buf + chunk
     }
@@ -36,8 +36,8 @@ fn write_all(fd int, data string) bool {
     $off := 0
     while off < data.len {
         part := data[off:data.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("dns write error: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("dns write error: " + err.msg())
         }
         if n <= 0 {
             <-
@@ -56,7 +56,7 @@ pub fn new_client(endpoint string) DnsClient {
     if colon >= 0 {
         host = ep[0:colon]
         port_str := ep[(colon + 1):ep.len]
-        p_val := parse_int(port_str) or (err) {
+        p_val := parse_int(port_str) >>> (err) {
             port = 53
             << DnsClient{host: host, port: 53}
         }
@@ -75,8 +75,8 @@ pub fn new_client(endpoint string) DnsClient {
 
 pub fn (c DnsClient) connect() int {
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("dns dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("dns dial failed: " + err.msg())
     }
     << fd
 }
@@ -89,21 +89,21 @@ pub fn (c DnsClient) resolve_a_on_fd(fd int, domain string) []string {
     l_lo := pkt.len & 255
     tcp_query := string_from_byte(l_hi) + string_from_byte(l_lo) + pkt
 
-    write_all(fd, tcp_query) or >>
+    write_all(fd, tcp_query) >>>
 
     // Read 2-byte response length
-    l_hdr := read_exact(fd, 2) or >>
+    l_hdr := read_exact(fd, 2) >>>
     resp_len := ((l_hdr[0] & 255) << 8) | (l_hdr[1] & 255)
 
-    resp_pkt := read_exact(fd, resp_len) or >>
+    resp_pkt := read_exact(fd, resp_len) >>>
     << parse_a_records(resp_pkt)
 }
 
 pub fn (c DnsClient) resolve_a(domain string) []string {
-    fd := c.connect() or >>
-    ips := c.resolve_a_on_fd(fd, domain) or (err) {
+    fd := c.connect() >>>
+    ips := c.resolve_a_on_fd(fd, domain) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     safe_close(fd)
     << ips

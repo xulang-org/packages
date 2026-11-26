@@ -72,7 +72,7 @@ fn set_option(c $&Config, key string, value string) {
 }
 
 fn parse_port_or_default(v string) int {
-    n := strconv.atoi(&v) or (err) { << 5432 }
+    n := strconv.atoi(&v) >>> (err) { << 5432 }
     << n
 }
 
@@ -84,7 +84,7 @@ fn parse_keyword_dsn(dsn string) Config {
         if i >= dsn.len { <- }
         $j := i
         while j < dsn.len && (dsn[j] & 255) != 32 && (dsn[j] & 255) != 9 && (dsn[j] & 255) != 61 { j += 1 }
-        if j == i || j >= dsn.len || (dsn[j] & 255) != 61 { >> errors.new("postgres: invalid keyword DSN") }
+        if j == i || j >= dsn.len || (dsn[j] & 255) != 61 { >>> errors.new("postgres: invalid keyword DSN") }
         key := dsn[i:j] + ""
         j += 1
         $value := ""
@@ -105,7 +105,7 @@ fn parse_keyword_dsn(dsn string) Config {
                     j += 1
                 }
             }
-            if going != 0 { >> errors.new("postgres: unterminated quoted DSN value") }
+            if going != 0 { >>> errors.new("postgres: unterminated quoted DSN value") }
         } else {
             $escaped := 0
             while j < dsn.len {
@@ -137,7 +137,7 @@ fn parse_url_dsn(dsn string) Config {
     $start := 0
     if strings.has_prefix(&dsn, "postgres://") { start = 11 }
     else if strings.has_prefix(&dsn, "postgresql://") { start = 13 }
-    else { >> errors.new("postgres: unsupported DSN scheme") }
+    else { >>> errors.new("postgres: unsupported DSN scheme") }
     $end := dsn.len
     qpos := strings.index_byte(&dsn, 63)
     if qpos >= 0 { end = qpos }
@@ -159,18 +159,18 @@ fn parse_url_dsn(dsn string) Config {
     }
     if hostport.len > 0 && (hostport[0] & 255) == 91 {
         close := strings.index_byte(&hostport, 93)
-        if close < 0 { >> errors.new("postgres: invalid IPv6 host") }
+        if close < 0 { >>> errors.new("postgres: invalid IPv6 host") }
         c.host = hostport[1:close] + ""
         if close + 1 < hostport.len && (hostport[close + 1] & 255) == 58 {
             ps := hostport[close + 2:hostport.len] + ""
-            c.port = strconv.atoi(&ps) or >> errors.new("postgres: invalid port")
+            c.port = strconv.atoi(&ps) >>> errors.new("postgres: invalid port")
         }
     } else if hostport.len > 0 {
         colon := strings.last_index_byte(&hostport, 58)
         if colon >= 0 {
             c.host = hostport[0:colon] + ""
             ps := hostport[colon + 1:hostport.len] + ""
-            c.port = strconv.atoi(&ps) or >> errors.new("postgres: invalid port")
+            c.port = strconv.atoi(&ps) >>> errors.new("postgres: invalid port")
         } else { c.host = hostport + "" }
     }
     if slash >= 0 {
@@ -190,7 +190,7 @@ fn parse_url_dsn(dsn string) Config {
 }
 
 pub fn parse_dsn(dsn string) Config {
-    if dsn.len == 0 { >> errors.new("postgres: empty DSN") }
+    if dsn.len == 0 { >>> errors.new("postgres: empty DSN") }
     $c := empty_config()
     if strings.has_prefix(&dsn, "postgres://") || strings.has_prefix(&dsn, "postgresql://") {
         c = parse_url_dsn(dsn)
@@ -198,12 +198,12 @@ pub fn parse_dsn(dsn string) Config {
         c = parse_keyword_dsn(dsn)
     }
     if c.host.len == 0 { c.host = "127.0.0.1" }
-    if c.port <= 0 || c.port > 65535 { >> errors.new("postgres: invalid port") }
+    if c.port <= 0 || c.port > 65535 { >>> errors.new("postgres: invalid port") }
     if c.user.len == 0 { c.user = "postgres" }
     if c.database.len == 0 { c.database = c.user + "" }
     if c.ssl_mode.len == 0 { c.ssl_mode = "disable" }
     if c.ssl_mode != "disable" && c.ssl_mode != "require" && c.ssl_mode != "verify-ca" && c.ssl_mode != "verify-full" {
-        >> errors.new("postgres: unsupported sslmode")
+        >>> errors.new("postgres: unsupported sslmode")
     }
     << c
 }

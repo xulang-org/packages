@@ -12,7 +12,7 @@
 // - Automatic PING/PONG heartbeat management.
 
 pub fn open(addr string) Client {
-    << connect(addr) or >>
+    << connect(addr) >>>
 }
 
 pub fn open_pool(addr string, max_idle int) Pool {

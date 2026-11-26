@@ -31,32 +31,32 @@ redis #github.com/xulang-org/packages/redis
 
 fn main() int {
     // 1. 直连或通过 URL 连接
-    $client := redis.open_url("redis://127.0.0.1:6379/0") or >>
+    $client := redis.open_url("redis://127.0.0.1:6379/0") >>>
     
     // 2. 基础 Key-Value
-    client.set("greeting", "Hello Xu") or >>
-    val := client.get("greeting") or >>
+    client.set("greeting", "Hello Xu") >>>
+    val := client.get("greeting") >>>
     println(val)
     
     // 3. 批量操作 (MSET / MGET)
-    client.mset(["k1", "v1", "k2", "v2"]) or >>
-    vals := client.mget(["k1", "k2"]) or >>
+    client.mset(["k1", "v1", "k2", "v2"]) >>>
+    vals := client.mget(["k1", "k2"]) >>>
 
     // 4. 有序集合 (Sorted Set / ZSet)
-    client.zadd("leaderboard", 100.5, "Alice") or >>
-    client.zadd("leaderboard", 95.0, "Bob") or >>
-    leaders := client.zrange("leaderboard", 0, -1) or >>
+    client.zadd("leaderboard", 100.5, "Alice") >>>
+    client.zadd("leaderboard", 95.0, "Bob") >>>
+    leaders := client.zrange("leaderboard", 0, -1) >>>
 
     // 5. 流水线 (Pipeline)
     $pipe := client.pipeline()
     pipe.set("p1", "v1")
     pipe.incr("p_cnt")
-    results := client.exec_pipeline($&pipe) or >>
+    results := client.exec_pipeline($&pipe) >>>
 
     // 6. 连接池
     pool := redis.new_pool_url("redis://127.0.0.1:6379/0", 10)
-    $conn := pool.get() or >>
-    pong := conn.ping() or >>
+    $conn := pool.get() >>>
+    pong := conn.ping() >>>
     pool.put(conn)
 
     client.close()

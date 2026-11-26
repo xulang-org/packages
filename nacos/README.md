@@ -31,7 +31,7 @@ fn main() {
     p.publish_config("application.yaml", "DEFAULT_GROUP", "server:\n  port: 8080\n")
 
     // 读取配置
-    cfg := p.get_config("application.yaml", "DEFAULT_GROUP") or (err) {
+    cfg := p.get_config("application.yaml", "DEFAULT_GROUP") >>> (err) {
         println("Config not found")
         <<
     }

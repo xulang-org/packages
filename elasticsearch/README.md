@@ -37,20 +37,20 @@ fn main() int {
     }
 
     // 2. 创建索引
-    es.create_index("articles", "{}") or >>
+    es.create_index("articles", "{}") >>>
 
     // 3. 写入文档
-    es.index_doc("articles", "1", "{\"title\": \"Xu Language Overview\", \"views\": 1024}") or >>
-    es.refresh("articles") or >>
+    es.index_doc("articles", "1", "{\"title\": \"Xu Language Overview\", \"views\": 1024}") >>>
+    es.refresh("articles") >>>
 
     // 4. 全文检索
-    res := es.search_match("articles", "title", "Xu") or >>
+    res := es.search_match("articles", "title", "Xu") >>>
     println("Total hits: " + str(res.total))
 
     // 5. 获取与删除
-    doc := es.get_doc("articles", "1") or >>
-    es.delete_doc("articles", "1") or >>
-    es.delete_index("articles") or >>
+    doc := es.get_doc("articles", "1") >>>
+    es.delete_doc("articles", "1") >>>
+    es.delete_index("articles") >>>
     << 0
 }
 ```

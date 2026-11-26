@@ -26,7 +26,7 @@ pub struct SmtpResponse {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -36,8 +36,8 @@ fn write_all(fd int, data string) bool {
     $off := 0
     while off < data.len {
         part := data[off:data.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("smtp write error: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("smtp write error: " + err.msg())
         }
         if n <= 0 {
             <-
@@ -55,11 +55,11 @@ fn write_cmd(fd int, cmd string) bool {
 fn read_line(fd int) string {
     $buf := ""
     while true {
-        chunk := net.conn_read(fd, 1) or (err) {
-            >> errors.new("smtp read error: " + err.msg())
+        chunk := net.conn_read(fd, 1) >>> (err) {
+            >>> errors.new("smtp read error: " + err.msg())
         }
         if chunk.len == 0 {
-            >> errors.new("smtp read unexpected EOF")
+            >>> errors.new("smtp read unexpected EOF")
         }
         buf = buf + chunk
         if buf.len >= 2 {
@@ -82,12 +82,12 @@ pub fn read_response(fd int) SmtpResponse {
     $last_code := 0
 
     while true {
-        line := read_line(fd) or >>
+        line := read_line(fd) >>>
         lines = lines + line
 
         if line.len >= 3 {
             c_str := line[0:3]
-            p_code := parse_int(c_str) or (err) {
+            p_code := parse_int(c_str) >>> (err) {
                 last_code = 0
                 <-
             }
@@ -121,7 +121,7 @@ pub fn new_client(endpoint string) SmtpClient {
     if colon >= 0 {
         host = ep[0:colon]
         port_str := ep[(colon + 1):ep.len]
-        p_val := parse_int(port_str) or (err) {
+        p_val := parse_int(port_str) >>> (err) {
             port = 1025
             << SmtpClient{host: host, port: 1025, username: "", password: ""}
         }
@@ -142,75 +142,75 @@ pub fn new_client(endpoint string) SmtpClient {
 
 pub fn (c SmtpClient) connect() int {
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("smtp dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("smtp dial failed: " + err.msg())
     }
 
     // 1. Read greeting: expects 220
-    greet := read_response(fd) or (err) {
+    greet := read_response(fd) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     if greet.code != 220 {
         safe_close(fd)
-        >> errors.new("smtp invalid greeting code: " + str(greet.code))
+        >>> errors.new("smtp invalid greeting code: " + str(greet.code))
     }
 
     // 2. Send EHLO
-    write_cmd(fd, "EHLO xu.local") or (err) {
+    write_cmd(fd, "EHLO xu.local") >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
-    ehlo_resp := read_response(fd) or (err) {
+    ehlo_resp := read_response(fd) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     if ehlo_resp.code != 250 {
         safe_close(fd)
-        >> errors.new("smtp EHLO rejected: " + str(ehlo_resp.code))
+        >>> errors.new("smtp EHLO rejected: " + str(ehlo_resp.code))
     }
 
     // 3. Optional AUTH LOGIN
     if c.username.len > 0 {
-        write_cmd(fd, "AUTH LOGIN") or (err) {
+        write_cmd(fd, "AUTH LOGIN") >>> (err) {
             safe_close(fd)
-            >> err
+            >>> err
         }
-        auth_resp := read_response(fd) or (err) {
+        auth_resp := read_response(fd) >>> (err) {
             safe_close(fd)
-            >> err
+            >>> err
         }
         if auth_resp.code != 334 {
             safe_close(fd)
-            >> errors.new("smtp AUTH LOGIN rejected: " + str(auth_resp.code))
+            >>> errors.new("smtp AUTH LOGIN rejected: " + str(auth_resp.code))
         }
 
         u_b64 := base64.encode_to_string(c.username + "")
-        write_cmd(fd, u_b64) or (err) {
+        write_cmd(fd, u_b64) >>> (err) {
             safe_close(fd)
-            >> err
+            >>> err
         }
-        u_resp := read_response(fd) or (err) {
+        u_resp := read_response(fd) >>> (err) {
             safe_close(fd)
-            >> err
+            >>> err
         }
         if u_resp.code != 334 {
             safe_close(fd)
-            >> errors.new("smtp username rejected: " + str(u_resp.code))
+            >>> errors.new("smtp username rejected: " + str(u_resp.code))
         }
 
         p_b64 := base64.encode_to_string(c.password + "")
-        write_cmd(fd, p_b64) or (err) {
+        write_cmd(fd, p_b64) >>> (err) {
             safe_close(fd)
-            >> err
+            >>> err
         }
-        p_resp := read_response(fd) or (err) {
+        p_resp := read_response(fd) >>> (err) {
             safe_close(fd)
-            >> err
+            >>> err
         }
         if p_resp.code != 235 {
             safe_close(fd)
-            >> errors.new("smtp password authentication failed: " + str(p_resp.code))
+            >>> errors.new("smtp password authentication failed: " + str(p_resp.code))
         }
     }
 
@@ -220,25 +220,25 @@ pub fn (c SmtpClient) connect() int {
 pub fn (c SmtpClient) send_mail_on_fd(fd int, msg Message) bool {
     // 1. MAIL FROM:<from>
     from_cmd := "MAIL FROM:<" + msg.from + ">"
-    write_cmd(fd, from_cmd) or >>
-    r1 := read_response(fd) or >>
+    write_cmd(fd, from_cmd) >>>
+    r1 := read_response(fd) >>>
     if r1.code != 250 {
-        >> errors.new("smtp MAIL FROM rejected: " + str(r1.code))
+        >>> errors.new("smtp MAIL FROM rejected: " + str(r1.code))
     }
 
     // 2. RCPT TO:<to>
     to_cmd := "RCPT TO:<" + msg.to + ">"
-    write_cmd(fd, to_cmd) or >>
-    r2 := read_response(fd) or >>
+    write_cmd(fd, to_cmd) >>>
+    r2 := read_response(fd) >>>
     if r2.code != 250 {
-        >> errors.new("smtp RCPT TO rejected: " + str(r2.code))
+        >>> errors.new("smtp RCPT TO rejected: " + str(r2.code))
     }
 
     // 3. DATA
-    write_cmd(fd, "DATA") or >>
-    r3 := read_response(fd) or >>
+    write_cmd(fd, "DATA") >>>
+    r3 := read_response(fd) >>>
     if r3.code != 354 {
-        >> errors.new("smtp DATA command rejected: " + str(r3.code))
+        >>> errors.new("smtp DATA command rejected: " + str(r3.code))
     }
 
     // 4. Send Message Header & Body followed by \r\n.\r\n
@@ -249,10 +249,10 @@ pub fn (c SmtpClient) send_mail_on_fd(fd int, msg Message) bool {
     content = content + "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
     content = content + msg.body + "\r\n.\r\n"
 
-    write_all(fd, content) or >>
-    r4 := read_response(fd) or >>
+    write_all(fd, content) >>>
+    r4 := read_response(fd) >>>
     if r4.code != 250 {
-        >> errors.new("smtp message delivery rejected: " + str(r4.code))
+        >>> errors.new("smtp message delivery rejected: " + str(r4.code))
     }
 
     << true
@@ -260,11 +260,11 @@ pub fn (c SmtpClient) send_mail_on_fd(fd int, msg Message) bool {
 
 pub fn (c SmtpClient) close_conn(fd int) {
     if fd >= 0 {
-        write_cmd(fd, "QUIT") or (e) {
+        write_cmd(fd, "QUIT") >>> (e) {
             safe_close(fd)
             <<
         }
-        read_response(fd) or (e) {
+        read_response(fd) >>> (e) {
             safe_close(fd)
             <<
         }

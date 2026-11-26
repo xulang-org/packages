@@ -4,7 +4,7 @@
 
 pub fn (c $&Client) put_object(bucket string, key string, data string, content_type string) int {
     $reusable := false
-    << c.put_object_at(-1, bucket, key, data, content_type, $&reusable) or >>
+    << c.put_object_at(-1, bucket, key, data, content_type, $&reusable) >>>
 }
 
 fn (c $&Client) put_object_at(fd int, bucket string, key string, data string, content_type string, reusable $&bool) int {
@@ -17,16 +17,16 @@ fn (c $&Client) put_object_at(fd int, bucket string, key string, data string, co
     if ct.len == 0 {
         ct = "application/octet-stream"
     }
-    resp := c.request_at(fd, "PUT", path, data, ct, reusable) or >>
+    resp := c.request_at(fd, "PUT", path, data, ct, reusable) >>>
     if resp.status_code != 200 && resp.status_code != 204 {
-        >> errors.new("s3: put_object failed with status " + str(resp.status_code) + ": " + resp.body)
+        >>> errors.new("s3: put_object failed with status " + str(resp.status_code) + ": " + resp.body)
     }
     << 0
 }
 
 pub fn (c $&Client) get_object(bucket string, key string) string {
     $reusable := false
-    << c.get_object_at(-1, bucket, key, $&reusable) or >>
+    << c.get_object_at(-1, bucket, key, $&reusable) >>>
 }
 
 fn (c $&Client) get_object_at(fd int, bucket string, key string, reusable $&bool) string {
@@ -35,16 +35,16 @@ fn (c $&Client) get_object_at(fd int, bucket string, key string, reusable $&bool
         k = k[1:k.len]
     }
     path := "/" + bucket + "/" + k
-    resp := c.request_at(fd, "GET", path, "", "", reusable) or >>
+    resp := c.request_at(fd, "GET", path, "", "", reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("s3: get_object failed with status " + str(resp.status_code) + ": " + resp.body)
+        >>> errors.new("s3: get_object failed with status " + str(resp.status_code) + ": " + resp.body)
     }
     << resp.body
 }
 
 pub fn (c $&Client) remove_object(bucket string, key string) int {
     $reusable := false
-    << c.remove_object_at(-1, bucket, key, $&reusable) or >>
+    << c.remove_object_at(-1, bucket, key, $&reusable) >>>
 }
 
 fn (c $&Client) remove_object_at(fd int, bucket string, key string, reusable $&bool) int {
@@ -53,9 +53,9 @@ fn (c $&Client) remove_object_at(fd int, bucket string, key string, reusable $&b
         k = k[1:k.len]
     }
     path := "/" + bucket + "/" + k
-    resp := c.request_at(fd, "DELETE", path, "", "", reusable) or >>
+    resp := c.request_at(fd, "DELETE", path, "", "", reusable) >>>
     if resp.status_code != 200 && resp.status_code != 204 {
-        >> errors.new("s3: remove_object failed with status " + str(resp.status_code) + ": " + resp.body)
+        >>> errors.new("s3: remove_object failed with status " + str(resp.status_code) + ": " + resp.body)
     }
     << 0
 }
@@ -71,7 +71,7 @@ fn (c $&Client) object_exists_at(fd int, bucket string, key string, reusable $&b
         k = k[1:k.len]
     }
     path := "/" + bucket + "/" + k
-    resp := c.request_at(fd, "HEAD", path, "", "", reusable) or (err) {
+    resp := c.request_at(fd, "HEAD", path, "", "", reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200

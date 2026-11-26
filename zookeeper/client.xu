@@ -13,7 +13,7 @@ fn parse_int_def(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -21,7 +21,7 @@ fn parse_int_def(s string, def int) int {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -57,8 +57,8 @@ pub fn new_client(endpoint string) Client {
 
 pub fn (c Client) exec_4lw(cmd string) string {
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("zookeeper dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("zookeeper dial failed: " + err.msg())
     }
 
     $cmd_payload := cmd
@@ -69,9 +69,9 @@ pub fn (c Client) exec_4lw(cmd string) string {
     $off := 0
     while off < cmd_payload.len {
         part := cmd_payload[off:cmd_payload.len]
-        n := net.conn_write(fd, &part) or (err) {
+        n := net.conn_write(fd, &part) >>> (err) {
             safe_close(fd)
-            >> errors.new("zookeeper write failed: " + err.msg())
+            >>> errors.new("zookeeper write failed: " + err.msg())
         }
         if n <= 0 {
             <-
@@ -81,7 +81,7 @@ pub fn (c Client) exec_4lw(cmd string) string {
 
     $raw_resp := ""
     while true {
-        chunk := net.conn_read(fd, 4096) or (err) {
+        chunk := net.conn_read(fd, 4096) >>> (err) {
             <-
         }
         if chunk.len == 0 {
@@ -94,7 +94,7 @@ pub fn (c Client) exec_4lw(cmd string) string {
 }
 
 pub fn (c Client) ruok() bool {
-    res := c.exec_4lw("ruok") or (err) {
+    res := c.exec_4lw("ruok") >>> (err) {
         << false
     }
     target := "imok"
@@ -105,9 +105,9 @@ pub fn (c Client) ruok() bool {
 }
 
 pub fn (c Client) stat() string {
-    << c.exec_4lw("stat") or >>
+    << c.exec_4lw("stat") >>>
 }
 
 pub fn (c Client) mntr() string {
-    << c.exec_4lw("mntr") or >>
+    << c.exec_4lw("mntr") >>>
 }

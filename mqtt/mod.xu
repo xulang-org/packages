@@ -13,7 +13,7 @@
 // - Graceful DISCONNECT.
 
 pub fn open(addr string, client_id string) Client {
-    << connect(addr, client_id) or >>
+    << connect(addr, client_id) >>>
 }
 
 pub fn open_pool(addr string, id_prefix string, max_idle int) Pool {

@@ -23,7 +23,7 @@ fn parse_int_def(s string, def int) int {
     if s.len == 0 {
         << def
     }
-    n := parse_int(s) or (err) {
+    n := parse_int(s) >>> (err) {
         << def
     }
     << n
@@ -31,7 +31,7 @@ fn parse_int_def(s string, def int) int {
 
 fn safe_close(fd int) {
     if fd >= 0 {
-        net.conn_close(fd) or (e) {
+        net.conn_close(fd) >>> (e) {
             <<
         }
     }
@@ -39,7 +39,7 @@ fn safe_close(fd int) {
 
 fn parse_endpoint(raw string) Client {
     if strings.has_prefix(&raw, "https://") {
-        ep := transport.parse_endpoint(raw, 6333) or (err) { << Client{host: "127.0.0.1", port: 6333, secure: true, api_key: ""} }
+        ep := transport.parse_endpoint(raw, 6333) >>> (err) { << Client{host: "127.0.0.1", port: 6333, secure: true, api_key: ""} }
         << Client{host: ep.host, port: ep.port, secure: true, api_key: ""}
     }
     $ep := raw
@@ -88,17 +88,17 @@ pub fn (c $&Client) request(method string, path string, body string) Response {
         req = req + "Connection: close\r\n\r\n" + body
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
-        resp := transport.request_raw(ep, cfg, req, method + "") or >>
+        resp := transport.request_raw(ep, cfg, req, method + "") >>>
         << Response{status_code: resp.status_code, body: resp.body}
     }
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) or (err) {
-        >> errors.new("qdrant: dial failed: " + err.msg())
+    fd := net.dial(strings.clone(&addr)) >>> (err) {
+        >>> errors.new("qdrant: dial failed: " + err.msg())
     }
     $reusable := false
-    result := c.request_on_fd(fd, method, path, body, $&reusable) or (err) {
+    result := c.request_on_fd(fd, method, path, body, $&reusable) >>> (err) {
         safe_close(fd)
-        >> err
+        >>> err
     }
     safe_close(fd)
     << result
@@ -107,10 +107,10 @@ pub fn (c $&Client) request(method string, path string, body string) Response {
 fn (c $&Client) request_at(fd int, method string, path string, body string, reusable $&bool) Response {
     if c.secure {
         *reusable = false
-        << c.request(method, path, body) or >>
+        << c.request(method, path, body) >>>
     }
-    if fd < 0 { << c.request(method, path, body) or >> }
-    << c.request_on_fd(fd, method, path, body, reusable) or >>
+    if fd < 0 { << c.request(method, path, body) >>> }
+    << c.request_on_fd(fd, method, path, body, reusable) >>>
 }
 
 fn (c $&Client) request_on_fd(fd int, method string, path string, body string, reusable $&bool) Response {
@@ -136,15 +136,15 @@ fn (c $&Client) request_on_fd(fd int, method string, path string, body string, r
     $off := 0
     while off < req.len {
         part := req[off:req.len]
-        n := net.conn_write(fd, &part) or (err) {
-            >> errors.new("qdrant: write failed: " + err.msg())
+        n := net.conn_write(fd, &part) >>> (err) {
+            >>> errors.new("qdrant: write failed: " + err.msg())
         }
-        if n <= 0 { >> errors.new("qdrant: connection closed during write") }
+        if n <= 0 { >>> errors.new("qdrant: connection closed during write") }
         off = off + n
     }
 
-    resp := http.read_response(fd, method + "") or (err) {
-        >> err
+    resp := http.read_response(fd, method + "") >>> (err) {
+        >>> err
     }
     *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method)
     << Response{status_code: resp.status_code, body: resp.body}
@@ -156,7 +156,7 @@ pub fn (c $&Client) ping() bool {
 }
 
 fn (c $&Client) ping_at(fd int, reusable $&bool) bool {
-    resp := c.request_at(fd, "GET", "/healthz", "", reusable) or (err) {
+    resp := c.request_at(fd, "GET", "/healthz", "", reusable) >>> (err) {
         << false
     }
     << resp.status_code == 200

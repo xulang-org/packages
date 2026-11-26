@@ -5,46 +5,46 @@
 
 pub fn (c $&Client) health() bool {
     $reusable := false
-    << c.health_at(-1, $&reusable) or >>
+    << c.health_at(-1, $&reusable) >>>
 }
 
 fn (c $&Client) health_at(fd int, reusable $&bool) bool {
-    resp := c.request_at(fd, "GET", "/health", "", "", "application/json", reusable) or (err) {
-        >> err
+    resp := c.request_at(fd, "GET", "/health", "", "", "application/json", reusable) >>> (err) {
+        >>> err
     }
     if resp.status_code == 200 {
         << true
     }
-    >> errors.new("influxdb health check failed with status " + str(resp.status_code))
+    >>> errors.new("influxdb health check failed with status " + str(resp.status_code))
 }
 
 pub fn (c $&Client) ping() bool {
     $reusable := false
-    << c.ping_at(-1, $&reusable) or >>
+    << c.ping_at(-1, $&reusable) >>>
 }
 
 fn (c $&Client) ping_at(fd int, reusable $&bool) bool {
-    resp := c.request_at(fd, "GET", "/ping", "", "", "", reusable) or (err) {
-        >> err
+    resp := c.request_at(fd, "GET", "/ping", "", "", "", reusable) >>> (err) {
+        >>> err
     }
     if resp.status_code == 204 || resp.status_code == 200 {
         << true
     }
-    >> errors.new("influxdb ping failed with status " + str(resp.status_code))
+    >>> errors.new("influxdb ping failed with status " + str(resp.status_code))
 }
 
 pub fn (c $&Client) query_flux(flux string) string {
     $reusable := false
-    << c.query_flux_at(-1, flux, $&reusable) or >>
+    << c.query_flux_at(-1, flux, $&reusable) >>>
 }
 
 fn (c $&Client) query_flux_at(fd int, flux string, reusable $&bool) string {
     path := "/api/v2/query?org=" + c.org
-    resp := c.request_at(fd, "POST", path, flux, "application/vnd.flux", "application/csv", reusable) or (err) {
-        >> err
+    resp := c.request_at(fd, "POST", path, flux, "application/vnd.flux", "application/csv", reusable) >>> (err) {
+        >>> err
     }
     if resp.status_code >= 200 && resp.status_code < 300 {
         << resp.body
     }
-    >> errors.new("influxdb query failed with status " + str(resp.status_code) + ": " + resp.body)
+    >>> errors.new("influxdb query failed with status " + str(resp.status_code) + ": " + resp.body)
 }

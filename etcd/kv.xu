@@ -34,32 +34,32 @@ fn extract_json_value(json_str string, key_field string) string {
 
 pub fn (c $&Client) put(key string, value string) int {
     $reusable := false
-    << c.put_at(-1, key, value, $&reusable) or >>
+    << c.put_at(-1, key, value, $&reusable) >>>
 }
 
 fn (c $&Client) put_at(fd int, key string, value string, reusable $&bool) int {
     k_b64 := base64.encode_to_string(key)
     v_b64 := base64.encode_to_string(value)
     body := "{\"key\":\"" + k_b64 + "\",\"value\":\"" + v_b64 + "\"}"
-    resp := c.request_at(fd, "/v3/kv/put", body, reusable) or >>
+    resp := c.request_at(fd, "/v3/kv/put", body, reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("etcd: put failed (" + str(resp.status_code) + "): " + resp.body)
+        >>> errors.new("etcd: put failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }
 
 pub fn (c $&Client) put_with_lease(key string, value string, lease_id int) int {
     $reusable := false
-    << c.put_with_lease_at(-1, key, value, lease_id, $&reusable) or >>
+    << c.put_with_lease_at(-1, key, value, lease_id, $&reusable) >>>
 }
 
 fn (c $&Client) put_with_lease_at(fd int, key string, value string, lease_id int, reusable $&bool) int {
     k_b64 := base64.encode_to_string(key)
     v_b64 := base64.encode_to_string(value)
     body := "{\"key\":\"" + k_b64 + "\",\"value\":\"" + v_b64 + "\",\"lease\":\"" + str(lease_id) + "\"}"
-    resp := c.request_at(fd, "/v3/kv/put", body, reusable) or >>
+    resp := c.request_at(fd, "/v3/kv/put", body, reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("etcd: put_with_lease failed (" + str(resp.status_code) + "): " + resp.body)
+        >>> errors.new("etcd: put_with_lease failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }
@@ -78,25 +78,25 @@ fn contains_kvs(body string) bool {
 
 pub fn (c $&Client) get(key string) string {
     $reusable := false
-    << c.get_at(-1, key, $&reusable) or >>
+    << c.get_at(-1, key, $&reusable) >>>
 }
 
 fn (c $&Client) get_at(fd int, key string, reusable $&bool) string {
     k_b64 := base64.encode_to_string(key)
     body := "{\"key\":\"" + k_b64 + "\"}"
-    resp := c.request_at(fd, "/v3/kv/range", body, reusable) or >>
+    resp := c.request_at(fd, "/v3/kv/range", body, reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("etcd: get failed (" + str(resp.status_code) + "): " + resp.body)
+        >>> errors.new("etcd: get failed (" + str(resp.status_code) + "): " + resp.body)
     }
     if !contains_kvs(resp.body) {
-        >> errors.new("etcd: key not found")
+        >>> errors.new("etcd: key not found")
     }
     v_b64 := extract_json_value(resp.body, "value")
     if v_b64.len == 0 {
         << ""
     }
-    raw := base64.decode_string(v_b64) or (err) {
-        >> errors.new("etcd: base64 decode failed: " + err.msg())
+    raw := base64.decode_string(v_b64) >>> (err) {
+        >>> errors.new("etcd: base64 decode failed: " + err.msg())
     }
     << raw
 }
@@ -109,7 +109,7 @@ pub fn (c $&Client) exists(key string) bool {
 fn (c $&Client) exists_at(fd int, key string, reusable $&bool) bool {
     k_b64 := base64.encode_to_string(key)
     body := "{\"key\":\"" + k_b64 + "\"}"
-    resp := c.request_at(fd, "/v3/kv/range", body, reusable) or (err) {
+    resp := c.request_at(fd, "/v3/kv/range", body, reusable) >>> (err) {
         << false
     }
     if resp.status_code != 200 {
@@ -120,15 +120,15 @@ fn (c $&Client) exists_at(fd int, key string, reusable $&bool) bool {
 
 pub fn (c $&Client) delete(key string) int {
     $reusable := false
-    << c.delete_at(-1, key, $&reusable) or >>
+    << c.delete_at(-1, key, $&reusable) >>>
 }
 
 fn (c $&Client) delete_at(fd int, key string, reusable $&bool) int {
     k_b64 := base64.encode_to_string(key)
     body := "{\"key\":\"" + k_b64 + "\"}"
-    resp := c.request_at(fd, "/v3/kv/deleterange", body, reusable) or >>
+    resp := c.request_at(fd, "/v3/kv/deleterange", body, reusable) >>>
     if resp.status_code != 200 {
-        >> errors.new("etcd: delete failed (" + str(resp.status_code) + "): " + resp.body)
+        >>> errors.new("etcd: delete failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }

@@ -50,7 +50,7 @@ fn oid_cell(oid int, payload string) string {
         << "f:" + payload
     }
     if oid == 17 && strings.has_prefix(&payload, "\\x") {
-        raw := hex.decode_string(payload[2:payload.len]) or (err) { << "s:" + payload }
+        raw := hex.decode_string(payload[2:payload.len]) >>> (err) { << "s:" + payload }
         << driver.encode_value(raw)
     }
     << "s:" + payload
@@ -108,7 +108,7 @@ fn command_rows(tag string) int {
     }
     if start == end { << 0 }
     part := tag[start:end] + ""
-    n := strconv.atoi(&part) or (err) { << 0 }
+    n := strconv.atoi(&part) >>> (err) { << 0 }
     << n
 }
 
@@ -292,7 +292,7 @@ fn pg_arg_val(args &[]driver.NamedValue, i int) string {
     }
     if args[i].value is f64 {
         x := args[i].value as f64
-        fs := strconv.format_float(x, 103, -1) or (err) { << pg_text("0") }
+        fs := strconv.format_float(x, 103, -1) >>> (err) { << pg_text("0") }
         << pg_text(fs)
     }
     if args[i].value is time.Time {
@@ -336,14 +336,14 @@ fn query_state(s $&PgState, q string, args []driver.NamedValue, want_rows int) Q
 }
 
 fn close_fd(fd int) {
-    net.conn_close(fd) or (err) {
+    net.conn_close(fd) >>> (err) {
         <<
     }
     <<
 }
 
 fn close_tls_quiet(tc $&transport.Conn) int {
-    tc.close() or (err) { << 0 }
+    tc.close() >>> (err) { << 0 }
     << 0
 }
 
@@ -362,34 +362,34 @@ fn failed_conn(msg string) driver.Conn {
 fn new_conn_tls(cfg Config) driver.Conn {
     port_text := str(cfg.port)
     addr := net.join_host_port(&cfg.host, &port_text)
-    $raw := net.dial_to("tcp", addr) or (err) { << failed_conn(err.msg()) }
+    $raw := net.dial_to("tcp", addr) >>> (err) { << failed_conn(err.msg()) }
     ssl_request := be32(8) + be32(80877103)
-    raw.write(&ssl_request) or (err) {
-        raw.close() or (close_err) { << failed_conn(err.msg()) }
+    raw.write(&ssl_request) >>> (err) {
+        raw.close() >>> (close_err) { << failed_conn(err.msg()) }
         << failed_conn(err.msg())
     }
-    answer := raw.read(1) or (err) {
-        raw.close() or (close_err) { << failed_conn(err.msg()) }
+    answer := raw.read(1) >>> (err) {
+        raw.close() >>> (close_err) { << failed_conn(err.msg()) }
         << failed_conn(err.msg())
     }
     if answer != "S" {
-        raw.close() or (close_err) { << failed_conn("postgres: server refused TLS") }
+        raw.close() >>> (close_err) { << failed_conn("postgres: server refused TLS") }
         << failed_conn("postgres: server refused TLS")
     }
     $tc_cfg := tls.new_config(cfg.host + "")
     if cfg.root_cert_file.len > 0 {
-        pem := read_file(cfg.root_cert_file) or (err) { << failed_conn(err.msg()) }
-        ncert := x509.append_certificates($&tc_cfg.root_cas, &pem) or (err) {
+        pem := read_file(cfg.root_cert_file) >>> (err) { << failed_conn(err.msg()) }
+        ncert := x509.append_certificates($&tc_cfg.root_cas, &pem) >>> (err) {
             << failed_conn(err.msg())
         }
         if ncert <= 0 { << failed_conn("postgres: no certificates in sslrootcert") }
     }
-    tls_conn := tls.client(raw, &tc_cfg) or (err) { << failed_conn(err.msg()) }
+    tls_conn := tls.client(raw, &tc_cfg) >>> (err) { << failed_conn(err.msg()) }
     $tr := transport.Conn{fd: -1, tls_conn: tls_conn, secure: true, closed: false, eof: false, buf: ""}
     startup_err := startup_tls($&tr, &cfg)
     ch := chan PgState{cap: 1}
     tcch := chan transport.Conn{cap: 1}
-    if startup_err.len > 0 { tr.close() or (close_err) { << failed_conn(startup_err) } }
+    if startup_err.len > 0 { tr.close() >>> (close_err) { << failed_conn(startup_err) } }
     tcch <- tr
     if startup_err.len > 0 {
         ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: startup_err, tx: 0}
@@ -403,7 +403,7 @@ fn new_conn(cfg Config) driver.Conn {
     if cfg.ssl_mode != "disable" {
         << new_conn_tls(cfg)
     }
-    fd := net.dial(cfg.host + ":" + str(cfg.port)) or (err) {
+    fd := net.dial(cfg.host + ":" + str(cfg.port)) >>> (err) {
         ch := chan PgState{cap: 1}
         ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: err.msg(), tx: 0}
         << driver.Conn(PgConn{st: ch})
@@ -418,7 +418,7 @@ fn new_conn(cfg Config) driver.Conn {
 }
 
 fn (d PostgresDriver) open(name string) driver.Conn {
-    cfg := parse_dsn(name) or (err) {
+    cfg := parse_dsn(name) >>> (err) {
         ch := chan PgState{cap: 1}
         ch <- PgState{fd: -1, secure: 0, tc_chan: closed_tc_chan(), closed: 1, open_err: err.msg(), tx: 0}
         << driver.Conn(PgConn{st: ch})

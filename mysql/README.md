@@ -32,29 +32,29 @@ mysql #github.com/xulang-org/packages/mysql
 fn main() int {
     dsn := "root:123456@tcp(127.0.0.1:3306)/my_db"
     $db := sql.open(mysql.driver(), dsn)
-    db.ping() or (err) {
+    db.ping() >>> (err) {
         println("Ping failed: " + err.msg())
         << 1
     }
 
-    db.exec("INSERT INTO users (name, age) VALUES (?, ?)", "Ada", 25) or (err) {
+    db.exec("INSERT INTO users (name, age) VALUES (?, ?)", "Ada", 25) >>> (err) {
         println(err.msg())
         << 1
     }
 
-    $rows := db.query("SELECT id, name FROM users WHERE age >= ?", 18) or (err) {
+    $rows := db.query("SELECT id, name FROM users WHERE age >= ?", 18) >>> (err) {
         println(err.msg())
         << 1
     }
     while rows.next() {
-        vals := rows.take() or (err) {
+        vals := rows.take() >>> (err) {
             println(err.msg())
             << 1
         }
         println(vals[1] as string)
     }
     rows.close()
-    db.close() or (err) {
+    db.close() >>> (err) {
         println(err.msg())
         << 1
     }

@@ -37,7 +37,7 @@ pub fn (p &Pool) get_conn() int {
         }
         else {
             addr := p.client.host + ":" + str(p.client.port)
-            fd := net.dial(strings.clone(&addr)) or (err) {
+            fd := net.dial(strings.clone(&addr)) >>> (err) {
                 << -1
             }
             << fd
@@ -65,11 +65,11 @@ pub fn (p &Pool) ruok() bool {
 }
 
 pub fn (p &Pool) stat() string {
-    << p.client.stat() or >>
+    << p.client.stat() >>>
 }
 
 pub fn (p &Pool) mntr() string {
-    << p.client.mntr() or >>
+    << p.client.mntr() >>>
 }
 
 pub fn (p &Pool) close() {

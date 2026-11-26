@@ -23,7 +23,7 @@ fn main() {
     )
 
     // 1. 服务健康检查
-    is_ok := client.health() or (err) {
+    is_ok := client.health() >>> (err) {
         println("Health check failed: " + err.msg())
         <<
     }
@@ -37,7 +37,7 @@ fn main() {
     pt.add_field_int("cores", 8)
     pt.add_field_bool("is_active", true)
 
-    client.write_point(pt) or (err) {
+    client.write_point(pt) >>> (err) {
         println("Write point error: " + err.msg())
         <<
     }
@@ -45,7 +45,7 @@ fn main() {
 
     // 3. 执行 Flux 查询
     flux := "from(bucket: \"xu-bucket\") |> range(start: -1h) |> filter(fn: (r) => r._measurement == \"cpu_metrics\")"
-    csv := client.query_flux(flux) or (err) {
+    csv := client.query_flux(flux) >>> (err) {
         println("Flux query error: " + err.msg())
         <<
     }
@@ -68,7 +68,7 @@ fn main() {
     )
 
     $client := pool.get()
-    client.ping() or (err) {
+    client.ping() >>> (err) {
         println("Ping failed: " + err.msg())
     }
 
