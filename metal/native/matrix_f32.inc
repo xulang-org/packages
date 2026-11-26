@@ -67,7 +67,7 @@ xu_int XM_API(matrix_f32_write)(xu_int h, const xu_i64_span *source) { @autorele
     ENTER; XMMatrix *m = lookup(h, MATRIX_F32);
     if (!m) RETURN(XM_HANDLE);
     if ((uint64_t)source->len != m.words) RETURN(XM_BOUNDS);
-    if (m.busy) RETURN(XM_BUSY);
+    if (!can_host_write(m)) RETURN(XM_BUSY);
     if (m.poisoned) RETURN(XM_COMMAND);
     const xu_int *input = source->data;
     int numberClass = MATRIX_CLASS_NORMAL;
@@ -96,7 +96,7 @@ xu_int XM_API(matrix_f32_write)(xu_int h, const xu_i64_span *source) { @autorele
 xu_int XM_API(matrix_f32_snapshot)(xu_int h) { @autoreleasepool {
     ENTER; XMMatrix *m = lookup(h, MATRIX_F32);
     if (!m) RETURN(XM_HANDLE);
-    if (m.busy) RETURN(XM_BUSY);
+    if (!can_host_read(m)) RETURN(XM_BUSY);
     if (m.poisoned) RETURN(XM_COMMAND);
     NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)m.words * 4];
     if (!data) RETURN(XM_ALLOC);
@@ -125,7 +125,7 @@ xu_int XM_API(matrix_f32_copy)(xu_int h, const xu_i64_span_mut *destination) { @
     ENTER; XMMatrix *m = lookup(h, MATRIX_F32);
     if (!m) RETURN(XM_HANDLE);
     if ((uint64_t)destination->len < m.words) RETURN(XM_BOUNDS);
-    if (m.busy) RETURN(XM_BUSY);
+    if (!can_host_read(m)) RETURN(XM_BUSY);
     if (m.poisoned) RETURN(XM_COMMAND);
     // Empty shapes may have nonzero row counts but only a 16-byte backing
     // allocation. Do not even form row pointers when there are no elements.
@@ -178,9 +178,11 @@ static BOOL matrix_normal_inputs(XMMatrix *m) {
 
 // Called with gate held. Per-device FIFO is bounded; pending fences retain
 // their own operation after eviction. Keys cover every varying GEMM property.
-static MPSMatrixMultiplication *matrix_kernel_ex(XMDevice *d, XMMatrix *c, XMMatrix *a, BOOL transposeRight) {
-    NSString *key = [NSString stringWithFormat:@"%llu:%llu:%llu:%d",
-        (unsigned long long)c.rows, (unsigned long long)c.columns,
+static MPSMatrixMultiplication *matrix_kernel_typed(XMDevice *d, XMMatrix *c, XMMatrix *a,
+                                                      BOOL transposeRight, MPSDataType dataType) {
+    const char *tag = (dataType == MPSDataTypeFloat16) ? "f16" : "f32";
+    NSString *key = [NSString stringWithFormat:@"%s:%llu:%llu:%llu:%d",
+        tag, (unsigned long long)c.rows, (unsigned long long)c.columns,
         (unsigned long long)a.columns, transposeRight ? 1 : 0];
     MPSMatrixMultiplication *kernel = d.matrixKernels[key];
     if (kernel) return kernel;
@@ -198,6 +200,25 @@ static MPSMatrixMultiplication *matrix_kernel_ex(XMDevice *d, XMMatrix *c, XMMat
     [d.matrixKeys addObject:key];
     d.matrixKernelBuilds++;
     return kernel;
+}
+
+static MPSMatrixMultiplication *matrix_kernel_ex(XMDevice *d, XMMatrix *c, XMMatrix *a, BOOL transposeRight) {
+    return matrix_kernel_typed(d, c, a, transposeRight, MPSDataTypeFloat32);
+}
+
+static inline BOOL batch_normal_input(XMBatch *batch, XMMatrix *m) {
+    if (batch && [batch.writeBuffers indexOfObjectIdenticalTo:m] != NSNotFound) return YES;
+    return matrix_normal_inputs(m);
+}
+
+static xu_int finish_op(XMBatch *batch, XMDevice *d, XMBuffer *dst, NSArray<XMBuffer *> *inputs,
+                        id<MTLCommandBuffer> command, id operation) {
+    if (batch) {
+        if (command && !batch.command) batch.command = command;
+        batch_acquire(batch, dst, inputs, operation);
+        return 0;
+    }
+    return submit_command_rw(d, dst ? @[dst] : @[], inputs ?: @[], command, operation ? @[operation] : nil, NO);
 }
 
 static BOOL ensure_ai_pipelines(XMDevice *d) {
@@ -429,25 +450,41 @@ static NSUInteger ai_row_tg_width(id<MTLComputePipelineState> pipe) {
     return w;
 }
 
-static xu_int gemm_f32_impl(xu_int dst, xu_int ah, xu_int bh, BOOL transposeRight) { @autoreleasepool {
+static XMBatch *lookup_batch_for(xu_int bh, XMBuffer *dst, xu_int *err_out) {
+    if (bh <= 0) { *err_out = XM_HANDLE; return nil; }
+    XMBatch *b = lookup(bh, BATCH);
+    if (!b) { *err_out = XM_HANDLE; return nil; }
+    if (b.submitted) { *err_out = XM_BUSY; return nil; }
+    if (dst && b.owner != dst.owner) { *err_out = XM_DEVICE; return nil; }
+    *err_out = 0;
+    return b;
+}
+
+static xu_int gemm_f32_impl(xu_int bh, xu_int dst, xu_int ah, xu_int bh_m, BOOL transposeRight) { @autoreleasepool {
     ENTER;
-    XMMatrix *c = lookup(dst, MATRIX_F32), *a = lookup(ah, MATRIX_F32), *b = lookup(bh, MATRIX_F32);
+    XMMatrix *c = lookup(dst, MATRIX_F32), *a = lookup(ah, MATRIX_F32), *b = lookup(bh_m, MATRIX_F32);
     if (!c || !a || !b) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (a.owner != c.owner || b.owner != c.owner) RETURN(XM_DEVICE);
     NSUInteger innerB = transposeRight ? b.columns : b.rows;
     NSUInteger outColsB = transposeRight ? b.rows : b.columns;
     if (a.columns != innerB || c.rows != a.rows || c.columns != outColsB) RETURN(XM_SHAPE);
     if (c == a || c == b) RETURN(XM_ALIAS);
-    if (c.busy || a.busy || b.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = (a == b) ? @[a] : @[a, b];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || a.poisoned || b.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(a) || !matrix_normal_inputs(b)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, a) || !batch_normal_input(batch, b)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
     if (!MPSSupportsMTLDevice(d.gpu)) RETURN(XM_UNAVAILABLE);
     if (!c.words || !a.columns) {
-        xu_int fence = submit_command(d, c, a, b, nil, nil);
-        // Failure to allocate the completed fence must leave output unchanged.
+        xu_int fence = finish_op(batch, d, c, inputs, nil, nil);
         if (fence >= 0) {
-            if (c.words) memset(c.memory.contents, 0, c.memory.length);
+            if (c.words && !batch) memset(c.memory.contents, 0, c.memory.length);
             c.numberClass = MATRIX_CLASS_NORMAL;
         }
         RETURN(fence);
@@ -457,19 +494,21 @@ static xu_int gemm_f32_impl(xu_int dst, xu_int ah, xu_int bh, BOOL transposeRigh
     @try {
         kernel = matrix_kernel_ex(d, c, a, transposeRight);
         if (!kernel) RETURN(XM_PIPELINE);
-        command = [d.queue commandBuffer];
+        command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
         if (!command) RETURN(XM_COMMAND);
         [kernel encodeToCommandBuffer:command leftMatrix:a.matrix rightMatrix:b.matrix resultMatrix:c.matrix];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command(d, c, a, b, command, kernel);
+    xu_int handle = finish_op(batch, d, c, inputs, command, kernel);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-xu_int XM_API(gemm_f32)(xu_int dst, xu_int ah, xu_int bh) { return gemm_f32_impl(dst, ah, bh, NO); }
-xu_int XM_API(gemm_f32_nt)(xu_int dst, xu_int ah, xu_int bh) { return gemm_f32_impl(dst, ah, bh, YES); }
+xu_int XM_API(gemm_f32)(xu_int dst, xu_int ah, xu_int bh) { return gemm_f32_impl(-1, dst, ah, bh, NO); }
+xu_int XM_API(gemm_f32_nt)(xu_int dst, xu_int ah, xu_int bh) { return gemm_f32_impl(-1, dst, ah, bh, YES); }
+xu_int XM_API(batch_gemm_f32)(xu_int batch, xu_int dst, xu_int ah, xu_int bh) { return gemm_f32_impl(batch < 0 ? 0 : batch, dst, ah, bh, NO); }
+xu_int XM_API(batch_gemm_f32_nt)(xu_int batch, xu_int dst, xu_int ah, xu_int bh) { return gemm_f32_impl(batch < 0 ? 0 : batch, dst, ah, bh, YES); }
 
-xu_int XM_API(rmsnorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int eps_bits) { @autoreleasepool {
+static xu_int rmsnorm_f32_impl(xu_int bh, xu_int dst, xu_int xh, xu_int wh, xu_int eps_bits) { @autoreleasepool {
     if (eps_bits < 0 || (xu_uint)eps_bits > UINT32_MAX) return XM_NUMERICS;
     uint32_t eb = (uint32_t)eps_bits;
     float eps = 0.0f;
@@ -478,16 +517,23 @@ xu_int XM_API(rmsnorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int eps_bits) { 
     ENTER;
     XMMatrix *c = lookup(dst, MATRIX_F32), *x = lookup(xh, MATRIX_F32), *w = lookup(wh, MATRIX_F32);
     if (!c || !x || !w) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (x.owner != c.owner || w.owner != c.owner) RETURN(XM_DEVICE);
     if (c.rows != x.rows || c.columns != x.columns || w.rows != 1 || w.columns != x.columns) RETURN(XM_SHAPE);
     if (c == x || c == w) RETURN(XM_ALIAS);
-    if (c.busy || x.busy || w.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = (x == w) ? @[x] : @[x, w];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || x.poisoned || w.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(x) || !matrix_normal_inputs(w)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, x) || !batch_normal_input(batch, w)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command(d, c, x, w, nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -505,25 +551,35 @@ xu_int XM_API(rmsnorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int eps_bits) { 
         [enc dispatchThreadgroups:MTLSizeMake(x.rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command(d, c, x, w, command, d.rmsnormPipeline);
+    xu_int handle = finish_op(batch, d, c, inputs, command, d.rmsnormPipeline);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-xu_int XM_API(softmax_f32)(xu_int dst, xu_int xh) { @autoreleasepool {
+xu_int XM_API(rmsnorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int eps_bits) { return rmsnorm_f32_impl(-1, dst, xh, wh, eps_bits); }
+xu_int XM_API(batch_rmsnorm_f32)(xu_int batch, xu_int dst, xu_int xh, xu_int wh, xu_int eps_bits) { return rmsnorm_f32_impl(batch < 0 ? 0 : batch, dst, xh, wh, eps_bits); }
+
+static xu_int softmax_f32_impl(xu_int bh, xu_int dst, xu_int xh) { @autoreleasepool {
     ENTER;
     XMMatrix *c = lookup(dst, MATRIX_F32), *x = lookup(xh, MATRIX_F32);
     if (!c || !x) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (x.owner != c.owner) RETURN(XM_DEVICE);
     if (c.rows != x.rows || c.columns != x.columns) RETURN(XM_SHAPE);
     if (c == x) RETURN(XM_ALIAS);
-    if (c.busy || x.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = @[x];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || x.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(x)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, x)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command(d, c, x, x, nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -539,26 +595,36 @@ xu_int XM_API(softmax_f32)(xu_int dst, xu_int xh) { @autoreleasepool {
         [enc dispatchThreadgroups:MTLSizeMake(x.rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command(d, c, x, x, command, d.softmaxPipeline);
+    xu_int handle = finish_op(batch, d, c, inputs, command, d.softmaxPipeline);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-static xu_int binary_elem_f32(xu_int dst, xu_int ah, xu_int bh, int mode) { @autoreleasepool {
+xu_int XM_API(softmax_f32)(xu_int dst, xu_int xh) { return softmax_f32_impl(-1, dst, xh); }
+xu_int XM_API(batch_softmax_f32)(xu_int batch, xu_int dst, xu_int xh) { return softmax_f32_impl(batch < 0 ? 0 : batch, dst, xh); }
+
+static xu_int binary_elem_f32(xu_int bh, xu_int dst, xu_int ah, xu_int bh_m, int mode) { @autoreleasepool {
     ENTER;
-    XMMatrix *c = lookup(dst, MATRIX_F32), *a = lookup(ah, MATRIX_F32), *b = lookup(bh, MATRIX_F32);
+    XMMatrix *c = lookup(dst, MATRIX_F32), *a = lookup(ah, MATRIX_F32), *b = lookup(bh_m, MATRIX_F32);
     if (!c || !a || !b) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (a.owner != c.owner || b.owner != c.owner) RETURN(XM_DEVICE);
     if (c.rows != a.rows || c.columns != a.columns || b.rows != a.rows || b.columns != a.columns) RETURN(XM_SHAPE);
     if (c == a || c == b) RETURN(XM_ALIAS);
-    if (c.busy || a.busy || b.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = (a == b) ? @[a] : @[a, b];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || a.poisoned || b.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(a) || !matrix_normal_inputs(b)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, a) || !batch_normal_input(batch, b)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command(d, c, a, b, nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
     id<MTLComputePipelineState> pipe = mode == 1 ? d.swigluPipeline : (mode == 2 ? d.mulPipeline : d.addPipeline);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -580,16 +646,19 @@ static xu_int binary_elem_f32(xu_int dst, xu_int ah, xu_int bh, int mode) { @aut
             threadsPerThreadgroup:MTLSizeMake(tx, ty, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command(d, c, a, b, command, pipe);
+    xu_int handle = finish_op(batch, d, c, inputs, command, pipe);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-xu_int XM_API(swiglu_f32)(xu_int dst, xu_int gate, xu_int up) { return binary_elem_f32(dst, gate, up, 1); }
-xu_int XM_API(add_f32)(xu_int dst, xu_int a, xu_int b) { return binary_elem_f32(dst, a, b, 0); }
-xu_int XM_API(mul_f32)(xu_int dst, xu_int a, xu_int b) { return binary_elem_f32(dst, a, b, 2); }
+xu_int XM_API(swiglu_f32)(xu_int dst, xu_int gate, xu_int up) { return binary_elem_f32(-1, dst, gate, up, 1); }
+xu_int XM_API(add_f32)(xu_int dst, xu_int a, xu_int b) { return binary_elem_f32(-1, dst, a, b, 0); }
+xu_int XM_API(mul_f32)(xu_int dst, xu_int a, xu_int b) { return binary_elem_f32(-1, dst, a, b, 2); }
+xu_int XM_API(batch_swiglu_f32)(xu_int batch, xu_int dst, xu_int gate, xu_int up) { return binary_elem_f32(batch < 0 ? 0 : batch, dst, gate, up, 1); }
+xu_int XM_API(batch_add_f32)(xu_int batch, xu_int dst, xu_int a, xu_int b) { return binary_elem_f32(batch < 0 ? 0 : batch, dst, a, b, 0); }
+xu_int XM_API(batch_mul_f32)(xu_int batch, xu_int dst, xu_int a, xu_int b) { return binary_elem_f32(batch < 0 ? 0 : batch, dst, a, b, 2); }
 
-xu_int XM_API(layernorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int bh, xu_int eps_bits) { @autoreleasepool {
+static xu_int layernorm_f32_impl(xu_int bh, xu_int dst, xu_int xh, xu_int wh, xu_int bh_bias, xu_int eps_bits) { @autoreleasepool {
     if (eps_bits < 0 || (xu_uint)eps_bits > UINT32_MAX) return XM_NUMERICS;
     uint32_t eb = (uint32_t)eps_bits;
     float eps = 0.0f;
@@ -597,20 +666,27 @@ xu_int XM_API(layernorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int bh, xu_int
     if (!isfinite(eps) || eps <= 0.0f) return XM_NUMERICS;
     ENTER;
     XMMatrix *c = lookup(dst, MATRIX_F32), *x = lookup(xh, MATRIX_F32),
-             *w = lookup(wh, MATRIX_F32), *b = lookup(bh, MATRIX_F32);
+             *w = lookup(wh, MATRIX_F32), *b = lookup(bh_bias, MATRIX_F32);
     if (!c || !x || !w || !b) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (x.owner != c.owner || w.owner != c.owner || b.owner != c.owner) RETURN(XM_DEVICE);
     if (c.rows != x.rows || c.columns != x.columns ||
         w.rows != 1 || w.columns != x.columns ||
         b.rows != 1 || b.columns != x.columns) RETURN(XM_SHAPE);
     if (c == x || c == w || c == b) RETURN(XM_ALIAS);
-    if (c.busy || x.busy || w.busy || b.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = @[x, w, b];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || x.poisoned || w.poisoned || b.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(x) || !matrix_normal_inputs(w) || !matrix_normal_inputs(b)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, x) || !batch_normal_input(batch, w) || !batch_normal_input(batch, b)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command_many(d, c, @[c, x, w, b], nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -629,25 +705,35 @@ xu_int XM_API(layernorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int bh, xu_int
         [enc dispatchThreadgroups:MTLSizeMake(x.rows, 1, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command_many(d, c, @[c, x, w, b], command, d.layernormPipeline);
+    xu_int handle = finish_op(batch, d, c, inputs, command, d.layernormPipeline);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-xu_int XM_API(gelu_f32)(xu_int dst, xu_int xh) { @autoreleasepool {
+xu_int XM_API(layernorm_f32)(xu_int dst, xu_int xh, xu_int wh, xu_int bh, xu_int eps_bits) { return layernorm_f32_impl(-1, dst, xh, wh, bh, eps_bits); }
+xu_int XM_API(batch_layernorm_f32)(xu_int batch, xu_int dst, xu_int xh, xu_int wh, xu_int bh, xu_int eps_bits) { return layernorm_f32_impl(batch < 0 ? 0 : batch, dst, xh, wh, bh, eps_bits); }
+
+static xu_int gelu_f32_impl(xu_int bh, xu_int dst, xu_int xh) { @autoreleasepool {
     ENTER;
     XMMatrix *c = lookup(dst, MATRIX_F32), *x = lookup(xh, MATRIX_F32);
     if (!c || !x) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (x.owner != c.owner) RETURN(XM_DEVICE);
     if (c.rows != x.rows || c.columns != x.columns) RETURN(XM_SHAPE);
     if (c == x) RETURN(XM_ALIAS);
-    if (c.busy || x.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = @[x];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || x.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(x)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, x)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command(d, c, x, x, nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -667,12 +753,15 @@ xu_int XM_API(gelu_f32)(xu_int dst, xu_int xh) { @autoreleasepool {
             threadsPerThreadgroup:MTLSizeMake(tx, ty, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command(d, c, x, x, command, d.geluPipeline);
+    xu_int handle = finish_op(batch, d, c, inputs, command, d.geluPipeline);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-xu_int XM_API(scale_f32)(xu_int dst, xu_int xh, xu_int alpha_bits) { @autoreleasepool {
+xu_int XM_API(gelu_f32)(xu_int dst, xu_int xh) { return gelu_f32_impl(-1, dst, xh); }
+xu_int XM_API(batch_gelu_f32)(xu_int batch, xu_int dst, xu_int xh) { return gelu_f32_impl(batch < 0 ? 0 : batch, dst, xh); }
+
+static xu_int scale_f32_impl(xu_int bh, xu_int dst, xu_int xh, xu_int alpha_bits) { @autoreleasepool {
     if (alpha_bits < 0 || (xu_uint)alpha_bits > UINT32_MAX) return XM_NUMERICS;
     uint32_t ab = (uint32_t)alpha_bits;
     float alpha = 0.0f;
@@ -681,16 +770,23 @@ xu_int XM_API(scale_f32)(xu_int dst, xu_int xh, xu_int alpha_bits) { @autoreleas
     ENTER;
     XMMatrix *c = lookup(dst, MATRIX_F32), *x = lookup(xh, MATRIX_F32);
     if (!c || !x) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (x.owner != c.owner) RETURN(XM_DEVICE);
     if (c.rows != x.rows || c.columns != x.columns) RETURN(XM_SHAPE);
     if (c == x) RETURN(XM_ALIAS);
-    if (c.busy || x.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = @[x];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || x.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(x)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, x)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command(d, c, x, x, nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -711,12 +807,15 @@ xu_int XM_API(scale_f32)(xu_int dst, xu_int xh, xu_int alpha_bits) { @autoreleas
             threadsPerThreadgroup:MTLSizeMake(tx, ty, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command(d, c, x, x, command, d.scalePipeline);
+    xu_int handle = finish_op(batch, d, c, inputs, command, d.scalePipeline);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-xu_int XM_API(rope_f32)(xu_int dst, xu_int xh, xu_int pos_offset, xu_int head_dim, xu_int theta_bits) { @autoreleasepool {
+xu_int XM_API(scale_f32)(xu_int dst, xu_int xh, xu_int alpha_bits) { return scale_f32_impl(-1, dst, xh, alpha_bits); }
+xu_int XM_API(batch_scale_f32)(xu_int batch, xu_int dst, xu_int xh, xu_int alpha_bits) { return scale_f32_impl(batch < 0 ? 0 : batch, dst, xh, alpha_bits); }
+
+static xu_int rope_f32_impl(xu_int bh, xu_int dst, xu_int xh, xu_int pos_offset, xu_int head_dim, xu_int theta_bits) { @autoreleasepool {
     if (pos_offset < 0 || pos_offset > UINT32_MAX || head_dim <= 0 || (head_dim & 1) || head_dim > MATRIX_MAX_DIM) return XM_BOUNDS;
     if (theta_bits < 0 || (xu_uint)theta_bits > UINT32_MAX) return XM_NUMERICS;
     uint32_t tb = (uint32_t)theta_bits;
@@ -727,16 +826,23 @@ xu_int XM_API(rope_f32)(xu_int dst, xu_int xh, xu_int pos_offset, xu_int head_di
     ENTER;
     XMMatrix *c = lookup(dst, MATRIX_F32), *x = lookup(xh, MATRIX_F32);
     if (!c || !x) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (x.owner != c.owner) RETURN(XM_DEVICE);
     if (c.rows != x.rows || c.columns != x.columns || (x.columns % (NSUInteger)head_dim) != 0) RETURN(XM_SHAPE);
     if (c == x) RETURN(XM_ALIAS);
-    if (c.busy || x.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = @[x];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || x.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(x)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, x)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command(d, c, x, x, nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -761,13 +867,16 @@ xu_int XM_API(rope_f32)(xu_int dst, xu_int xh, xu_int pos_offset, xu_int head_di
             threadsPerThreadgroup:MTLSizeMake(tx, 1, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command(d, c, x, x, command, d.ropePipeline);
+    xu_int handle = finish_op(batch, d, c, inputs, command, d.ropePipeline);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
 
-xu_int XM_API(causal_attention_f32)(xu_int dst, xu_int qh, xu_int kh, xu_int vh,
-                                    xu_int n_heads, xu_int n_kv_heads, xu_int scale_bits) { @autoreleasepool {
+xu_int XM_API(rope_f32)(xu_int dst, xu_int xh, xu_int pos_offset, xu_int head_dim, xu_int theta_bits) { return rope_f32_impl(-1, dst, xh, pos_offset, head_dim, theta_bits); }
+xu_int XM_API(batch_rope_f32)(xu_int batch, xu_int dst, xu_int xh, xu_int pos_offset, xu_int head_dim, xu_int theta_bits) { return rope_f32_impl(batch < 0 ? 0 : batch, dst, xh, pos_offset, head_dim, theta_bits); }
+
+static xu_int causal_attention_f32_impl(xu_int bh, xu_int dst, xu_int qh, xu_int kh, xu_int vh,
+                                          xu_int n_heads, xu_int n_kv_heads, xu_int scale_bits) { @autoreleasepool {
     if (n_heads <= 0 || n_kv_heads <= 0 || (n_heads % n_kv_heads) != 0) return XM_SHAPE;
     if (scale_bits < 0 || (xu_uint)scale_bits > UINT32_MAX) return XM_NUMERICS;
     uint32_t sb = (uint32_t)scale_bits;
@@ -778,6 +887,12 @@ xu_int XM_API(causal_attention_f32)(xu_int dst, xu_int qh, xu_int kh, xu_int vh,
     XMMatrix *c = lookup(dst, MATRIX_F32), *q = lookup(qh, MATRIX_F32),
              *k = lookup(kh, MATRIX_F32), *v = lookup(vh, MATRIX_F32);
     if (!c || !q || !k || !v) RETURN(XM_HANDLE);
+    XMBatch *batch = nil;
+    if (bh >= 0) {
+        xu_int berr = 0;
+        batch = lookup_batch_for(bh, c, &berr);
+        if (!batch) RETURN(berr);
+    }
     if (q.owner != c.owner || k.owner != c.owner || v.owner != c.owner) RETURN(XM_DEVICE);
     if (q.columns == 0 || (q.columns % (NSUInteger)n_heads) != 0) RETURN(XM_SHAPE);
     NSUInteger head_dim = q.columns / (NSUInteger)n_heads;
@@ -785,13 +900,14 @@ xu_int XM_API(causal_attention_f32)(xu_int dst, xu_int qh, xu_int kh, xu_int vh,
         k.columns != (NSUInteger)n_kv_heads * head_dim ||
         v.rows != k.rows || v.columns != k.columns || k.rows < q.rows) RETURN(XM_SHAPE);
     if (c == q || c == k || c == v) RETURN(XM_ALIAS);
-    if (c.busy || q.busy || k.busy || v.busy) RETURN(XM_BUSY);
+    NSArray<XMBuffer *> *inputs = @[q, k, v];
+    if (!op_can_access(batch, c, inputs)) RETURN(XM_BUSY);
     if (c.poisoned || q.poisoned || k.poisoned || v.poisoned) RETURN(XM_COMMAND);
-    if (!matrix_normal_inputs(q) || !matrix_normal_inputs(k) || !matrix_normal_inputs(v)) RETURN(XM_NUMERICS);
+    if (!batch_normal_input(batch, q) || !batch_normal_input(batch, k) || !batch_normal_input(batch, v)) RETURN(XM_NUMERICS);
     XMDevice *d = c.owner;
-    if (!c.words) RETURN(submit_command_many(d, c, @[c, q, k, v], nil, nil));
+    if (!c.words) RETURN(finish_op(batch, d, c, inputs, nil, nil));
     if (!ensure_ai_pipelines(d)) RETURN(XM_PIPELINE);
-    id<MTLCommandBuffer> command = [d.queue commandBuffer];
+    id<MTLCommandBuffer> command = (batch && batch.command) ? batch.command : [d.queue commandBuffer];
     if (!command) RETURN(XM_COMMAND);
     @try {
         id<MTLComputeCommandEncoder> enc = [command computeCommandEncoder];
@@ -819,7 +935,16 @@ xu_int XM_API(causal_attention_f32)(xu_int dst, xu_int qh, xu_int kh, xu_int vh,
         [enc dispatchThreadgroups:MTLSizeMake(nh, seq_len, 1) threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
         [enc endEncoding];
     } @catch (NSException *exception) { (void)exception; RETURN(XM_PIPELINE); }
-    xu_int handle = submit_command_many(d, c, @[c, q, k, v], command, d.causalAttnPipeline);
+    xu_int handle = finish_op(batch, d, c, inputs, command, d.causalAttnPipeline);
     if (handle >= 0) c.numberClass = MATRIX_CLASS_UNKNOWN;
     RETURN(handle);
 } }
+
+xu_int XM_API(causal_attention_f32)(xu_int dst, xu_int qh, xu_int kh, xu_int vh,
+                                    xu_int n_heads, xu_int n_kv_heads, xu_int scale_bits) {
+    return causal_attention_f32_impl(-1, dst, qh, kh, vh, n_heads, n_kv_heads, scale_bits);
+}
+xu_int XM_API(batch_causal_attention_f32)(xu_int batch, xu_int dst, xu_int qh, xu_int kh, xu_int vh,
+                                          xu_int n_heads, xu_int n_kv_heads, xu_int scale_bits) {
+    return causal_attention_f32_impl(batch < 0 ? 0 : batch, dst, qh, kh, vh, n_heads, n_kv_heads, scale_bits);
+}

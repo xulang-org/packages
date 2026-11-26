@@ -1,0 +1,83 @@
+@"github.com/xulang-org/packages/metal"
+
+metal_native #"github.com/xulang-org/packages/metal_native"
+#errors
+
+// Row-major binary16 matrix (MPSDataTypeFloat16) and raw GGML Q4_0 weights.
+pub struct F16Matrix { handle int }
+pub struct Q4Matrix { handle int }
+
+pub fn (d &Device) matrix_f16(rows int, columns int) F16Matrix {
+    handle := checked(metal_native.matrix_f16_new(d.handle, rows, columns)) >>>
+    << F16Matrix{handle: handle}
+}
+pub fn (m &F16Matrix) rows() int { << checked(metal_native.matrix_f16_info(m.handle, 1)) >>> }
+pub fn (m &F16Matrix) columns() int { << checked(metal_native.matrix_f16_info(m.handle, 2)) >>> }
+pub fn (m &F16Matrix) row_bytes() int { << checked(metal_native.matrix_f16_info(m.handle, 3)) >>> }
+
+pub fn (m $&F16Matrix) write_bits(values &[]int) int {
+    << checked(metal_native.matrix_f16_write(m.handle, values)) >>>
+}
+pub fn (m &F16Matrix) bits() []int {
+    count := checked(metal_native.matrix_f16_info(m.handle, 4)) >>>
+    $out := []int{}
+    for _ in 0:count { out.push(0) }
+    m.copy_bits($&out) >>>
+    << out
+}
+pub fn (m &F16Matrix) copy_bits(out $&[]int) int {
+    << checked(metal_native.matrix_f16_copy(m.handle, out)) >>>
+}
+pub fn (m $&F16Matrix) close() int {
+    if m.handle == 0 { << 0 }
+    checked(metal_native.matrix_f16_close(m.handle)) >>>
+    m.handle = 0
+    << 0
+}
+fn (m $&F16Matrix) drop() {
+    if m.handle > 0 { metal_native.matrix_f16_release(m.handle) m.handle = 0 }
+}
+
+pub fn gemm_f16(dst $&F16Matrix, a &F16Matrix, b &F16Matrix) Fence {
+    handle := checked(metal_native.gemm_f16(dst.handle, a.handle, b.handle)) >>>
+    << Fence{handle: handle}
+}
+pub fn gemm_f16_nt(dst $&F16Matrix, a &F16Matrix, b &F16Matrix) Fence {
+    handle := checked(metal_native.gemm_f16_nt(dst.handle, a.handle, b.handle)) >>>
+    << Fence{handle: handle}
+}
+pub fn f16_to_f32(dst $&F32Matrix, src &F16Matrix) Fence {
+    handle := checked(metal_native.f16_to_f32(dst.handle, src.handle)) >>>
+    << Fence{handle: handle}
+}
+pub fn f32_to_f16(dst $&F16Matrix, src &F32Matrix) Fence {
+    handle := checked(metal_native.f32_to_f16(dst.handle, src.handle)) >>>
+    << Fence{handle: handle}
+}
+
+pub fn (d &Device) matrix_q4_0(rows int, columns int) Q4Matrix {
+    handle := checked(metal_native.matrix_q4_0_new(d.handle, rows, columns)) >>>
+    << Q4Matrix{handle: handle}
+}
+pub fn (m &Q4Matrix) rows() int { << checked(metal_native.matrix_q4_0_info(m.handle, 1)) >>> }
+pub fn (m &Q4Matrix) columns() int { << checked(metal_native.matrix_q4_0_info(m.handle, 2)) >>> }
+pub fn (m &Q4Matrix) byte_len() int { << checked(metal_native.matrix_q4_0_info(m.handle, 3)) >>> }
+
+pub fn (m $&Q4Matrix) write_bytes(bytes &string) int {
+    << checked(metal_native.matrix_q4_0_write(m.handle, bytes)) >>>
+}
+pub fn (m $&Q4Matrix) close() int {
+    if m.handle == 0 { << 0 }
+    checked(metal_native.matrix_q4_0_close(m.handle)) >>>
+    m.handle = 0
+    << 0
+}
+fn (m $&Q4Matrix) drop() {
+    if m.handle > 0 { metal_native.matrix_q4_0_release(m.handle) m.handle = 0 }
+}
+
+// Fused Q4_0 dequantize+dot computing dst = x @ dequant(w)^T in GPU registers.
+pub fn gemv_q4_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q4Matrix) Fence {
+    handle := checked(metal_native.gemv_q4_0_f32(dst.handle, x.handle, w.handle)) >>>
+    << Fence{handle: handle}
+}

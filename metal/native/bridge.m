@@ -8,7 +8,7 @@
 #include <string.h>
 #include "api.h"
 
-enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, MATRIX_F32, SLOT_BITS = 12, SLOT_COUNT = 4096 };
+enum { DEVICE = 1, BUFFER, FENCE, SNAPSHOT, MATRIX_F32, BATCH, MATRIX_F16, MATRIX_Q4_0, SLOT_BITS = 12, SLOT_COUNT = 4096 };
 // Rounded dispatches use at most 256 threads and must not wrap a uint gid.
 static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 
@@ -26,6 +26,9 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) id<MTLComputePipelineState> scalePipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> ropePipeline;
 @property(nonatomic, strong) id<MTLComputePipelineState> causalAttnPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> f16ToF32Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> f32ToF16Pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> gemvQ40Pipeline;
 @property(nonatomic) xu_int children;
 @property(nonatomic) xu_int dispatches;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, MPSMatrixMultiplication *> *matrixKernels;
@@ -39,7 +42,9 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) XMDevice *owner;
 @property(nonatomic, strong) id<MTLBuffer> memory;
 @property(nonatomic) uint64_t words;
-@property(nonatomic) xu_int busy;
+@property(nonatomic) xu_int readBusy;
+@property(nonatomic) xu_int writeBusy;
+@property(nonatomic, weak) id ownerBatch;
 @property(nonatomic) BOOL poisoned;
 @end
 @implementation XMBuffer
@@ -48,14 +53,25 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @interface XMFence : NSObject
 @property(nonatomic, strong) XMDevice *owner;
 @property(nonatomic, strong) id<MTLCommandBuffer> command;
-@property(nonatomic, strong) NSArray<XMBuffer *> *buffers;
-@property(nonatomic, strong) XMBuffer *output;
+@property(nonatomic, strong) NSArray<XMBuffer *> *readBuffers;
+@property(nonatomic, strong) NSArray<XMBuffer *> *writeBuffers;
 @property(nonatomic, strong) NSLock *waitGate;
 @property(nonatomic) BOOL completed;
 @property(nonatomic) xu_int status;
-@property(nonatomic, strong) id operation;
+@property(nonatomic, strong) NSArray *operations;
 @end
 @implementation XMFence
+@end
+
+@interface XMBatch : NSObject
+@property(nonatomic, strong) XMDevice *owner;
+@property(nonatomic, strong) id<MTLCommandBuffer> command;
+@property(nonatomic, strong) NSMutableArray<XMBuffer *> *readBuffers;
+@property(nonatomic, strong) NSMutableArray<XMBuffer *> *writeBuffers;
+@property(nonatomic, strong) NSMutableArray *operations;
+@property(nonatomic) BOOL submitted;
+@end
+@implementation XMBatch
 @end
 
 typedef struct {
@@ -103,41 +119,109 @@ static xu_int finish(XMFence *f) {
     if (!f.completed) {
         f.status = f.command.status == MTLCommandBufferStatusCompleted ? 0 : XM_COMMAND;
         f.completed = YES;
-        for (XMBuffer *b in f.buffers) b.busy--;
-        if (f.status < 0) f.output.poisoned = YES;
+        for (XMBuffer *b in f.readBuffers) b.readBusy--;
+        for (XMBuffer *b in f.writeBuffers) {
+            b.writeBusy--;
+            if (f.status < 0) b.poisoned = YES;
+        }
     }
     return f.status;
 }
 
-// Caller holds gate. Integer and MPS operations share lifetime, busy accounting,
-// acknowledgement and failure handling. A dropped fence retains its operation.
-static xu_int submit_command_many(XMDevice *d, XMBuffer *output, NSArray<XMBuffer *> *buffers,
-                                  id<MTLCommandBuffer> command, id operation) {
+static inline BOOL can_host_write(XMBuffer *b) {
+    return b.readBusy == 0 && b.writeBusy == 0 && b.ownerBatch == nil;
+}
+static inline BOOL can_host_read(XMBuffer *b) {
+    return b.writeBusy == 0 && b.ownerBatch == nil;
+}
+static inline BOOL op_can_access(XMBatch *batch, XMBuffer *dst, NSArray<XMBuffer *> *inputs) {
+    if (!batch) {
+        if (dst.readBusy != 0 || dst.writeBusy != 0 || dst.ownerBatch != nil) return NO;
+        for (XMBuffer *in in inputs) {
+            if (in && (in.writeBusy != 0 || in.ownerBatch != nil)) return NO;
+        }
+        return YES;
+    }
+    xu_int expected_dst_reads = ([batch.readBuffers indexOfObjectIdenticalTo:dst] != NSNotFound) ? 1 : 0;
+    BOOL dst_ok = (dst.ownerBatch == batch) ||
+                  (dst.ownerBatch == nil && dst.writeBusy == 0 && dst.readBusy == expected_dst_reads);
+    if (!dst_ok) return NO;
+    for (XMBuffer *in in inputs) {
+        if (!in) continue;
+        BOOL in_ok = (in.ownerBatch == batch) || (in.ownerBatch == nil && in.writeBusy == 0);
+        if (!in_ok) return NO;
+    }
+    return YES;
+}
+static void batch_acquire(XMBatch *batch, XMBuffer *dst, NSArray<XMBuffer *> *inputs, id operation) {
+    for (XMBuffer *in in inputs) {
+        if (!in || in == dst) continue;
+        if ([batch.writeBuffers indexOfObjectIdenticalTo:in] == NSNotFound &&
+            [batch.readBuffers indexOfObjectIdenticalTo:in] == NSNotFound) {
+            in.readBusy++;
+            [batch.readBuffers addObject:in];
+        }
+    }
+    if (dst && [batch.writeBuffers indexOfObjectIdenticalTo:dst] == NSNotFound) {
+        NSUInteger rIdx = [batch.readBuffers indexOfObjectIdenticalTo:dst];
+        if (rIdx != NSNotFound) {
+            [batch.readBuffers removeObjectAtIndex:rIdx];
+            dst.readBusy--;
+        }
+        dst.writeBusy++;
+        dst.ownerBatch = batch;
+        [batch.writeBuffers addObject:dst];
+    }
+    if (operation) [batch.operations addObject:operation];
+}
+
+// Caller holds gate. Integer and MPS operations share lifetime, read/write lock
+// accounting, acknowledgement and failure handling. A dropped fence retains its operations.
+static xu_int submit_command_rw(XMDevice *d, NSArray<XMBuffer *> *writes, NSArray<XMBuffer *> *reads,
+                                id<MTLCommandBuffer> command, NSArray *operations, BOOL alreadyLocked) {
     XMFence *f = [XMFence new];
     if (!f) return XM_ALLOC;
     f.waitGate = [NSLock new];
     if (!f.waitGate) return XM_ALLOC;
-    NSMutableArray<XMBuffer *> *uniq = [NSMutableArray arrayWithCapacity:buffers.count];
-    for (XMBuffer *buf in buffers) {
-        if (buf && [uniq indexOfObjectIdenticalTo:buf] == NSNotFound) [uniq addObject:buf];
+    NSMutableArray<XMBuffer *> *uniqWrites = [NSMutableArray arrayWithCapacity:writes.count];
+    for (XMBuffer *buf in writes) {
+        if (buf && [uniqWrites indexOfObjectIdenticalTo:buf] == NSNotFound) [uniqWrites addObject:buf];
     }
-    f.owner = d; f.output = output; f.buffers = uniq;
-    f.command = command; f.operation = operation;
-    f.completed = command == nil;
+    NSMutableArray<XMBuffer *> *uniqReads = [NSMutableArray arrayWithCapacity:reads.count];
+    for (XMBuffer *buf in reads) {
+        if (buf && [uniqWrites indexOfObjectIdenticalTo:buf] == NSNotFound &&
+            [uniqReads indexOfObjectIdenticalTo:buf] == NSNotFound) {
+            [uniqReads addObject:buf];
+        }
+    }
+    f.owner = d;
+    f.writeBuffers = uniqWrites;
+    f.readBuffers = uniqReads;
+    f.command = command;
+    f.operations = operations;
+    f.completed = (command == nil);
     xu_int handle = insert(f, FENCE);
     if (handle < 0) return handle;
     d.children++;
     if (command) {
-        for (XMBuffer *buffer in f.buffers) buffer.busy++;
+        if (!alreadyLocked) {
+            for (XMBuffer *buf in uniqWrites) buf.writeBusy++;
+            for (XMBuffer *buf in uniqReads) buf.readBusy++;
+        }
         [command commit];
         d.dispatches++;
     }
     return handle;
 }
 
+static xu_int submit_command_many(XMDevice *d, XMBuffer *output, NSArray<XMBuffer *> *reads,
+                                  id<MTLCommandBuffer> command, id operation) {
+    return submit_command_rw(d, output ? @[output] : @[], reads ?: @[], command, operation ? @[operation] : nil, NO);
+}
+
 static xu_int submit_command(XMDevice *d, XMBuffer *c, XMBuffer *a, XMBuffer *b,
                              id<MTLCommandBuffer> command, id operation) {
-    return submit_command_many(d, c, (a == b ? @[c, a] : @[c, a, b]), command, operation);
+    return submit_command_rw(d, c ? @[c] : @[], (a == b ? @[a] : @[a, b]), command, operation ? @[operation] : nil, NO);
 }
 
 xu_int XM_API(abi_version)(void) { return 2; }
@@ -216,7 +300,7 @@ xu_int XM_API(buffer_put)(xu_int h, xu_int index, xu_int value) { @autoreleasepo
     ENTER; XMBuffer *b = lookup(h, BUFFER);
     if (!b) RETURN(XM_HANDLE);
     if (index < 0 || (xu_uint)index >= b.words) RETURN(XM_BOUNDS);
-    if (b.busy) RETURN(XM_BUSY);
+    if (!can_host_write(b)) RETURN(XM_BUSY);
     if (b.poisoned) RETURN(XM_COMMAND);
     uint64_t bits = (xu_uint)value;
     memcpy((uint8_t *)b.memory.contents + (uint64_t)index * 8, &bits, 8);
@@ -238,7 +322,7 @@ xu_int XM_API(buffer_write)(xu_int h, xu_int offset, const xu_i64_span *source, 
     ENTER; XMBuffer *b = lookup(h, BUFFER);
     if (!b) RETURN(XM_HANDLE);
     if (offset < 0 || (xu_uint)offset > b.words || (xu_uint)count > b.words - (xu_uint)offset) RETURN(XM_BOUNDS);
-    if (b.busy) RETURN(XM_BUSY);
+    if (!can_host_write(b)) RETURN(XM_BUSY);
     if (b.poisoned) RETURN(XM_COMMAND);
     if (count) memmove((uint8_t *)b.memory.contents + (xu_uint)offset * 8,
         (const uint8_t *)source->data + (xu_uint)first * 8, (size_t)count * 8);
@@ -247,14 +331,14 @@ xu_int XM_API(buffer_write)(xu_int h, xu_int offset, const xu_i64_span *source, 
 xu_int XM_API(buffer_snapshot)(xu_int h) { @autoreleasepool {
     ENTER; XMBuffer *b = lookup(h, BUFFER);
     if (!b) RETURN(XM_HANDLE);
-    if (b.busy) RETURN(XM_BUSY);
+    if (!can_host_read(b)) RETURN(XM_BUSY);
     if (b.poisoned) RETURN(XM_COMMAND);
     RETURN(snapshot([NSData dataWithBytes:b.memory.contents length:(NSUInteger)b.words * 8]));
 } }
 static xu_int release_buffer_kind(xu_int handle, int kind, BOOL force) {
     ENTER; XMBuffer *b = lookup(handle, kind);
     if (!b) RETURN(XM_HANDLE);
-    if (!force && b.busy) RETURN(XM_BUSY);
+    if (!force && !can_host_write(b)) RETURN(XM_BUSY);
     b.owner.children--;
     remove_handle(handle);
     RETURN(0);
@@ -306,7 +390,7 @@ xu_int XM_API(madd_i64)(xu_int dst, xu_int ah, xu_int bh, xu_int factor, xu_int 
     if (a.owner != c.owner || b.owner != c.owner) RETURN(XM_DEVICE);
     if ((xu_uint)words > c.words || (xu_uint)words > a.words || (xu_uint)words > b.words) RETURN(XM_BOUNDS);
     if (c == a || c == b) RETURN(XM_ALIAS);
-    if (c.busy || a.busy || b.busy) RETURN(XM_BUSY);
+    if (!op_can_access(nil, c, @[a, b])) RETURN(XM_BUSY);
     if (c.poisoned || a.poisoned || b.poisoned) RETURN(XM_COMMAND);
     XMDevice *d = c.owner;
     id<MTLCommandBuffer> command = nil;
@@ -364,3 +448,4 @@ xu_int XM_API(fence_close)(xu_int h) { @autoreleasepool {
 } }
 
 #include "matrix_f32.inc"
+#include "batch_and_quant.inc"

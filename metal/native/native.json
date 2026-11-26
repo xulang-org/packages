@@ -358,6 +358,191 @@
         "int"
       ],
       "ret": "int"
+    },
+    {
+      "name": "batch_new",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_commit",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemm_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemm_f32_nt",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_rmsnorm_f32",
+      "params": ["int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_softmax_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_swiglu_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_add_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_layernorm_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gelu_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_mul_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_scale_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_rope_f32",
+      "params": ["int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_causal_attention_f32",
+      "params": ["int", "int", "int", "int", "int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f16_new",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f16_info",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f16_write",
+      "params": ["int", "i64_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f16_copy",
+      "params": ["int", "i64_span_mut"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f16_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_f16_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemm_f16",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemm_f16_nt",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "f16_to_f32",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "f32_to_f16",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemm_f16",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemm_f16_nt",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_f16_to_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_f32_to_f16",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_0_new",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_0_info",
+      "params": ["int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_0_write",
+      "params": ["int", "u8_span"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_0_close",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "matrix_q4_0_release",
+      "params": ["int"],
+      "ret": "int"
+    },
+    {
+      "name": "gemv_q4_0_f32",
+      "params": ["int", "int", "int"],
+      "ret": "int"
+    },
+    {
+      "name": "batch_gemv_q4_0_f32",
+      "params": ["int", "int", "int", "int"],
+      "ret": "int"
     }
   ]
 }

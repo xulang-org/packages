@@ -464,6 +464,9 @@ class TestMetalAI(unittest.TestCase):
 
         xu_src = (
             '@main\nmetal #"github.com/xulang-org/packages/metal"\n#errors\n'
+            'fn dump(t string, v &[]int) {\n'
+            '    $s := t + ":"\n    for i in 0:v.len { if i > 0 { s = s + "," }\n s = s + str(v[i]) }\n    println(s)\n'
+            '}\n'
             'fn mat(d &metal.Device, r int, c int, vals &[]int) metal.F32Matrix {\n'
             '    $m := d.matrix_f32(r, c) >>>\n'
             '    _ := m.write_bits(vals) >>>\n'
@@ -538,6 +541,367 @@ class TestMetalAI(unittest.TestCase):
         self.assertEqual(len(got), len(ref_out))
         for i, (gv, rv) in enumerate(zip(got, ref_out)):
             self.assertLess(abs(gv - rv), 1e-3, f"layer[{i}]: gpu={gv} cpu={rv}")
+
+    def test_concurrent_reads_and_rw_guards(self):
+        # 2x4 @ (3x4)^T -> 2x3, three concurrent reads on the same input matrix mn1
+        a = [f32((i + 1) * 0.25) for i in range(8)]
+        wq = [f32(((i * 3) % 7 - 3) * 0.2) for i in range(12)]
+        wk = [f32(((i * 5) % 9 - 4) * 0.2) for i in range(12)]
+        wv = [f32(((i * 7) % 11 - 5) * 0.2) for i in range(12)]
+
+        def cpu_mm_nt(x, w):
+            out = []
+            for r in range(2):
+                for c in range(3):
+                    out.append(f32(sum(x[r * 4 + k] * w[c * 4 + k] for k in range(4))))
+            return out
+
+        ref_q = cpu_mm_nt(a, wq)
+        ref_k = cpu_mm_nt(a, wk)
+        ref_v = cpu_mm_nt(a, wv)
+
+        def xu_arr(name, vals):
+            return f"    {name} := [{', '.join(str(f32_bits(v)) for v in vals)}]\n"
+
+        xu_src = (
+            '@main\nmetal #"github.com/xulang-org/packages/metal"\n#errors\n'
+            'fn dump(t string, v &[]int) {\n'
+            '    $s := t + ":"\n    for i in 0:v.len { if i > 0 { s = s + "," }\n s = s + str(v[i]) }\n    println(s)\n'
+            '}\n'
+            'fn mat(d &metal.Device, r int, c int, vals &[]int) metal.F32Matrix {\n'
+            '    $m := d.matrix_f32(r, c) >>>\n'
+            '    _ := m.write_bits(vals) >>>\n'
+            '    << m\n'
+            '}\n'
+            'fn try_write_busy(m $&metal.F32Matrix, vals &[]int) bool {\n'
+            '    _ := m.write_bits(vals) >>> (_) { << true }\n'
+            '    << false\n'
+            '}\n'
+            'fn try_read_busy(m &metal.F32Matrix) bool {\n'
+            '    _ := m.bits() >>> (_) { << true }\n'
+            '    << false\n'
+            '}\n'
+            'fn run_conc() int {\n'
+            '    if !metal.available() { println("SKIP:NO_METAL")\n << 0 }\n'
+            '    $d := metal.open() >>>\n'
+            + xu_arr("a", a) + xu_arr("wq", wq) + xu_arr("wk", wk) + xu_arr("wv", wv)
+            + '    $mn1 := mat(&d, 2, 4, &a) >>>\n'
+            '    $mwq := mat(&d, 3, 4, &wq) >>>\n'
+            '    $mwk := mat(&d, 3, 4, &wk) >>>\n'
+            '    $mwv := mat(&d, 3, 4, &wv) >>>\n'
+            '    $out_q := d.matrix_f32(2, 3) >>>\n'
+            '    $out_k := d.matrix_f32(2, 3) >>>\n'
+            '    $out_v := d.matrix_f32(2, 3) >>>\n'
+            '    // Deterministic R/W lock verification using an active Batch:\n'
+            '    $b_chk := d.begin_batch() >>>\n'
+            '    _ := b_chk.gemm_f32_nt($&out_q, &mn1, &mwq) >>>\n'
+            '    if !try_write_busy($&mn1, &a) { << 2 }\n'
+            '    if !try_read_busy(&out_q) { << 3 }\n'
+            '    _ := mn1.bits() >>>\n'
+            '    _ := b_chk.close() >>>\n'
+            '    // Now launch 3 concurrent standalone GPU dispatches all reading mn1 simultaneously:\n'
+            '    $fq := metal.gemm_f32_nt($&out_q, &mn1, &mwq) >>>\n'
+            '    $fk := metal.gemm_f32_nt($&out_k, &mn1, &mwk) >>>\n'
+            '    $fv := metal.gemm_f32_nt($&out_v, &mn1, &mwv) >>>\n'
+            '    _ := fq.wait() >>>\n    _ := fq.close() >>>\n'
+            '    _ := fk.wait() >>>\n    _ := fk.close() >>>\n'
+            '    _ := fv.wait() >>>\n    _ := fv.close() >>>\n'
+            '    bq := out_q.bits() >>>\n    bk := out_k.bits() >>>\n    bv := out_v.bits() >>>\n'
+            '    dump("Q", &bq)\n    dump("K", &bk)\n    dump("V", &bv)\n'
+            '    _ := mn1.close() >>>\n    _ := mwq.close() >>>\n    _ := mwk.close() >>>\n    _ := mwv.close() >>>\n'
+            '    _ := out_q.close() >>>\n    _ := out_k.close() >>>\n    _ := out_v.close() >>>\n'
+            '    _ := d.close() >>>\n'
+            '    println("LIVE:" + str(metal.live_handles()))\n    << 0\n}\n'
+            'fn main() int { << run_conc() >>> (err) { eprintln(err.msg())\n << 1 } }\n'
+        )
+        with tempfile.TemporaryDirectory() as td:
+            out = run_xu(Path(td), xu_src)
+        if "SKIP:NO_METAL" in out:
+            self.skipTest("Metal device unavailable on host")
+        kv = dict(line.split(":", 1) for line in out.splitlines() if ":" in line)
+        self.assertEqual(kv.get("LIVE"), "0")
+        for key, ref in (("Q", ref_q), ("K", ref_k), ("V", ref_v)):
+            got = [bits_to_f32(int(x)) for x in kv[key].split(",")]
+            for i, (gv, rv) in enumerate(zip(got, ref)):
+                self.assertLess(abs(gv - rv), 1e-4, f"{key}[{i}]: {gv} vs {rv}")
+
+    def test_f16_and_q4_0_matrices(self):
+        # Test F16Matrix conversions + GEMM + GEMM_NT, and Q4_0Matrix GEMV (M=1 and M=4)
+        def f16_bits(v):
+            return struct.unpack("<H", struct.pack("<e", v))[0]
+
+        def bits_to_f16(b):
+            return struct.unpack("<e", struct.pack("<H", b & 0xFFFF))[0]
+
+        a_vals = [bits_to_f16(f16_bits(((i * 7) % 13 - 6) * 0.25)) for i in range(12)]  # 3x4
+        b_vals = [bits_to_f16(f16_bits(((i * 5 + 1) % 11 - 5) * 0.25)) for i in range(20)]  # 5x4
+        ref_f16_nt = []
+        for r in range(3):
+            for c in range(5):
+                acc = 0.0
+                for k in range(4):
+                    acc += a_vals[r * 4 + k] * b_vals[c * 4 + k]
+                ref_f16_nt.append(bits_to_f16(f16_bits(acc)))
+
+        # Q4_0: rows=12, cols=64 (2 blocks/row), x: 4x64
+        x_q4 = [f32(((i * 11 + 3) % 19 - 9) * 0.125) for i in range(4 * 64)]
+        w_raw_src = [f32(((i * 7 + 5) % 23 - 11) * 0.25) for i in range(12 * 64)]
+        q4_bytes = bytearray()
+        w_dequant = []
+        for row in range(12):
+            for blk in range(2):
+                seg = w_raw_src[(row * 2 + blk) * 32:(row * 2 + blk + 1) * 32]
+                amax = max(abs(v) for v in seg)
+                d = f32(amax / 7.0) if amax > 0 else 0.0
+                d16_b = struct.pack("<e", d)
+                d16 = f32(struct.unpack("<e", d16_b)[0])
+                q4_bytes.extend(d16_b)
+                inv_d = 1.0 / d16 if d16 != 0 else 0.0
+                qs = [min(15, max(0, int(round(v * inv_d)) + 8)) for v in seg]
+                for j in range(16):
+                    q4_bytes.append((qs[j] & 15) | ((qs[16 + j] & 15) << 4))
+                w_dequant.extend(f32((q - 8) * d16) for q in qs)
+        ref_q4_m4 = []
+        for m in range(4):
+            for r in range(12):
+                ref_q4_m4.append(f32(sum(x_q4[m * 64 + k] * w_dequant[r * 64 + k] for k in range(64))))
+        ref_q4_m1 = ref_q4_m4[:12]
+
+        def xu_int_arr(name, ints):
+            return f"    {name} := [{', '.join(str(x) for x in ints)}]\n"
+
+        q4_byte_ints = ", ".join(str(b) for b in q4_bytes)
+        xu_src = (
+            '@main\nmetal #"github.com/xulang-org/packages/metal"\n#errors\n'
+            'fn dump(tag string, bits &[]int) {\n'
+            '    $s := tag + ":"\n    for i in 0:bits.len { if i > 0 { s = s + "," }\n s = s + str(bits[i]) }\n    println(s)\n'
+            '}\n'
+            'fn guard_q4_shape(d &metal.Device) bool {\n'
+            '    _ := d.matrix_q4_0(4, 30) >>> (_) { << true }\n    << false\n'
+            '}\n'
+            'fn guard_q4_len(q $&metal.Q4Matrix) bool {\n'
+            '    bad := "short"\n'
+            '    _ := q.write_bytes(&bad) >>> (_) { << true }\n    << false\n'
+            '}\n'
+            'fn run_quant() int {\n'
+            '    if !metal.available() { println("SKIP:NO_METAL")\n << 0 }\n'
+            '    $d := metal.open() >>>\n'
+            + xu_int_arr("a_h", [f16_bits(v) for v in a_vals])
+            + xu_int_arr("b_h", [f16_bits(v) for v in b_vals])
+            + xu_int_arr("x_f", [f32_bits(v) for v in x_q4])
+            + xu_int_arr("x_m1_f", [f32_bits(v) for v in x_q4[:64]])
+            + f'    q4_b_arr := [{q4_byte_ints}]\n'
+            '    $q4_str := ""\n    for b in q4_b_arr { q4_str.push_str(string_from_byte(b)) }\n'
+            '    $ma := d.matrix_f16(3, 4) >>>\n    $mb := d.matrix_f16(5, 4) >>>\n    $mc := d.matrix_f16(3, 5) >>>\n'
+            '    _ := ma.write_bits(&a_h) >>>\n    _ := mb.write_bits(&b_h) >>>\n'
+            '    $fg := metal.gemm_f16_nt($&mc, &ma, &mb) >>>\n    _ := fg.wait() >>>\n    _ := fg.close() >>>\n'
+            '    out_c := mc.bits() >>>\n    dump("F16_NT", &out_c)\n'
+            '    $mf32 := d.matrix_f32(3, 5) >>>\n'
+            '    $fc := metal.f16_to_f32($&mf32, &mc) >>>\n    _ := fc.wait() >>>\n    _ := fc.close() >>>\n'
+            '    $mc2 := d.matrix_f16(3, 5) >>>\n'
+            '    $fc2 := metal.f32_to_f16($&mc2, &mf32) >>>\n    _ := fc2.wait() >>>\n    _ := fc2.close() >>>\n'
+            '    out_c2 := mc2.bits() >>>\n    dump("F16_RT", &out_c2)\n'
+            '    if !guard_q4_shape(&d) { << 2 }\n'
+            '    $mq4 := d.matrix_q4_0(12, 64) >>>\n'
+            '    if !guard_q4_len($&mq4) { << 3 }\n'
+            '    _ := mq4.write_bytes(&q4_str) >>>\n'
+            '    $mx4 := d.matrix_f32(4, 64) >>>\n    _ := mx4.write_bits(&x_f) >>>\n'
+            '    $md4 := d.matrix_f32(4, 12) >>>\n'
+            '    $fq4 := metal.gemv_q4_0_f32($&md4, &mx4, &mq4) >>>\n    _ := fq4.wait() >>>\n    _ := fq4.close() >>>\n'
+            '    out_q4_m4 := md4.bits() >>>\n    dump("Q4_M4", &out_q4_m4)\n'
+            '    $mx1 := d.matrix_f32(1, 64) >>>\n    _ := mx1.write_bits(&x_m1_f) >>>\n'
+            '    $md1 := d.matrix_f32(1, 12) >>>\n'
+            '    $fq1 := metal.gemv_q4_0_f32($&md1, &mx1, &mq4) >>>\n    _ := fq1.wait() >>>\n    _ := fq1.close() >>>\n'
+            '    out_q4_m1 := md1.bits() >>>\n    dump("Q4_M1", &out_q4_m1)\n'
+            '    _ := ma.close() >>>\n    _ := mb.close() >>>\n    _ := mc.close() >>>\n    _ := mc2.close() >>>\n    _ := mf32.close() >>>\n'
+            '    _ := mq4.close() >>>\n    _ := mx4.close() >>>\n    _ := md4.close() >>>\n    _ := mx1.close() >>>\n    _ := md1.close() >>>\n'
+            '    _ := d.close() >>>\n'
+            '    println("LIVE:" + str(metal.live_handles()))\n    << 0\n}\n'
+            'fn main() int { << run_quant() >>> (err) { eprintln(err.msg())\n << 1 } }\n'
+        )
+        with tempfile.TemporaryDirectory() as td:
+            out = run_xu(Path(td), xu_src)
+        if "SKIP:NO_METAL" in out:
+            self.skipTest("Metal device unavailable on host")
+        kv = dict(line.split(":", 1) for line in out.splitlines() if ":" in line)
+        self.assertEqual(kv.get("LIVE"), "0")
+        got_f16 = [bits_to_f16(int(x)) for x in kv["F16_NT"].split(",")]
+        got_f16_rt = [bits_to_f16(int(x)) for x in kv["F16_RT"].split(",")]
+        self.assertEqual(got_f16, got_f16_rt)
+        for i, (gv, rv) in enumerate(zip(got_f16, ref_f16_nt)):
+            self.assertLess(abs(gv - rv), 5e-3, f"F16[{i}]: {gv} vs {rv}")
+        got_m4 = [bits_to_f32(int(x)) for x in kv["Q4_M4"].split(",")]
+        got_m1 = [bits_to_f32(int(x)) for x in kv["Q4_M1"].split(",")]
+        for i, (gv, rv) in enumerate(zip(got_m4, ref_q4_m4)):
+            self.assertLess(abs(gv - rv), 1e-3, f"Q4_M4[{i}]: {gv} vs {rv}")
+        for i, (gv, rv) in enumerate(zip(got_m1, ref_q4_m1)):
+            self.assertLess(abs(gv - rv), 1e-3, f"Q4_M1[{i}]: {gv} vs {rv}")
+
+    def test_single_batch_full_transformer_layer(self):
+        # Encode all 15 Transformer layer ops into ONE Batch -> dispatch_count() increases by 1!
+        seq_len, dim, hidden, n_heads, n_kv_heads, head_dim = 3, 16, 24, 4, 2, 4
+        kv_dim = n_kv_heads * head_dim
+        eps = 1e-5
+        scale = 1.0 / math.sqrt(float(head_dim))
+
+        def mk(n, s):
+            return [f32((((i * 13 + 7) % 23) - 11) * s) for i in range(n)]
+
+        x = mk(seq_len * dim, 0.15)
+        wn1 = [f32(0.8 + (i % 4) * 0.1) for i in range(dim)]
+        wn2 = [f32(0.9 + (i % 3) * 0.1) for i in range(dim)]
+        wq = mk(dim * dim, 0.08)
+        wk = mk(kv_dim * dim, 0.08)
+        wv = mk(kv_dim * dim, 0.08)
+        wo = mk(dim * dim, 0.08)
+        wg = mk(hidden * dim, 0.08)
+        wu = mk(hidden * dim, 0.08)
+        wd = mk(dim * hidden, 0.08)
+
+        def cpu_rmsnorm(mat, w, rows, cols):
+            out = []
+            for r in range(rows):
+                row = mat[r * cols:(r + 1) * cols]
+                inv = 1.0 / math.sqrt(sum(v * v for v in row) / cols + eps)
+                out.extend(f32(row[c] * inv * w[c]) for c in range(cols))
+            return out
+
+        def cpu_gemm_nt(a, b, m, n, k):
+            return [f32(sum(a[r * k + p] * b[c * k + p] for p in range(k))) for r in range(m) for c in range(n)]
+
+        def cpu_rope(mat, rows, heads, hd):
+            out = []
+            half = hd // 2
+            lt = math.log(10000.0)
+            for r in range(rows):
+                for h in range(heads):
+                    base = r * heads * hd + h * hd
+                    seg = [0.0] * hd
+                    for j in range(half):
+                        ang = r * math.exp(-lt * (2 * j / float(hd)))
+                        co, si = math.cos(ang), math.sin(ang)
+                        v0, v1 = mat[base + j], mat[base + half + j]
+                        seg[j] = f32(v0 * co - v1 * si)
+                        seg[half + j] = f32(v0 * si + v1 * co)
+                    out.extend(seg)
+            return out
+
+        n1 = cpu_rmsnorm(x, wn1, seq_len, dim)
+        q = cpu_rope(cpu_gemm_nt(n1, wq, seq_len, dim, dim), seq_len, n_heads, head_dim)
+        k = cpu_rope(cpu_gemm_nt(n1, wk, seq_len, kv_dim, dim), seq_len, n_kv_heads, head_dim)
+        v = cpu_gemm_nt(n1, wv, seq_len, kv_dim, dim)
+        att = []
+        for qr in range(seq_len):
+            for h in range(n_heads):
+                kvh = h // (n_heads // n_kv_heads)
+                qv = q[qr * dim + h * head_dim:qr * dim + (h + 1) * head_dim]
+                sc = [sum(qv[d] * k[t * kv_dim + kvh * head_dim + d] for d in range(head_dim)) * scale for t in range(qr + 1)]
+                mx = max(sc)
+                ex = [math.exp(s - mx) for s in sc]
+                sm = sum(ex)
+                for d in range(head_dim):
+                    att.append(f32(sum((ex[t] / sm) * v[t * kv_dim + kvh * head_dim + d] for t in range(qr + 1))))
+        h_att = [f32(a + b) for a, b in zip(x, cpu_gemm_nt(att, wo, seq_len, dim, dim))]
+        n2 = cpu_rmsnorm(h_att, wn2, seq_len, dim)
+        fg = cpu_gemm_nt(n2, wg, seq_len, hidden, dim)
+        fu = cpu_gemm_nt(n2, wu, seq_len, hidden, dim)
+        fsw = [f32((g / (1.0 + math.exp(-g))) * u) for g, u in zip(fg, fu)]
+        ref_out = [f32(a + b) for a, b in zip(h_att, cpu_gemm_nt(fsw, wd, seq_len, dim, hidden))]
+
+        def xu_arr(name, vals):
+            return f"    {name} := [{', '.join(str(f32_bits(v)) for v in vals)}]\n"
+
+        xu_src = (
+            '@main\nmetal #"github.com/xulang-org/packages/metal"\n#errors\n'
+            'fn dump(t string, v &[]int) {\n'
+            '    $s := t + ":"\n    for i in 0:v.len { if i > 0 { s = s + "," }\n s = s + str(v[i]) }\n    println(s)\n'
+            '}\n'
+            'fn mat(d &metal.Device, r int, c int, vals &[]int) metal.F32Matrix {\n'
+            '    $m := d.matrix_f32(r, c) >>>\n'
+            '    _ := m.write_bits(vals) >>>\n'
+            '    << m\n'
+            '}\n'
+            'fn run_batch_layer() int {\n'
+            '    if !metal.available() { println("SKIP:NO_METAL")\n << 0 }\n'
+            '    $d := metal.open() >>>\n'
+            + xu_arr("x", x) + xu_arr("wn1", wn1) + xu_arr("wn2", wn2)
+            + xu_arr("wq", wq) + xu_arr("wk", wk) + xu_arr("wv", wv) + xu_arr("wo", wo)
+            + xu_arr("wg", wg) + xu_arr("wu", wu) + xu_arr("wd", wd)
+            + '    $mx := mat(&d, 3, 16, &x) >>>\n'
+            '    $mwn1 := mat(&d, 1, 16, &wn1) >>>\n'
+            '    $mwn2 := mat(&d, 1, 16, &wn2) >>>\n'
+            '    $mwq := mat(&d, 16, 16, &wq) >>>\n'
+            '    $mwk := mat(&d, 8, 16, &wk) >>>\n'
+            '    $mwv := mat(&d, 8, 16, &wv) >>>\n'
+            '    $mwo := mat(&d, 16, 16, &wo) >>>\n'
+            '    $mwg := mat(&d, 24, 16, &wg) >>>\n'
+            '    $mwu := mat(&d, 24, 16, &wu) >>>\n'
+            '    $mwd := mat(&d, 16, 24, &wd) >>>\n'
+            '    $mn1 := d.matrix_f32(3, 16) >>>\n'
+            '    $mq_raw := d.matrix_f32(3, 16) >>>\n'
+            '    $mk_raw := d.matrix_f32(3, 8) >>>\n'
+            '    $mv := d.matrix_f32(3, 8) >>>\n'
+            '    $mq := d.matrix_f32(3, 16) >>>\n'
+            '    $mk := d.matrix_f32(3, 8) >>>\n'
+            '    $matt := d.matrix_f32(3, 16) >>>\n'
+            '    $mo_proj := d.matrix_f32(3, 16) >>>\n'
+            '    $mh_att := d.matrix_f32(3, 16) >>>\n'
+            '    $mn2 := d.matrix_f32(3, 16) >>>\n'
+            '    $mfg := d.matrix_f32(3, 24) >>>\n'
+            '    $mfu := d.matrix_f32(3, 24) >>>\n'
+            '    $mfsw := d.matrix_f32(3, 24) >>>\n'
+            '    $mffn := d.matrix_f32(3, 16) >>>\n'
+            '    $mout := d.matrix_f32(3, 16) >>>\n'
+            '    // First test aborting an uncommitted batch cleanly releases buffer locks\n'
+            '    $b_abort := d.begin_batch() >>>\n'
+            '    _ := b_abort.rmsnorm_f32($&mn1, &mx, &mwn1, 0.00001) >>>\n'
+            '    _ := b_abort.close() >>>\n'
+            '    dc0 := d.dispatch_count() >>>\n'
+            '    $b := d.begin_batch() >>>\n'
+            '    _ := b.rmsnorm_f32($&mn1, &mx, &mwn1, 0.00001) >>>\n'
+            '    _ := b.gemm_f32_nt($&mq_raw, &mn1, &mwq) >>>\n'
+            '    _ := b.gemm_f32_nt($&mk_raw, &mn1, &mwk) >>>\n'
+            '    _ := b.gemm_f32_nt($&mv, &mn1, &mwv) >>>\n'
+            '    _ := b.rope_f32($&mq, &mq_raw, 0, 4, 10000.0) >>>\n'
+            '    _ := b.rope_f32($&mk, &mk_raw, 0, 4, 10000.0) >>>\n'
+            '    _ := b.causal_attention_f32($&matt, &mq, &mk, &mv, 4, 2, 0.5) >>>\n'
+            '    _ := b.gemm_f32_nt($&mo_proj, &matt, &mwo) >>>\n'
+            '    _ := b.add_f32($&mh_att, &mx, &mo_proj) >>>\n'
+            '    _ := b.rmsnorm_f32($&mn2, &mh_att, &mwn2, 0.00001) >>>\n'
+            '    _ := b.gemm_f32_nt($&mfg, &mn2, &mwg) >>>\n'
+            '    _ := b.gemm_f32_nt($&mfu, &mn2, &mwu) >>>\n'
+            '    _ := b.swiglu_f32($&mfsw, &mfg, &mfu) >>>\n'
+            '    _ := b.gemm_f32_nt($&mffn, &mfsw, &mwd) >>>\n'
+            '    _ := b.add_f32($&mout, &mh_att, &mffn) >>>\n'
+            '    $f := b.commit() >>>\n'
+            '    _ := f.wait() >>>\n'
+            '    _ := f.close() >>>\n'
+            '    dc1 := d.dispatch_count() >>>\n'
+            '    println("DELTA:" + str(dc1 - dc0))\n'
+            '    bits_out := mout.bits() >>>\n'
+            '    $s := "OUT:"\n    for i in 0:bits_out.len { if i > 0 { s = s + "," }\n s = s + str(bits_out[i]) }\n    println(s)\n'
+            '    _ := mx.close() >>>\n    _ := mwn1.close() >>>\n    _ := mwn2.close() >>>\n'
+            '    _ := mwq.close() >>>\n    _ := mwk.close() >>>\n    _ := mwv.close() >>>\n    _ := mwo.close() >>>\n'
+            '    _ := mwg.close() >>>\n    _ := mwu.close() >>>\n    _ := mwd.close() >>>\n'
+            '    _ := mn1.close() >>>\n    _ := mq_raw.close() >>>\n    _ := mk_raw.close() >>>\n    _ := mv.close() >>>\n'
+            '    _ := mq.close() >>>\n    _ := mk.close() >>>\n    _ := matt.close() >>>\n    _ := mo_proj.close() >>>\n'
+            '    _ := mh_att.close() >>>\n    _ := mn2.close() >>>\n    _ := mfg.close() >>>\n    _ := mfu.close() >>>\n'
+            '    _ := mfsw.close() >>>\n    _ := mffn.close() >>>\n    _ := mout.close() >>>\n'
+            '    _ := d.close() >>>\n'
+            '    println("LIVE:" + str(metal.live_handles()))\n    << 0\n}\n'
+            'fn main() int { << run_batch_layer() >>> (err) { eprintln(err.msg())\n << 1 } }\n'
+        )
+        with tempfile.TemporaryDirectory() as td:
+            out = run_xu(Path(td), xu_src)
+        if "SKIP:NO_METAL" in out:
+            self.skipTest("Metal device unavailable on host")
+        kv = dict(line.split(":", 1) for line in out.splitlines() if ":" in line)
+        self.assertEqual(kv.get("LIVE"), "0")
+        self.assertEqual(kv.get("DELTA"), "1")
+        got = [bits_to_f32(int(x)) for x in kv["OUT"].split(",")]
+        self.assertEqual(len(got), len(ref_out))
+        for i, (gv, rv) in enumerate(zip(got, ref_out)):
+            self.assertLess(abs(gv - rv), 1e-3, f"batch_layer[{i}]: gpu={gv} cpu={rv}")
 
 
 if __name__ == "__main__":

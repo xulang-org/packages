@@ -1,0 +1,84 @@
+@"github.com/xulang-org/packages/metal"
+
+metal_native #"github.com/xulang-org/packages/metal_native"
+#errors
+#math
+
+// Multi-op command buffer batching: encodes sequential GPU kernels and MPS
+// dispatches into a single MTLCommandBuffer submitted on Batch.commit().
+pub struct Batch { handle int }
+
+pub fn (d &Device) begin_batch() Batch {
+    handle := checked(metal_native.batch_new(d.handle)) >>>
+    << Batch{handle: handle}
+}
+
+pub fn (b $&Batch) commit() Fence {
+    handle := checked(metal_native.batch_commit(b.handle)) >>>
+    _ := metal_native.batch_close(b.handle)
+    b.handle = 0
+    << Fence{handle: handle}
+}
+
+pub fn (b $&Batch) close() int {
+    if b.handle == 0 { << 0 }
+    checked(metal_native.batch_close(b.handle)) >>>
+    b.handle = 0
+    << 0
+}
+fn (b $&Batch) drop() {
+    if b.handle > 0 { metal_native.batch_release(b.handle) b.handle = 0 }
+}
+
+pub fn (b $&Batch) gemm_f32(dst $&F32Matrix, a &F32Matrix, c_rhs &F32Matrix) int {
+    << checked(metal_native.batch_gemm_f32(b.handle, dst.handle, a.handle, c_rhs.handle)) >>>
+}
+pub fn (b $&Batch) gemm_f32_nt(dst $&F32Matrix, a &F32Matrix, c_rhs &F32Matrix) int {
+    << checked(metal_native.batch_gemm_f32_nt(b.handle, dst.handle, a.handle, c_rhs.handle)) >>>
+}
+pub fn (b $&Batch) rmsnorm_f32(dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, eps f64) int {
+    << checked(metal_native.batch_rmsnorm_f32(b.handle, dst.handle, x.handle, weight.handle, math.float32_bits(eps))) >>>
+}
+pub fn (b $&Batch) layernorm_f32(dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, bias &F32Matrix, eps f64) int {
+    << checked(metal_native.batch_layernorm_f32(b.handle, dst.handle, x.handle, weight.handle, bias.handle, math.float32_bits(eps))) >>>
+}
+pub fn (b $&Batch) softmax_f32(dst $&F32Matrix, x &F32Matrix) int {
+    << checked(metal_native.batch_softmax_f32(b.handle, dst.handle, x.handle)) >>>
+}
+pub fn (b $&Batch) swiglu_f32(dst $&F32Matrix, gate &F32Matrix, up &F32Matrix) int {
+    << checked(metal_native.batch_swiglu_f32(b.handle, dst.handle, gate.handle, up.handle)) >>>
+}
+pub fn (b $&Batch) gelu_f32(dst $&F32Matrix, x &F32Matrix) int {
+    << checked(metal_native.batch_gelu_f32(b.handle, dst.handle, x.handle)) >>>
+}
+pub fn (b $&Batch) add_f32(dst $&F32Matrix, a &F32Matrix, rhs &F32Matrix) int {
+    << checked(metal_native.batch_add_f32(b.handle, dst.handle, a.handle, rhs.handle)) >>>
+}
+pub fn (b $&Batch) mul_f32(dst $&F32Matrix, a &F32Matrix, rhs &F32Matrix) int {
+    << checked(metal_native.batch_mul_f32(b.handle, dst.handle, a.handle, rhs.handle)) >>>
+}
+pub fn (b $&Batch) scale_f32(dst $&F32Matrix, x &F32Matrix, alpha f64) int {
+    << checked(metal_native.batch_scale_f32(b.handle, dst.handle, x.handle, math.float32_bits(alpha))) >>>
+}
+pub fn (b $&Batch) rope_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, theta f64) int {
+    << checked(metal_native.batch_rope_f32(b.handle, dst.handle, x.handle, pos_offset, head_dim, math.float32_bits(theta))) >>>
+}
+pub fn (b $&Batch) causal_attention_f32(dst $&F32Matrix, q &F32Matrix, k &F32Matrix, v &F32Matrix,
+                                        n_heads int, n_kv_heads int, scale f64) int {
+    << checked(metal_native.batch_causal_attention_f32(b.handle, dst.handle, q.handle, k.handle, v.handle, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
+}
+pub fn (b $&Batch) gemm_f16(dst $&F16Matrix, a &F16Matrix, rhs &F16Matrix) int {
+    << checked(metal_native.batch_gemm_f16(b.handle, dst.handle, a.handle, rhs.handle)) >>>
+}
+pub fn (b $&Batch) gemm_f16_nt(dst $&F16Matrix, a &F16Matrix, rhs &F16Matrix) int {
+    << checked(metal_native.batch_gemm_f16_nt(b.handle, dst.handle, a.handle, rhs.handle)) >>>
+}
+pub fn (b $&Batch) f16_to_f32(dst $&F32Matrix, src &F16Matrix) int {
+    << checked(metal_native.batch_f16_to_f32(b.handle, dst.handle, src.handle)) >>>
+}
+pub fn (b $&Batch) f32_to_f16(dst $&F16Matrix, src &F32Matrix) int {
+    << checked(metal_native.batch_f32_to_f16(b.handle, dst.handle, src.handle)) >>>
+}
+pub fn (b $&Batch) gemv_q4_0_f32(dst $&F32Matrix, x &F32Matrix, w &Q4Matrix) int {
+    << checked(metal_native.batch_gemv_q4_0_f32(b.handle, dst.handle, x.handle, w.handle)) >>>
+}
