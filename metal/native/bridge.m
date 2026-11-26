@@ -16,6 +16,16 @@ static const uint64_t MAX_WORDS = UINT32_MAX - 255ULL;
 @property(nonatomic, strong) id<MTLDevice> gpu;
 @property(nonatomic, strong) id<MTLCommandQueue> queue;
 @property(nonatomic, strong) id<MTLComputePipelineState> pipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> rmsnormPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> softmaxPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> swigluPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> addPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> layernormPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> geluPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> mulPipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> scalePipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> ropePipeline;
+@property(nonatomic, strong) id<MTLComputePipelineState> causalAttnPipeline;
 @property(nonatomic) xu_int children;
 @property(nonatomic) xu_int dispatches;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, MPSMatrixMultiplication *> *matrixKernels;
@@ -101,14 +111,17 @@ static xu_int finish(XMFence *f) {
 
 // Caller holds gate. Integer and MPS operations share lifetime, busy accounting,
 // acknowledgement and failure handling. A dropped fence retains its operation.
-static xu_int submit_command(XMDevice *d, XMBuffer *c, XMBuffer *a, XMBuffer *b,
-                             id<MTLCommandBuffer> command, id operation) {
+static xu_int submit_command_many(XMDevice *d, XMBuffer *output, NSArray<XMBuffer *> *buffers,
+                                  id<MTLCommandBuffer> command, id operation) {
     XMFence *f = [XMFence new];
     if (!f) return XM_ALLOC;
     f.waitGate = [NSLock new];
     if (!f.waitGate) return XM_ALLOC;
-    f.owner = d; f.output = c;
-    f.buffers = a == b ? @[c,a] : @[c,a,b];
+    NSMutableArray<XMBuffer *> *uniq = [NSMutableArray arrayWithCapacity:buffers.count];
+    for (XMBuffer *buf in buffers) {
+        if (buf && [uniq indexOfObjectIdenticalTo:buf] == NSNotFound) [uniq addObject:buf];
+    }
+    f.owner = d; f.output = output; f.buffers = uniq;
     f.command = command; f.operation = operation;
     f.completed = command == nil;
     xu_int handle = insert(f, FENCE);
@@ -120,6 +133,11 @@ static xu_int submit_command(XMDevice *d, XMBuffer *c, XMBuffer *a, XMBuffer *b,
         d.dispatches++;
     }
     return handle;
+}
+
+static xu_int submit_command(XMDevice *d, XMBuffer *c, XMBuffer *a, XMBuffer *b,
+                             id<MTLCommandBuffer> command, id operation) {
+    return submit_command_many(d, c, (a == b ? @[c, a] : @[c, a, b]), command, operation);
 }
 
 xu_int XM_API(abi_version)(void) { return 2; }

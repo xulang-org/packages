@@ -2,6 +2,7 @@
 
 metal_native #"github.com/xulang-org/packages/metal_native"
 #errors
+#math
 
 // Host arrays hold canonical uint32 IEEE 754 binary32 bits in each Xu int.
 // These owners are distinct from Xu f64 and from integer GPU buffers.
@@ -85,5 +86,73 @@ fn (s $&F32Snapshot) drop() {
 // Storage transfer above preserves all bits, without f64 narrowing.
 pub fn gemm_f32(dst $&F32Matrix, a &F32Matrix, b &F32Matrix) Fence {
     handle := checked(metal_native.gemm_f32(dst.handle, a.handle, b.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// gemm_f32_nt computes dst = a @ b^T where a is [M, K], b is [N, K], dst is [M, N].
+pub fn gemm_f32_nt(dst $&F32Matrix, a &F32Matrix, b &F32Matrix) Fence {
+    handle := checked(metal_native.gemm_f32_nt(dst.handle, a.handle, b.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// rmsnorm_f32 computes row-wise RMSNorm(x, eps) * weight for x [M, N] and weight [1, N].
+pub fn rmsnorm_f32(dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, eps f64) Fence {
+    handle := checked(metal_native.rmsnorm_f32(dst.handle, x.handle, weight.handle, math.float32_bits(eps))) >>>
+    << Fence{handle: handle}
+}
+
+// softmax_f32 computes row-wise numerically stable softmax over x [M, N].
+pub fn softmax_f32(dst $&F32Matrix, x &F32Matrix) Fence {
+    handle := checked(metal_native.softmax_f32(dst.handle, x.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// swiglu_f32 computes element-wise SiLU(gate) * up over [M, N] matrices.
+pub fn swiglu_f32(dst $&F32Matrix, gate &F32Matrix, up &F32Matrix) Fence {
+    handle := checked(metal_native.swiglu_f32(dst.handle, gate.handle, up.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// add_f32 computes element-wise a + b over [M, N] matrices.
+pub fn add_f32(dst $&F32Matrix, a &F32Matrix, b &F32Matrix) Fence {
+    handle := checked(metal_native.add_f32(dst.handle, a.handle, b.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// layernorm_f32 computes row-wise LayerNorm(x, eps) * weight + bias for x [M, N] and [1, N] affine vectors.
+pub fn layernorm_f32(dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, bias &F32Matrix, eps f64) Fence {
+    handle := checked(metal_native.layernorm_f32(dst.handle, x.handle, weight.handle, bias.handle, math.float32_bits(eps))) >>>
+    << Fence{handle: handle}
+}
+
+// gelu_f32 computes element-wise tanh-approximated GELU over [M, N] matrices.
+pub fn gelu_f32(dst $&F32Matrix, x &F32Matrix) Fence {
+    handle := checked(metal_native.gelu_f32(dst.handle, x.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// mul_f32 computes element-wise a * b over [M, N] matrices.
+pub fn mul_f32(dst $&F32Matrix, a &F32Matrix, b &F32Matrix) Fence {
+    handle := checked(metal_native.mul_f32(dst.handle, a.handle, b.handle)) >>>
+    << Fence{handle: handle}
+}
+
+// scale_f32 multiplies each element of x [M, N] by binary32 scalar alpha.
+pub fn scale_f32(dst $&F32Matrix, x &F32Matrix, alpha f64) Fence {
+    handle := checked(metal_native.scale_f32(dst.handle, x.handle, math.float32_bits(alpha))) >>>
+    << Fence{handle: handle}
+}
+
+// rope_f32 applies NeoX split-half rotary position embeddings over [seq_len, n_heads * head_dim].
+pub fn rope_f32(dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, theta f64) Fence {
+    handle := checked(metal_native.rope_f32(dst.handle, x.handle, pos_offset, head_dim, math.float32_bits(theta))) >>>
+    << Fence{handle: handle}
+}
+
+// causal_attention_f32 computes multi-head causal GQA attention:
+// q, dst: [seq_len, n_heads * head_dim]; k, v: [kv_len, n_kv_heads * head_dim].
+pub fn causal_attention_f32(dst $&F32Matrix, q &F32Matrix, k &F32Matrix, v &F32Matrix,
+                            n_heads int, n_kv_heads int, scale f64) Fence {
+    handle := checked(metal_native.causal_attention_f32(dst.handle, q.handle, k.handle, v.handle, n_heads, n_kv_heads, math.float32_bits(scale))) >>>
     << Fence{handle: handle}
 }

@@ -33,3 +33,14 @@ xu_int XM_API(matrix_f32_close)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
 xu_int XM_API(matrix_f32_release)(xu_int a) { (void)a; return XM_UNAVAILABLE; }
 xu_int XM_API(snapshot_f32_copy)(xu_int a, const xu_i64_span_mut *b) { (void)a; (void)b; return XM_UNAVAILABLE; }
 xu_int XM_API(gemm_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(gemm_f32_nt)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(rmsnorm_f32)(xu_int a, xu_int b, xu_int c, xu_int d) { (void)a; (void)b; (void)c; (void)d; return XM_UNAVAILABLE; }
+xu_int XM_API(softmax_f32)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(swiglu_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(add_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(layernorm_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(gelu_f32)(xu_int a, xu_int b) { (void)a; (void)b; return XM_UNAVAILABLE; }
+xu_int XM_API(mul_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(scale_f32)(xu_int a, xu_int b, xu_int c) { (void)a; (void)b; (void)c; return XM_UNAVAILABLE; }
+xu_int XM_API(rope_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e) { (void)a; (void)b; (void)c; (void)d; (void)e; return XM_UNAVAILABLE; }
+xu_int XM_API(causal_attention_f32)(xu_int a, xu_int b, xu_int c, xu_int d, xu_int e, xu_int f, xu_int g) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g; return XM_UNAVAILABLE; }

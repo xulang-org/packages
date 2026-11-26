@@ -252,6 +252,112 @@
         "i64_span_mut"
       ],
       "ret": "int"
+    },
+    {
+      "name": "gemm_f32_nt",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "rmsnorm_f32",
+      "params": [
+        "int",
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "softmax_f32",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "swiglu_f32",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "add_f32",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "layernorm_f32",
+      "params": [
+        "int",
+        "int",
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "gelu_f32",
+      "params": [
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "mul_f32",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "scale_f32",
+      "params": [
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "rope_f32",
+      "params": [
+        "int",
+        "int",
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
+    },
+    {
+      "name": "causal_attention_f32",
+      "params": [
+        "int",
+        "int",
+        "int",
+        "int",
+        "int",
+        "int",
+        "int"
+      ],
+      "ret": "int"
     }
   ]
 }

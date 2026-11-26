@@ -43,4 +43,15 @@ XM_DECL(matrix_f32_close, (xu_int matrix));
 XM_DECL(matrix_f32_release, (xu_int matrix));
 XM_DECL(snapshot_f32_copy, (xu_int snapshot, const xu_i64_span_mut *bits));
 XM_DECL(gemm_f32, (xu_int dst, xu_int a, xu_int b));
+XM_DECL(gemm_f32_nt, (xu_int dst, xu_int a, xu_int b));
+XM_DECL(rmsnorm_f32, (xu_int dst, xu_int x, xu_int weight, xu_int eps_bits));
+XM_DECL(softmax_f32, (xu_int dst, xu_int x));
+XM_DECL(swiglu_f32, (xu_int dst, xu_int gate, xu_int up));
+XM_DECL(add_f32, (xu_int dst, xu_int a, xu_int b));
+XM_DECL(layernorm_f32, (xu_int dst, xu_int x, xu_int weight, xu_int bias, xu_int eps_bits));
+XM_DECL(gelu_f32, (xu_int dst, xu_int x));
+XM_DECL(mul_f32, (xu_int dst, xu_int a, xu_int b));
+XM_DECL(scale_f32, (xu_int dst, xu_int x, xu_int alpha_bits));
+XM_DECL(rope_f32, (xu_int dst, xu_int x, xu_int pos_offset, xu_int head_dim, xu_int theta_bits));
+XM_DECL(causal_attention_f32, (xu_int dst, xu_int q, xu_int k, xu_int v, xu_int n_heads, xu_int n_kv_heads, xu_int scale_bits));
 #endif

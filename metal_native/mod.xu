@@ -11,8 +11,8 @@ const SLOT = 2
 const OFF_LIBRARY = 0
 const OFF_LOADED = 8
 const OFF_SYMS = 16
-const SYM_COUNT = 33
-const BLOB_SIZE = 280
+const SYM_COUNT = 44
+const BLOB_SIZE = 368
 
 const XM_UNAVAILABLE = -1
 
@@ -49,6 +49,17 @@ extern "C" fn xm_matrix_f32_close(fn_ptr c_ptr, matrix int) int = dynamic
 extern "C" fn xm_matrix_f32_release(fn_ptr c_ptr, matrix int) int = dynamic
 extern "C" fn xm_snapshot_f32_copy(fn_ptr c_ptr, snapshot int, bits c_ptr) int = dynamic
 extern "C" fn xm_gemm_f32(fn_ptr c_ptr, dst int, a int, b int) int = dynamic
+extern "C" fn xm_gemm_f32_nt(fn_ptr c_ptr, dst int, a int, b int) int = dynamic
+extern "C" fn xm_rmsnorm_f32(fn_ptr c_ptr, dst int, x int, weight int, eps_bits int) int = dynamic
+extern "C" fn xm_softmax_f32(fn_ptr c_ptr, dst int, x int) int = dynamic
+extern "C" fn xm_swiglu_f32(fn_ptr c_ptr, dst int, gate int, up int) int = dynamic
+extern "C" fn xm_add_f32(fn_ptr c_ptr, dst int, a int, b int) int = dynamic
+extern "C" fn xm_layernorm_f32(fn_ptr c_ptr, dst int, x int, weight int, bias int, eps_bits int) int = dynamic
+extern "C" fn xm_gelu_f32(fn_ptr c_ptr, dst int, x int) int = dynamic
+extern "C" fn xm_mul_f32(fn_ptr c_ptr, dst int, a int, b int) int = dynamic
+extern "C" fn xm_scale_f32(fn_ptr c_ptr, dst int, x int, alpha_bits int) int = dynamic
+extern "C" fn xm_rope_f32(fn_ptr c_ptr, dst int, x int, pos_offset int, head_dim int, theta_bits int) int = dynamic
+extern "C" fn xm_causal_attention_f32(fn_ptr c_ptr, dst int, q int, k int, v int, n_heads int, n_kv_heads int, scale_bits int) int = dynamic
 
 fn sym_name(i int) string {
     if i == 0 { << "xu_metal_native_available" }
@@ -84,6 +95,17 @@ fn sym_name(i int) string {
     if i == 30 { << "xu_metal_native_matrix_f32_release" }
     if i == 31 { << "xu_metal_native_snapshot_f32_copy" }
     if i == 32 { << "xu_metal_native_gemm_f32" }
+    if i == 33 { << "xu_metal_native_gemm_f32_nt" }
+    if i == 34 { << "xu_metal_native_rmsnorm_f32" }
+    if i == 35 { << "xu_metal_native_softmax_f32" }
+    if i == 36 { << "xu_metal_native_swiglu_f32" }
+    if i == 37 { << "xu_metal_native_add_f32" }
+    if i == 38 { << "xu_metal_native_layernorm_f32" }
+    if i == 39 { << "xu_metal_native_gelu_f32" }
+    if i == 40 { << "xu_metal_native_mul_f32" }
+    if i == 41 { << "xu_metal_native_scale_f32" }
+    if i == 42 { << "xu_metal_native_rope_f32" }
+    if i == 43 { << "xu_metal_native_causal_attention_f32" }
     << ""
 }
 
@@ -385,4 +407,48 @@ pub fn snapshot_f32_copy(snapshot int, bits $&[]int) int {
 pub fn gemm_f32(dst int, a int, b int) int {
     if !ensure() { << XM_UNAVAILABLE }
     unsafe { << xm_gemm_f32(sym(32), dst, a, b) }
+}
+pub fn gemm_f32_nt(dst int, a int, b int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gemm_f32_nt(sym(33), dst, a, b) }
+}
+pub fn rmsnorm_f32(dst int, x int, weight int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_rmsnorm_f32(sym(34), dst, x, weight, eps_bits) }
+}
+pub fn softmax_f32(dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_softmax_f32(sym(35), dst, x) }
+}
+pub fn swiglu_f32(dst int, gate int, up int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_swiglu_f32(sym(36), dst, gate, up) }
+}
+pub fn add_f32(dst int, a int, b int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_add_f32(sym(37), dst, a, b) }
+}
+pub fn layernorm_f32(dst int, x int, weight int, bias int, eps_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_layernorm_f32(sym(38), dst, x, weight, bias, eps_bits) }
+}
+pub fn gelu_f32(dst int, x int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_gelu_f32(sym(39), dst, x) }
+}
+pub fn mul_f32(dst int, a int, b int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_mul_f32(sym(40), dst, a, b) }
+}
+pub fn scale_f32(dst int, x int, alpha_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_scale_f32(sym(41), dst, x, alpha_bits) }
+}
+pub fn rope_f32(dst int, x int, pos_offset int, head_dim int, theta_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_rope_f32(sym(42), dst, x, pos_offset, head_dim, theta_bits) }
+}
+pub fn causal_attention_f32(dst int, q int, k int, v int, n_heads int, n_kv_heads int, scale_bits int) int {
+    if !ensure() { << XM_UNAVAILABLE }
+    unsafe { << xm_causal_attention_f32(sym(43), dst, q, k, v, n_heads, n_kv_heads, scale_bits) }
 }
