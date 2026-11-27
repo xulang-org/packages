@@ -7,7 +7,9 @@
 #strconv
 #strings
 #tensor
+cohere #github.com/xulang-org/packages/cohere
 openai #github.com/xulang-org/packages/openai
+postgres #github.com/xulang-org/packages/postgres
 
 pub struct Chunk {
     pub id string
@@ -26,6 +28,11 @@ pub struct SearchHit {
 pub struct MemoryStore {
     pub dim int
     pub chunks []Chunk
+}
+
+pub struct ParentChildDoc {
+    pub parents []Chunk
+    pub children []Chunk
 }
 
 pub fn new_store(dim int) MemoryStore {
@@ -53,6 +60,54 @@ pub fn chunk_text(text string, chunk_size int, overlap int) []string {
         out.push(text[pos:end])
         if end >= text.len { <- }
         pos += step
+    }
+    << out
+}
+
+fn find_last_sep(text &string, start int, end int, sep string) int {
+    if sep.len == 0 || end - start < sep.len { << -1 }
+    $i := end - sep.len
+    while i >= start {
+        $ok := true
+        for j in 0:sep.len {
+            if ((*text)[i + j] & 255) != (sep[j] & 255) {
+                ok = false
+                <-
+            }
+        }
+        if ok { << i + sep.len }
+        i -= 1
+    }
+    << -1
+}
+
+pub fn chunk_recursive(text string, max_chars int, overlap int) []string {
+    $out := []string{}
+    if text.len == 0 { << out }
+    $mc := max_chars
+    if mc <= 0 { mc = 512 }
+    $ov := overlap
+    if ov < 0 { ov = 0 }
+    if ov >= mc { ov = mc - 1 }
+    if ov < 0 { ov = 0 }
+    $pos := 0
+    while pos < text.len {
+        if text.len - pos <= mc {
+            piece := strings.trim_space(&text[pos:text.len])
+            if piece.len > 0 { out.push(piece) }
+            <-
+        }
+        limit := pos + mc
+        $cut := find_last_sep(&text, pos + 1, limit, "\n\n")
+        if cut < 0 { cut = find_last_sep(&text, pos + 1, limit, "\n") }
+        if cut < 0 { cut = find_last_sep(&text, pos + 1, limit, ". ") }
+        if cut < 0 { cut = find_last_sep(&text, pos + 1, limit, " ") }
+        if cut <= pos { cut = limit }
+        piece := strings.trim_space(&text[pos:cut])
+        if piece.len > 0 { out.push(piece) }
+        $next_pos := cut - ov
+        if next_pos <= pos { next_pos = cut }
+        pos = next_pos
     }
     << out
 }
@@ -826,4 +881,497 @@ pub fn rerank_hits(hits &[]SearchHit, scores &[]f64, top_k int) []SearchHit {
         }
     }
     << out
+}
+
+pub fn rerank_with_api(client &openai.Client, model string, query string,
+                       hits &[]SearchHit, top_k int) []SearchHit {
+    if top_k <= 0 || hits.len == 0 { << []SearchHit{} }
+    $docs := []string{}
+    for i in 0:hits.len {
+        docs.push(hits[i].chunk.text + "")
+    }
+    res := client.rerank(model, query, &docs, top_k) >>>
+    $out := []SearchHit{}
+    for i in 0:res.len {
+        r := &res[i]
+        hidx := r.index
+        if hidx >= 0 && hidx < hits.len {
+            out.push(SearchHit{chunk: copy_chunk(&hits[hidx].chunk), score: r.relevance_score})
+        }
+    }
+    << out
+}
+
+pub fn chunk_parent_child(doc_id string, source string, text string,
+                          parent_chars int, child_chars int, overlap int) ParentChildDoc {
+    ptexts := chunk_recursive(text, parent_chars, overlap)
+    $parents := []Chunk{}
+    $children := []Chunk{}
+    for pi in 0:ptexts.len {
+        pid := doc_id + "#p" + str(pi)
+        parents.push(Chunk{
+            id: pid + "",
+            doc_id: doc_id + "",
+            text: ptexts[pi] + "",
+            source: source + "",
+            metadata_json: "{}",
+            embedding: []f32{}
+        })
+        ctexts := chunk_recursive(ptexts[pi] + "", child_chars, overlap)
+        meta := "{\"parent_id\":" + json.quote(&pid) + "}"
+        for ci in 0:ctexts.len {
+            children.push(Chunk{
+                id: pid + "#c" + str(ci),
+                doc_id: doc_id + "",
+                text: ctexts[ci] + "",
+                source: source + "",
+                metadata_json: meta + "",
+                embedding: []f32{}
+            })
+        }
+    }
+    << ParentChildDoc{parents: ~parents, children: ~children}
+}
+
+pub fn expand_to_parents(child_hits &[]SearchHit, parents &[]Chunk) []SearchHit {
+    $out := []SearchHit{}
+    $seen_pids := []string{}
+    for i in 0:child_hits.len {
+        ch := &child_hits[i].chunk
+        $pid := ""
+        md := json.parse(&ch.metadata_json)
+        if md.ok() && md.is_dict(md.root()) {
+            pid = json_str_or(&md, md.root(), "parent_id", "")
+        }
+        if pid.len == 0 {
+            out.push(SearchHit{chunk: copy_chunk(ch), score: child_hits[i].score})
+            ->
+        }
+        $dup := false
+        for si in 0:seen_pids.len {
+            if seen_pids[si] == pid {
+                dup = true
+                <-
+            }
+        }
+        if dup { -> }
+        for pi in 0:parents.len {
+            if parents[pi].id == pid {
+                seen_pids.push(pid + "")
+                out.push(SearchHit{chunk: copy_chunk(&parents[pi]), score: child_hits[i].score})
+                <-
+            }
+        }
+    }
+    << out
+}
+
+pub fn expand_queries_openai(client &openai.Client, model string, query string, n int) []string {
+    $cnt := n
+    if cnt <= 0 { cnt = 3 }
+    sys := "Generate " + str(cnt) + " alternative search queries for the user question. Output one query per line, no numbering."
+    $qmsgs := []openai.Message{}
+    qmsgs.push(openai.message("system", sys))
+    qmsgs.push(openai.message("user", query + ""))
+    req := openai.chat_request(model, ~qmsgs)
+    resp := client.chat(&req) >>>
+    $out := []string{}
+    out.push(query + "")
+    lines := strings.split(&resp.content, "\n")
+    for i in 0:lines.len {
+        if out.len >= cnt + 1 { <- }
+        ln := strings.trim_space(&lines[i])
+        if ln.len == 0 { -> }
+        $dup := false
+        for j in 0:out.len {
+            if out[j] == ln {
+                dup = true
+                <-
+            }
+        }
+        if !dup { out.push(ln) }
+    }
+    << out
+}
+
+pub fn hyde_document_openai(client &openai.Client, model string, query string) string {
+    sys := "Write a concise factual passage (2-4 sentences) that directly answers the user's question for hypothetical document retrieval."
+    req := openai.chat_request(model, [openai.message("system", sys), openai.message("user", query)])
+    resp := client.chat(&req) >>>
+    << strings.trim_space(&resp.content)
+}
+
+pub fn compress_context(query &string, hits &[]SearchHit, max_sentences_per_hit int) []SearchHit {
+    $keep_n := max_sentences_per_hit
+    if keep_n <= 0 { keep_n = 2 }
+    qterms := tokenize_terms(query)
+    $out := []SearchHit{}
+    for hi in 0:hits.len {
+        h := &hits[hi]
+        $sents := []string{}
+        $start := 0
+        txt := &h.chunk.text
+        for i in 0:(txt.len + 1) {
+            $is_end := i == txt.len
+            if !is_end {
+                ch := (*txt)[i] & 255
+                is_end = ch == 46 || ch == 33 || ch == 63 || ch == 10
+            }
+            if is_end {
+                $end := i
+                if end < txt.len && ((*txt)[end] & 255) != 10 { end += 1 }
+                if end > start {
+                    raw_pc := (*txt)[start:end]
+                    pc := strings.trim_space(&raw_pc)
+                    if pc.len > 0 { sents.push(pc) }
+                }
+                start = end
+                if end == i { start = i + 1 }
+            }
+        }
+        if sents.len <= keep_n {
+            out.push(SearchHit{chunk: copy_chunk(&h.chunk), score: h.score})
+            ->
+        }
+        $scores := []f32{}
+        for si in 0:sents.len {
+            sterms := tokenize_terms(&sents[si])
+            $ov := 0
+            for qi in 0:qterms.len {
+                for ti in 0:sterms.len {
+                    if sterms[ti] == qterms[qi] {
+                        ov += 1
+                        <-
+                    }
+                }
+            }
+            scores.push(f32(ov))
+        }
+        $selected := []bool{}
+        for _ in 0:sents.len { selected.push(false) }
+        for _ in 0:keep_n {
+            $bi := -1
+            $bs := f32(-1.0)
+            for si in 0:sents.len {
+                if !selected[si] && scores[si] > bs {
+                    bs = scores[si]
+                    bi = si
+                }
+            }
+            if bi >= 0 { selected[bi] = true }
+        }
+        $comp := ""
+        for si in 0:sents.len {
+            if selected[si] {
+                if comp.len > 0 { comp = comp + " " }
+                comp = comp + sents[si]
+            }
+        }
+        $nc := copy_chunk(&h.chunk)
+        nc.text = comp
+        out.push(SearchHit{chunk: ~nc, score: h.score})
+    }
+    << out
+}
+
+pub fn format_context_cited(hits &[]SearchHit) string {
+    $out := ""
+    for i in 0:hits.len {
+        if i > 0 { out = out + "\n\n" }
+        c := &hits[i].chunk
+        $lbl := c.source + ""
+        if lbl.len > 0 && c.id.len > 0 { lbl = lbl + "#" + c.id }
+        else if c.id.len > 0 { lbl = c.id + "" }
+        out = out + "[" + str(i + 1) + "] (" + lbl + ")\n" + c.text
+    }
+    << out
+}
+
+pub struct PgVectorStore {
+    pub table string
+    pub dim int
+    pub metric string
+}
+
+fn rag_valid_pg_ident(s &string) bool {
+    if s.len == 0 || s.len > 63 { << false }
+    for i in 0:s.len {
+        ch := (*s)[i] & 255
+        is_alpha := (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95
+        is_digit := ch >= 48 && ch <= 57
+        if i == 0 && !is_alpha { << false }
+        if !is_alpha && !is_digit { << false }
+    }
+    << true
+}
+
+fn sql_quote_lit(s &string) string {
+    $out := "'"
+    for i in 0:s.len {
+        ch := (*s)[i] & 255
+        if ch == 39 {
+            out.push_str("''")
+        } else {
+            out.push_str(string_from_byte(ch))
+        }
+    }
+    out.push_str("'")
+    << out
+}
+
+pub fn new_pgvector_store(table string, dim int, metric string) PgVectorStore {
+    if !rag_valid_pg_ident(&table) {
+        >>> errors.new("rag: invalid PostgreSQL table identifier: " + table)
+    }
+    if dim <= 0 {
+        >>> errors.new("rag: pgvector dimension must be positive")
+    }
+    $met := metric + ""
+    if met.len == 0 { met = "cosine" }
+    _ := postgres.pgvector_distance_op(met + "") >>>
+    << PgVectorStore{table: table, dim: dim, metric: met}
+}
+
+pub fn (s &PgVectorStore) create_table_sql() string {
+    << postgres.pgvector_create_extension_sql() + "; CREATE TABLE IF NOT EXISTS " + s.table +
+       " (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}'::jsonb, embedding vector(" +
+       str(s.dim) + ") NOT NULL)"
+}
+
+pub fn (s &PgVectorStore) create_index_sql(index_name string, method string) string {
+    << postgres.pgvector_create_index_sql(s.table + "", "embedding", index_name, method, s.metric + "") >>>
+}
+
+pub fn (s &PgVectorStore) upsert_chunk_sql(c &Chunk) string {
+    if c.embedding.len != s.dim {
+        >>> errors.new("rag: pgvector chunk embedding dimension mismatch")
+    }
+    vec_lit := postgres.vector_encode(&c.embedding)
+    $meta := c.metadata_json + ""
+    if meta.len == 0 { meta = "{}" }
+    << "INSERT INTO " + s.table + " (id, doc_id, text, source, metadata, embedding) VALUES (" +
+       sql_quote_lit(&c.id) + ", " + sql_quote_lit(&c.doc_id) + ", " + sql_quote_lit(&c.text) + ", " +
+       sql_quote_lit(&c.source) + ", " + sql_quote_lit(&meta) + "::jsonb, " + sql_quote_lit(&vec_lit) +
+       "::vector) ON CONFLICT (id) DO UPDATE SET doc_id = EXCLUDED.doc_id, text = EXCLUDED.text, source = EXCLUDED.source, metadata = EXCLUDED.metadata, embedding = EXCLUDED.embedding"
+}
+
+pub fn (s &PgVectorStore) search_sql(query_emb &[]f64, top_k int, filter_doc_id string) string {
+    if query_emb.len != s.dim {
+        >>> errors.new("rag: pgvector query embedding dimension mismatch")
+    }
+    if top_k <= 0 {
+        >>> errors.new("rag: pgvector top_k must be positive")
+    }
+    vec_lit := postgres.vector_encode_f64(query_emb)
+    op := postgres.pgvector_distance_op(s.metric + "") >>>
+    vec_expr := sql_quote_lit(&vec_lit) + "::vector"
+    $where_clause := ""
+    if filter_doc_id.len > 0 {
+        where_clause = " WHERE doc_id = " + sql_quote_lit(&filter_doc_id)
+    }
+    << "SELECT id, doc_id, text, source, metadata::text, (embedding " + op + " " + vec_expr +
+       ") AS distance FROM " + s.table + where_clause + " ORDER BY embedding " + op + " " + vec_expr +
+       " LIMIT " + str(top_k)
+}
+
+pub fn chunk_code(code string, max_chars int, overlap int) []string {
+    $out := []string{}
+    if code.len == 0 { << out }
+    $mc := max_chars
+    if mc <= 0 { mc = 800 }
+    $ov := overlap
+    if ov < 0 { ov = 0 }
+    if ov >= mc { ov = mc - 1 }
+    if ov < 0 { ov = 0 }
+    $pos := 0
+    while pos < code.len {
+        if code.len - pos <= mc {
+            piece := strings.trim_space(&code[pos:code.len])
+            if piece.len > 0 { out.push(piece) }
+            <-
+        }
+        limit := pos + mc
+        $cut := find_last_sep(&code, pos + 1, limit, "\npub fn ")
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\nfn ") }
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\npub struct ") }
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\nstruct ") }
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\ndef ") }
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\nclass ") }
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\nfunc ") }
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\n\n") }
+        if cut < 0 { cut = find_last_sep(&code, pos + 1, limit, "\n") }
+        if cut <= pos { cut = limit }
+        piece := strings.trim_space(&code[pos:cut])
+        if piece.len > 0 { out.push(piece) }
+        $next_pos := cut - ov
+        if next_pos <= pos { next_pos = cut }
+        pos = next_pos
+    }
+    << out
+}
+
+pub fn rerank_with_cohere(client &cohere.Client, model string, query string,
+                          hits &[]SearchHit, top_k int) []SearchHit {
+    if top_k <= 0 || hits.len == 0 { << []SearchHit{} }
+    $docs := []string{}
+    for i in 0:hits.len {
+        docs.push(hits[i].chunk.text + "")
+    }
+    res := client.rerank(model, query, &docs, top_k) >>>
+    $out := []SearchHit{}
+    for i in 0:res.len {
+        r := &res[i]
+        hidx := r.index
+        if hidx >= 0 && hidx < hits.len {
+            out.push(SearchHit{chunk: copy_chunk(&hits[hidx].chunk), score: r.relevance_score})
+        }
+    }
+    << out
+}
+
+pub struct Triple {
+    pub subject string
+    pub predicate string
+    pub object string
+    pub source string
+}
+
+pub struct KnowledgeGraph {
+    pub triples []Triple
+}
+
+pub fn new_knowledge_graph() KnowledgeGraph {
+    << KnowledgeGraph{triples: []Triple{}}
+}
+
+pub fn (kg &KnowledgeGraph) len() int {
+    << kg.triples.len
+}
+
+pub fn (kg $&KnowledgeGraph) add_triple(subject string, predicate string, object string, source string) {
+    kg.triples.push(Triple{
+        subject: subject,
+        predicate: predicate,
+        object: object,
+        source: source
+    })
+}
+
+fn rag_ascii_lower(s &string) string {
+    $out := ""
+    for i in 0:s.len {
+        ch := (*s)[i] & 255
+        if ch >= 65 && ch <= 90 { out.push_str(string_from_byte(ch + 32)) }
+        else { out.push_str(string_from_byte(ch)) }
+    }
+    << out
+}
+
+fn rag_str_in_list(list &[]string, val &string) bool {
+    for i in 0:list.len {
+        if list[i] == *val { << true }
+    }
+    << false
+}
+
+pub fn (kg &KnowledgeGraph) query_neighbors(entity string, max_hops int) []Triple {
+    $out := []Triple{}
+    if entity.len == 0 || kg.triples.len == 0 { << out }
+    $hops := max_hops
+    if hops <= 0 { hops = 1 }
+    $visited_ent := [rag_ascii_lower(&entity)]
+    $frontier := [rag_ascii_lower(&entity)]
+    $seen_idx := []bool{}
+    for _ in 0:kg.triples.len { seen_idx.push(false) }
+
+    for _ in 0:hops {
+        if frontier.len == 0 { <- }
+        $next_frontier := []string{}
+        for ti in 0:kg.triples.len {
+            if seen_idx[ti] { -> }
+            tr := &kg.triples[ti]
+            ls := rag_ascii_lower(&tr.subject)
+            lo := rag_ascii_lower(&tr.object)
+            $hit := false
+            if rag_str_in_list(&frontier, &ls) {
+                hit = true
+                if lo.len > 0 && !rag_str_in_list(&visited_ent, &lo) {
+                    visited_ent.push(lo + "")
+                    next_frontier.push(lo + "")
+                }
+            }
+            if rag_str_in_list(&frontier, &lo) {
+                hit = true
+                if ls.len > 0 && !rag_str_in_list(&visited_ent, &ls) {
+                    visited_ent.push(ls + "")
+                    next_frontier.push(ls + "")
+                }
+            }
+            if hit {
+                seen_idx[ti] = true
+                out.push(Triple{
+                    subject: tr.subject + "",
+                    predicate: tr.predicate + "",
+                    object: tr.object + "",
+                    source: tr.source + ""
+                })
+            }
+        }
+        frontier = ~next_frontier
+    }
+    << out
+}
+
+pub fn format_subgraph(triples &[]Triple) string {
+    $out := ""
+    for i in 0:triples.len {
+        if i > 0 { out = out + "\n" }
+        tr := &triples[i]
+        out = out + "- " + tr.subject + " --[" + tr.predicate + "]--> " + tr.object
+        if tr.source.len > 0 { out = out + " (" + tr.source + ")" }
+    }
+    << out
+}
+
+pub fn (kg &KnowledgeGraph) save_json(path string) int {
+    $out := "{\"triples\":["
+    for i in 0:kg.triples.len {
+        if i > 0 { out = out + "," }
+        tr := &kg.triples[i]
+        out = out + "{\"subject\":" + json.quote(&tr.subject) +
+              ",\"predicate\":" + json.quote(&tr.predicate) +
+              ",\"object\":" + json.quote(&tr.object) +
+              ",\"source\":" + json.quote(&tr.source) + "}"
+    }
+    out = out + "]}"
+    _ := os.write(path + "", out) >>>
+    << kg.triples.len
+}
+
+pub fn load_knowledge_graph_json(path string) KnowledgeGraph {
+    raw := os.read(path + "") >>>
+    doc := json.parse(&raw)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("rag: invalid KnowledgeGraph JSON file")
+    }
+    root := doc.root()
+    $kg := new_knowledge_graph()
+    if doc.has(root, "triples") {
+        arr := doc.get(root, "triples") >>>
+        if doc.is_list(arr) {
+            cnt := doc.count(arr)
+            for i in 0:cnt {
+                item := doc.at(arr, i) >>>
+                if doc.is_dict(item) {
+                    kg.add_triple(
+                        json_str_or(&doc, item, "subject", ""),
+                        json_str_or(&doc, item, "predicate", ""),
+                        json_str_or(&doc, item, "object", ""),
+                        json_str_or(&doc, item, "source", "")
+                    )
+                }
+            }
+        }
+    }
+    << kg
 }

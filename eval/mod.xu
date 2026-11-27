@@ -1,0 +1,536 @@
+@"github.com/xulang-org/packages/eval"
+
+#encoding/json
+#errors
+#math
+#os
+#strconv
+#strings
+openai #github.com/xulang-org/packages/openai
+anthropic #github.com/xulang-org/packages/anthropic
+gemini #github.com/xulang-org/packages/gemini
+
+pub struct JudgeResult {
+    pub score f64
+    pub passed bool
+    pub reasoning string
+}
+
+pub struct EvalCase {
+    pub id string
+    pub input string
+    pub expected string
+}
+
+pub struct EvalSummary {
+    pub total int
+    pub exact_match_avg f64
+    pub token_f1_avg f64
+    pub rouge_l_avg f64
+}
+
+pub struct RagasReport {
+    pub context_precision f64
+    pub context_recall f64
+    pub faithfulness f64
+    pub answer_relevancy f64
+    pub overall f64
+}
+
+fn normalize_ws_lower(s &string) string {
+    $out := ""
+    $prev_sp := true
+    for i in 0:s.len {
+        ch := (*s)[i] & 255
+        is_ws := ch == 32 || ch == 9 || ch == 10 || ch == 13
+        is_punct := ch == 46 || ch == 44 || ch == 33 || ch == 63 || ch == 58 || ch == 59
+        if is_ws || is_punct {
+            if !prev_sp && out.len > 0 {
+                out = out + " "
+                prev_sp = true
+            }
+        } else {
+            $c := ch
+            if c >= 65 && c <= 90 { c += 32 }
+            out.push_str(string_from_byte(c))
+            prev_sp = false
+        }
+    }
+    if out.len > 0 && (out[out.len - 1] & 255) == 32 {
+        out = out[0:out.len - 1]
+    }
+    << out
+}
+
+fn eval_tokenize(s &string) []string {
+    norm := normalize_ws_lower(s)
+    $toks := []string{}
+    $start := 0
+    for i in 0:(norm.len + 1) {
+        $is_end := i == norm.len
+        if !is_end { is_end = (norm[i] & 255) == 32 }
+        if is_end {
+            if i > start { toks.push(norm[start:i]) }
+            start = i + 1
+        }
+    }
+    << toks
+}
+
+pub fn exact_match(pred &string, gold &string, normalize bool) f64 {
+    if normalize {
+        if normalize_ws_lower(pred) == normalize_ws_lower(gold) { << 1.0 }
+        << 0.0
+    }
+    if strings.trim_space(pred) == strings.trim_space(gold) { << 1.0 }
+    << 0.0
+}
+
+fn ngram_key(toks &[]string, start int, n int) string {
+    $k := ""
+    sep := string_from_byte(31)
+    for j in 0:n {
+        if j > 0 { k = k + sep }
+        k = k + toks[start + j]
+    }
+    << k
+}
+
+fn count_overlap(a &[]string, b &[]string) int {
+    $used := []bool{}
+    for _ in 0:b.len { used.push(false) }
+    $hits := 0
+    for i in 0:a.len {
+        for j in 0:b.len {
+            if !used[j] && a[i] == b[j] {
+                used[j] = true
+                hits += 1
+                <-
+            }
+        }
+    }
+    << hits
+}
+
+pub fn token_f1(pred &string, gold &string) f64 {
+    ptoks := eval_tokenize(pred)
+    gtoks := eval_tokenize(gold)
+    if ptoks.len == 0 && gtoks.len == 0 { << 1.0 }
+    if ptoks.len == 0 || gtoks.len == 0 { << 0.0 }
+    hits := count_overlap(&ptoks, &gtoks)
+    if hits == 0 { << 0.0 }
+    prec := f64(hits) / f64(ptoks.len)
+    rec := f64(hits) / f64(gtoks.len)
+    << (2.0 * prec * rec) / (prec + rec)
+}
+
+pub fn rouge_n(pred &string, reference &string, n int) f64 {
+    if n <= 0 { << 0.0 }
+    ptoks := eval_tokenize(pred)
+    rtoks := eval_tokenize(reference)
+    if ptoks.len < n || rtoks.len < n {
+        if ptoks.len == 0 && rtoks.len == 0 { << 1.0 }
+        << 0.0
+    }
+    $png := []string{}
+    $rng := []string{}
+    for i in 0:(ptoks.len - n + 1) { png.push(ngram_key(&ptoks, i, n)) }
+    for i in 0:(rtoks.len - n + 1) { rng.push(ngram_key(&rtoks, i, n)) }
+    hits := count_overlap(&png, &rng)
+    if hits == 0 { << 0.0 }
+    prec := f64(hits) / f64(png.len)
+    rec := f64(hits) / f64(rng.len)
+    << (2.0 * prec * rec) / (prec + rec)
+}
+
+pub fn rouge_l(pred &string, reference &string) f64 {
+    ptoks := eval_tokenize(pred)
+    rtoks := eval_tokenize(reference)
+    if ptoks.len == 0 && rtoks.len == 0 { << 1.0 }
+    if ptoks.len == 0 || rtoks.len == 0 { << 0.0 }
+    rows := ptoks.len + 1
+    cols := rtoks.len + 1
+    $dp := []int{}
+    for _ in 0:(rows * cols) { dp.push(0) }
+    for i in 1:rows {
+        for j in 1:cols {
+            if ptoks[i - 1] == rtoks[j - 1] {
+                dp[i * cols + j] = dp[(i - 1) * cols + (j - 1)] + 1
+            } else {
+                up := dp[(i - 1) * cols + j]
+                left := dp[i * cols + (j - 1)]
+                if up >= left { dp[i * cols + j] = up }
+                else { dp[i * cols + j] = left }
+            }
+        }
+    }
+    lcs := dp[ptoks.len * cols + rtoks.len]
+    if lcs == 0 { << 0.0 }
+    prec := f64(lcs) / f64(ptoks.len)
+    rec := f64(lcs) / f64(rtoks.len)
+    << (2.0 * prec * rec) / (prec + rec)
+}
+
+pub fn bleu_score(pred &string, reference &string, max_n int) f64 {
+    ptoks := eval_tokenize(pred)
+    rtoks := eval_tokenize(reference)
+    if ptoks.len == 0 { << 0.0 }
+    if rtoks.len == 0 { << 0.0 }
+    $mn := max_n
+    if mn <= 0 { mn = 4 }
+    if ptoks.len < mn { mn = ptoks.len }
+    if rtoks.len < mn { mn = rtoks.len }
+    if mn <= 0 { << 0.0 }
+    $log_sum := 0.0
+    for n in 1:(mn + 1) {
+        $png := []string{}
+        $rng := []string{}
+        for i in 0:(ptoks.len - n + 1) { png.push(ngram_key(&ptoks, i, n)) }
+        for i in 0:(rtoks.len - n + 1) { rng.push(ngram_key(&rtoks, i, n)) }
+        hits := count_overlap(&png, &rng)
+        // Smoothing +1 for denominator/numerator when hits == 0 on short strings
+        $p := f64(hits) / f64(png.len)
+        if hits == 0 { p = 1.0 / (f64(png.len) + 1.0) }
+        log_sum += math.log(p) / f64(mn)
+    }
+    $bp := 1.0
+    if ptoks.len < rtoks.len {
+        bp = math.exp(1.0 - f64(rtoks.len) / f64(ptoks.len))
+    }
+    << bp * math.exp(log_sum)
+}
+
+pub fn json_valid_score(output &string, required_keys &[]string) f64 {
+    trimmed := strings.trim_space(output)
+    doc := json.parse(&trimmed)
+    if !doc.ok() || !doc.is_dict(doc.root()) { << 0.0 }
+    root := doc.root()
+    if required_keys.len == 0 { << 1.0 }
+    $found := 0
+    for i in 0:required_keys.len {
+        if doc.has(root, required_keys[i] + "") { found += 1 }
+    }
+    << f64(found) / f64(required_keys.len)
+}
+
+fn eval_json_f64_or(doc &json.Doc, obj int, key string, def f64) f64 {
+    if !doc.has(obj, key) { << def }
+    sn := doc.get(obj, key) >>> (_) { << def }
+    if !doc.is_number(sn) { << def }
+    << doc.as_f64(sn) >>> (_) { << def }
+}
+
+fn eval_json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.has(obj, key) { << def }
+    rn := doc.get(obj, key) >>> (_) { << def }
+    if !doc.is_string(rn) { << def }
+    << doc.as_string(rn) >>> (_) { << def }
+}
+
+fn eval_parse_f64_or(s &string, def f64) f64 {
+    << strconv.parse_float(s) >>> (_) { << def }
+}
+
+fn parse_judge_response(raw_text &string, pass_threshold f64) JudgeResult {
+    $raw := strings.trim_space(raw_text)
+    if strings.has_prefix(&raw, "```json") {
+        raw = raw[7:raw.len]
+        raw = strings.trim_space(&raw)
+    } else if strings.has_prefix(&raw, "```") {
+        raw = raw[3:raw.len]
+        raw = strings.trim_space(&raw)
+    }
+    if strings.has_suffix(&raw, "```") && raw.len >= 3 {
+        raw = raw[0:raw.len - 3]
+        raw = strings.trim_space(&raw)
+    }
+    doc := json.parse(&raw)
+    $sc := 0.0
+    $reas := raw + ""
+    if doc.ok() && doc.is_dict(doc.root()) {
+        root := doc.root()
+        sc = eval_json_f64_or(&doc, root, "score", 0.0)
+        reas = eval_json_str_or(&doc, root, "reasoning", reas)
+    } else {
+        sc = eval_parse_f64_or(&raw, 0.0)
+    }
+    << JudgeResult{score: sc, passed: sc >= pass_threshold, reasoning: reas}
+}
+
+pub fn judge_openai(client &openai.Client, model string, question string,
+                    answer string, rubric string, pass_threshold f64) JudgeResult {
+    sys := "You are an impartial evaluator. Score the assistant answer from 0.0 to 1.0 against the rubric and respond ONLY with a JSON object: {\"score\": <number>, \"reasoning\": \"...\"}."
+    usr := "Question:\n" + question + "\n\nAnswer:\n" + answer + "\n\nRubric:\n" + rubric
+    $req := openai.chat_request(model, [openai.message("system", sys), openai.message("user", usr)])
+    req.response_format_json = "{\"type\":\"json_object\"}"
+    resp := client.chat(&req) >>>
+    << parse_judge_response(&resp.content, pass_threshold)
+}
+
+pub fn judge_anthropic(client &anthropic.Client, model string, question string,
+                       answer string, rubric string, pass_threshold f64) JudgeResult {
+    sys := "You are an impartial evaluator. Score the assistant answer from 0.0 to 1.0 against the rubric and respond ONLY with a JSON object: {\"score\": <number>, \"reasoning\": \"...\"}."
+    usr := "Question:\n" + question + "\n\nAnswer:\n" + answer + "\n\nRubric:\n" + rubric
+    $req := anthropic.messages_request(model, [anthropic.message("user", usr)], 512)
+    req.system = sys
+    resp := client.messages(&req) >>>
+    << parse_judge_response(&resp.content, pass_threshold)
+}
+
+pub fn judge_gemini(client &gemini.Client, model string, question string,
+                    answer string, rubric string, pass_threshold f64) JudgeResult {
+    sys := "You are an impartial evaluator. Score the assistant answer from 0.0 to 1.0 against the rubric and respond ONLY with a JSON object: {\"score\": <number>, \"reasoning\": \"...\"}."
+    usr := "Question:\n" + question + "\n\nAnswer:\n" + answer + "\n\nRubric:\n" + rubric
+    $req := gemini.generate_request(model, [gemini.user_text(usr)])
+    req.system_instruction = sys
+    req.response_mime_type = "application/json"
+    resp := client.generate(&req) >>>
+    << parse_judge_response(&resp.text, pass_threshold)
+}
+
+pub fn run_suite(cases &[]EvalCase, predictor fn(&string) string) EvalSummary {
+    if cases.len == 0 {
+        << EvalSummary{total: 0, exact_match_avg: 0.0, token_f1_avg: 0.0, rouge_l_avg: 0.0}
+    }
+    $em := 0.0
+    $f1 := 0.0
+    $rl := 0.0
+    for i in 0:cases.len {
+        c := &cases[i]
+        inp := c.input + ""
+        pred := predictor(&inp)
+        em += exact_match(&pred, &c.expected, true)
+        f1 += token_f1(&pred, &c.expected)
+        rl += rouge_l(&pred, &c.expected)
+    }
+    n := f64(cases.len)
+    << EvalSummary{total: cases.len, exact_match_avg: em / n, token_f1_avg: f1 / n, rouge_l_avg: rl / n}
+}
+
+fn eval_unique_content_tokens(s &string) []string {
+    raw := eval_tokenize(s)
+    $out := []string{}
+    for i in 0:raw.len {
+        w := &raw[i]
+        if w.len < 3 { -> }
+        if *w == "the" || *w == "and" || *w == "for" || *w == "are" ||
+           *w == "was" || *w == "what" || *w == "how" || *w == "with" { -> }
+        $seen := false
+        for j in 0:out.len {
+            if out[j] == *w {
+                seen = true
+                <-
+            }
+        }
+        if !seen { out.push((*w) + "") }
+    }
+    << out
+}
+
+fn split_sentences_eval(s &string) []string {
+    $out := []string{}
+    $start := 0
+    for i in 0:(s.len + 1) {
+        $is_sep := i == s.len
+        if !is_sep {
+            ch := (*s)[i] & 255
+            is_sep = ch == 46 || ch == 33 || ch == 63 || ch == 10
+        }
+        if is_sep {
+            if i > start {
+                raw_piece := (*s)[start:i]
+                piece := strings.trim_space(&raw_piece)
+                if piece.len > 0 { out.push(piece) }
+            }
+            start = i + 1
+        }
+    }
+    << out
+}
+
+fn token_cov_ratio(needle_toks &[]string, haystack_toks &[]string) f64 {
+    if needle_toks.len == 0 { << 1.0 }
+    if haystack_toks.len == 0 { << 0.0 }
+    $hits := 0
+    for i in 0:needle_toks.len {
+        nw := &needle_toks[i]
+        for j in 0:haystack_toks.len {
+            if haystack_toks[j] == *nw {
+                hits += 1
+                <-
+            }
+        }
+    }
+    << f64(hits) / f64(needle_toks.len)
+}
+
+pub fn rag_context_precision(retrieved_texts &[]string, ground_truth &string) f64 {
+    if retrieved_texts.len == 0 { << 0.0 }
+    gt_toks := eval_unique_content_tokens(ground_truth)
+    if gt_toks.len == 0 { << 1.0 }
+    $rel_hits := 0
+    $prec_sum := 0.0
+    for k in 0:retrieved_texts.len {
+        c_toks := eval_unique_content_tokens(&retrieved_texts[k])
+        if token_cov_ratio(&c_toks, &gt_toks) >= 0.25 || token_cov_ratio(&gt_toks, &c_toks) >= 0.25 {
+            rel_hits += 1
+            prec_sum += f64(rel_hits) / f64(k + 1)
+        }
+    }
+    if rel_hits == 0 { << 0.0 }
+    << prec_sum / f64(rel_hits)
+}
+
+pub fn rag_context_recall(retrieved_texts &[]string, ground_truth &string) f64 {
+    gt_toks := eval_unique_content_tokens(ground_truth)
+    if gt_toks.len == 0 { << 1.0 }
+    if retrieved_texts.len == 0 { << 0.0 }
+    $ctx_toks := []string{}
+    for k in 0:retrieved_texts.len {
+        ts := eval_unique_content_tokens(&retrieved_texts[k])
+        for i in 0:ts.len { ctx_toks.push(ts[i] + "") }
+    }
+    << token_cov_ratio(&gt_toks, &ctx_toks)
+}
+
+pub fn rag_faithfulness(answer &string, retrieved_texts &[]string) f64 {
+    sents := split_sentences_eval(answer)
+    if sents.len == 0 { << 1.0 }
+    if retrieved_texts.len == 0 { << 0.0 }
+    $ctx_toks := []string{}
+    for k in 0:retrieved_texts.len {
+        ts := eval_unique_content_tokens(&retrieved_texts[k])
+        for i in 0:ts.len { ctx_toks.push(ts[i] + "") }
+    }
+    $tot := 0.0
+    $cnt := 0
+    for si in 0:sents.len {
+        stoks := eval_unique_content_tokens(&sents[si])
+        if stoks.len > 0 {
+            tot += token_cov_ratio(&stoks, &ctx_toks)
+            cnt += 1
+        }
+    }
+    if cnt == 0 { << 1.0 }
+    << tot / f64(cnt)
+}
+
+pub fn rag_answer_relevancy(question &string, answer &string) f64 {
+    atoks := eval_unique_content_tokens(answer)
+    if atoks.len == 0 { << 0.0 }
+    qtoks := eval_unique_content_tokens(question)
+    if qtoks.len == 0 { << 1.0 }
+    << token_cov_ratio(&qtoks, &atoks)
+}
+
+pub fn evaluate_rag_triad(question &string, answer &string,
+                          retrieved_texts &[]string, ground_truth &string) RagasReport {
+    cp := rag_context_precision(retrieved_texts, ground_truth)
+    cr := rag_context_recall(retrieved_texts, ground_truth)
+    fa := rag_faithfulness(answer, retrieved_texts)
+    ar := rag_answer_relevancy(question, answer)
+    << RagasReport{
+        context_precision: cp,
+        context_recall: cr,
+        faithfulness: fa,
+        answer_relevancy: ar,
+        overall: (cp + cr + fa + ar) / 4.0
+    }
+}
+
+pub fn evaluate_rag_judge_openai(client &openai.Client, model string, question string,
+                                 answer string, retrieved_texts &[]string) RagasReport {
+    sys := "You are a Ragas RAG evaluator. Score 0.0..1.0 and respond ONLY with JSON: {\"context_precision\":<num>,\"context_recall\":<num>,\"faithfulness\":<num>,\"answer_relevancy\":<num>}."
+    $ctx := ""
+    for i in 0:retrieved_texts.len {
+        if i > 0 { ctx = ctx + "\n" }
+        ctx = ctx + "[" + str(i + 1) + "] " + retrieved_texts[i]
+    }
+    usr := "Question:\n" + question + "\n\nContext:\n" + ctx + "\n\nAnswer:\n" + answer
+    $req := openai.chat_request(model, [openai.message("system", sys), openai.message("user", usr)])
+    req.response_format_json = "{\"type\":\"json_object\"}"
+    resp := client.chat(&req) >>>
+    raw := strings.trim_space(&resp.content)
+    doc := json.parse(&raw)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("eval: judge returned non-JSON Ragas output")
+    }
+    root := doc.root()
+    cp := eval_json_f64_or(&doc, root, "context_precision", 0.0)
+    cr := eval_json_f64_or(&doc, root, "context_recall", 0.0)
+    fa := eval_json_f64_or(&doc, root, "faithfulness", 0.0)
+    ar := eval_json_f64_or(&doc, root, "answer_relevancy", 0.0)
+    << RagasReport{
+        context_precision: cp,
+        context_recall: cr,
+        faithfulness: fa,
+        answer_relevancy: ar,
+        overall: (cp + cr + fa + ar) / 4.0
+    }
+}
+
+pub struct PairwiseResult {
+    pub winner string
+    pub reasoning string
+}
+
+pub fn pass_at_k(n int, c int, k int) f64 {
+    if n <= 0 || c <= 0 || k <= 0 { << 0.0 }
+    if n - c < k { << 1.0 }
+    $prob_fail := 1.0
+    for i in 0:k {
+        prob_fail = prob_fail * (f64(n - c - i) / f64(n - i))
+    }
+    << 1.0 - prob_fail
+}
+
+pub fn compare_openai(client &openai.Client, model string, question string,
+                      answer_a string, answer_b string, rubric string) PairwiseResult {
+    sys := "You are an impartial pairwise evaluator. Compare Answer A and Answer B against the rubric and respond ONLY with JSON: {\"winner\": \"A\"|\"B\"|\"tie\", \"reasoning\": \"...\"}."
+    usr := "Question:\n" + question + "\n\nAnswer A:\n" + answer_a + "\n\nAnswer B:\n" + answer_b + "\n\nRubric:\n" + rubric
+    $req := openai.chat_request(model + "", [openai.message("system", sys), openai.message("user", usr)])
+    req.response_format_json = "{\"type\":\"json_object\"}"
+    resp := client.chat(&req) >>>
+    $raw := strings.trim_space(&resp.content)
+    if strings.has_prefix(&raw, "```json") {
+        raw = strings.trim_space(&raw[7:raw.len])
+    } else if strings.has_prefix(&raw, "```") {
+        raw = strings.trim_space(&raw[3:raw.len])
+    }
+    if strings.has_suffix(&raw, "```") && raw.len >= 3 {
+        raw = strings.trim_space(&raw[0:raw.len - 3])
+    }
+    doc := json.parse(&raw)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("eval: pairwise judge returned non-JSON output")
+    }
+    root := doc.root()
+    $w := strings.trim_space(&eval_json_str_or(&doc, root, "winner", "tie"))
+    if w == "a" || w == "A" { w = "A" }
+    else if w == "b" || w == "B" { w = "B" }
+    else { w = "tie" }
+    << PairwiseResult{winner: w, reasoning: eval_json_str_or(&doc, root, "reasoning", "")}
+}
+
+pub fn load_cases_jsonl(path string) []EvalCase {
+    raw := os.read(path + "") >>>
+    lines := strings.split(&raw, "\n")
+    $out := []EvalCase{}
+    for i in 0:lines.len {
+        ln := strings.trim_space(&lines[i])
+        if ln.len == 0 { -> }
+        doc := json.parse(&ln)
+        if !doc.ok() || !doc.is_dict(doc.root()) {
+            >>> errors.new("eval: invalid JSONL line " + str(i + 1))
+        }
+        root := doc.root()
+        $cid := eval_json_str_or(&doc, root, "id", "")
+        if cid.len == 0 { cid = "case_" + str(out.len + 1) }
+        $inp := eval_json_str_or(&doc, root, "input", "")
+        if inp.len == 0 { inp = eval_json_str_or(&doc, root, "question", "") }
+        $exp := eval_json_str_or(&doc, root, "expected", "")
+        if exp.len == 0 { exp = eval_json_str_or(&doc, root, "ground_truth", "") }
+        out.push(EvalCase{id: cid, input: inp, expected: exp})
+    }
+    << out
+}

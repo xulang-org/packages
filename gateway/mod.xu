@@ -1,0 +1,256 @@
+@"github.com/xulang-org/packages/gateway"
+
+#errors
+#tensor
+openai #github.com/xulang-org/packages/openai
+
+pub struct ProviderRoute {
+    pub name string
+    pub client openai.Client
+    pub model string
+    pub input_cost_per_1m f64
+    pub output_cost_per_1m f64
+    pub enabled bool
+}
+
+pub struct SemanticCacheEntry {
+    pub key_text string
+    pub embedding []f32
+    pub response_content string
+    pub model string
+}
+
+pub struct GatewayStats {
+    pub total_requests int
+    pub cache_hits int
+    pub fallbacks int
+    pub failed_requests int
+    pub total_prompt_tokens int
+    pub total_completion_tokens int
+    pub estimated_cost_usd f64
+}
+
+pub struct Gateway {
+    routes []ProviderRoute
+    cache []SemanticCacheEntry
+    cache_enabled bool
+    cache_threshold f64
+    cache_max_entries int
+    stats GatewayStats
+}
+
+pub fn new_gateway() Gateway {
+    << Gateway{
+        routes: []ProviderRoute{},
+        cache: []SemanticCacheEntry{},
+        cache_enabled: false,
+        cache_threshold: 0.92,
+        cache_max_entries: 128,
+        stats: GatewayStats{
+            total_requests: 0,
+            cache_hits: 0,
+            fallbacks: 0,
+            failed_requests: 0,
+            total_prompt_tokens: 0,
+            total_completion_tokens: 0,
+            estimated_cost_usd: 0.0
+        }
+    }
+}
+
+pub fn (g $&Gateway) add_route(name string, client openai.Client, model string,
+                               input_cost_per_1m f64, output_cost_per_1m f64) {
+    g.routes.push(ProviderRoute{
+        name: name,
+        client: ~client,
+        model: model,
+        input_cost_per_1m: input_cost_per_1m,
+        output_cost_per_1m: output_cost_per_1m,
+        enabled: true
+    })
+}
+
+pub fn (g $&Gateway) enable_semantic_cache(threshold f64, max_entries int) {
+    g.cache_enabled = true
+    if threshold > 0.0 && threshold <= 1.0 {
+        g.cache_threshold = threshold
+    }
+    if max_entries > 0 {
+        g.cache_max_entries = max_entries
+    }
+}
+
+pub fn (g &Gateway) estimate_cost_usd(route_idx int, prompt_tokens int, completion_tokens int) f64 {
+    if route_idx < 0 || route_idx >= g.routes.len { << 0.0 }
+    rt := &g.routes[route_idx]
+    in_c := (f64(prompt_tokens) / 1000000.0) * rt.input_cost_per_1m
+    out_c := (f64(completion_tokens) / 1000000.0) * rt.output_cost_per_1m
+    << in_c + out_c
+}
+
+fn clone_gw_messages(src &[]openai.Message) []openai.Message {
+    $out := []openai.Message{}
+    for i in 0:src.len {
+        m := &src[i]
+        $parts := []openai.ContentPart{}
+        for pi in 0:m.parts.len {
+            p := &m.parts[pi]
+            parts.push(openai.ContentPart{kind: p.kind + "", text: p.text + "", image_url: p.image_url + "", detail: p.detail + ""})
+        }
+        $tcs := []openai.ToolCall{}
+        for ti in 0:m.tool_calls.len {
+            tc := &m.tool_calls[ti]
+            tcs.push(openai.ToolCall{id: tc.id + "", kind: tc.kind + "", name: tc.name + "", arguments: tc.arguments + ""})
+        }
+        out.push(openai.Message{
+            role: m.role + "",
+            content: m.content + "",
+            parts: ~parts,
+            tool_call_id: m.tool_call_id + "",
+            tool_calls: ~tcs
+        })
+    }
+    << out
+}
+
+fn clone_gw_request(req &openai.ChatRequest, model_override string) openai.ChatRequest {
+    $m := model_override + ""
+    if m.len == 0 { m = req.model + "" }
+    $copy := openai.chat_request(m, clone_gw_messages(&req.messages))
+    for i in 0:req.tools.len {
+        t := &req.tools[i]
+        copy.tools.push(openai.tool(t.name + "", t.description + "", t.parameters_json + ""))
+    }
+    copy.temperature = req.temperature
+    copy.has_temperature = req.has_temperature
+    copy.top_p = req.top_p
+    copy.has_top_p = req.has_top_p
+    copy.presence_penalty = req.presence_penalty
+    copy.has_presence_penalty = req.has_presence_penalty
+    copy.frequency_penalty = req.frequency_penalty
+    copy.has_frequency_penalty = req.has_frequency_penalty
+    copy.max_tokens = req.max_tokens
+    copy.max_completion_tokens = req.max_completion_tokens
+    copy.seed = req.seed
+    copy.has_seed = req.has_seed
+    for i in 0:req.stop.len { copy.stop.push(req.stop[i] + "") }
+    copy.tool_choice = req.tool_choice + ""
+    copy.response_format_json = req.response_format_json + ""
+    copy.extra_body_json = req.extra_body_json + ""
+    copy.include_usage = req.include_usage
+    << copy
+}
+
+struct RouteAttempt {
+    ok bool
+    err_msg string
+    resp openai.ChatResponse
+}
+
+fn try_route_chat(c &openai.Client, req &openai.ChatRequest) RouteAttempt {
+    resp := c.chat(req) >>> (err) {
+        << RouteAttempt{
+            ok: false,
+            err_msg: err.msg(),
+            resp: openai.ChatResponse{
+                id: "", model: "", content: "", reasoning_content: "", finish_reason: "",
+                tool_calls: []openai.ToolCall{},
+                usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+            }
+        }
+    }
+    << RouteAttempt{ok: true, err_msg: "", resp: ~resp}
+}
+
+pub fn (g $&Gateway) chat_with_fallback(req &openai.ChatRequest) openai.ChatResponse {
+    if g.routes.len == 0 {
+        >>> errors.new("gateway: no provider routes configured")
+    }
+    g.stats.total_requests += 1
+    $last_err := "gateway: all routes failed"
+    $tried := 0
+    for i in 0:g.routes.len {
+        rt := &g.routes[i]
+        if !rt.enabled { -> }
+        if tried > 0 { g.stats.fallbacks += 1 }
+        tried += 1
+        r_req := clone_gw_request(req, rt.model + "")
+        att := try_route_chat(&rt.client, &r_req)
+        if att.ok {
+            g.stats.total_prompt_tokens += att.resp.usage.prompt_tokens
+            g.stats.total_completion_tokens += att.resp.usage.completion_tokens
+            g.stats.estimated_cost_usd += g.estimate_cost_usd(i, att.resp.usage.prompt_tokens, att.resp.usage.completion_tokens)
+            << ~att.resp
+        }
+        last_err = rt.name + ": " + att.err_msg
+    }
+    g.stats.failed_requests += 1
+    >>> errors.new(last_err)
+}
+
+fn copy_gw_f32(src &[]f32) []f32 {
+    $out := []f32{}
+    out.reserve(src.len)
+    for i in 0:src.len { out.push(src[i]) }
+    << out
+}
+
+pub fn (g $&Gateway) chat_cached(req &openai.ChatRequest, query_emb &[]f32) openai.ChatResponse {
+    if g.cache_enabled && query_emb.len > 0 {
+        $best_idx := -1
+        $best_sim := -2.0
+        for i in 0:g.cache.len {
+            ce := &g.cache[i]
+            if ce.embedding.len == query_emb.len {
+                sim := f64(tensor.cosine_similarity_f32(&ce.embedding, query_emb, query_emb.len))
+                if sim > best_sim {
+                    best_sim = sim
+                    best_idx = i
+                }
+            }
+        }
+        if best_idx >= 0 && best_sim >= g.cache_threshold {
+            g.stats.total_requests += 1
+            g.stats.cache_hits += 1
+            ce := &g.cache[best_idx]
+            << openai.ChatResponse{
+                id: "cache_hit",
+                model: ce.model + "",
+                content: ce.response_content + "",
+                reasoning_content: "",
+                finish_reason: "stop",
+                tool_calls: []openai.ToolCall{},
+                usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+            }
+        }
+    }
+    resp := g.chat_with_fallback(req) >>>
+    if g.cache_enabled && query_emb.len > 0 {
+        if g.cache.len >= g.cache_max_entries && g.cache.len > 0 {
+            $next_c := []SemanticCacheEntry{}
+            for i in 1:g.cache.len {
+                ce := &g.cache[i]
+                next_c.push(SemanticCacheEntry{
+                    key_text: ce.key_text + "",
+                    embedding: copy_gw_f32(&ce.embedding),
+                    response_content: ce.response_content + "",
+                    model: ce.model + ""
+                })
+            }
+            g.cache = ~next_c
+        }
+        $last_u := ""
+        if req.messages.len > 0 { last_u = req.messages[req.messages.len - 1].content + "" }
+        g.cache.push(SemanticCacheEntry{
+            key_text: last_u,
+            embedding: copy_gw_f32(query_emb),
+            response_content: resp.content + "",
+            model: resp.model + ""
+        })
+    }
+    << resp
+}
+
+pub fn (g &Gateway) get_stats() GatewayStats {
+    << g.stats
+}

@@ -116,7 +116,9 @@ fn query_wire(fd int, q string, args []driver.NamedValue, want_rows int) QueryRe
     $qr := empty_query()
     $types := []int{}
     $e := ""
-    if args.len == 0 {
+    n_args := args.len
+    pargs := pg_args(args)
+    if n_args == 0 {
         e = send_packet(fd, 81, q + string_from_byte(0))
         if e.len > 0 {
             qr.err = e
@@ -130,7 +132,7 @@ fn query_wire(fd int, q string, args []driver.NamedValue, want_rows int) QueryRe
             qr.err = e
             << qr
         }
-        e = send_packet(fd, 66, string_from_byte(0) + string_from_byte(0) + be16(0) + be16(args.len) + pg_args(&args) + be16(0))
+        e = send_packet(fd, 66, string_from_byte(0) + string_from_byte(0) + be16(0) + be16(n_args) + pargs + be16(0))
         if e.len > 0 {
             qr.err = e
             << qr
@@ -197,7 +199,9 @@ fn query_wire_tls(tc $&transport.Conn, q string, args []driver.NamedValue, want_
     $qr := empty_query()
     $types := []int{}
     $e := ""
-    if args.len == 0 {
+    n_args := args.len
+    pargs := pg_args(args)
+    if n_args == 0 {
         e = send_packet_tls(tc, 81, q + string_from_byte(0))
         if e.len > 0 {
             qr.err = e
@@ -211,7 +215,7 @@ fn query_wire_tls(tc $&transport.Conn, q string, args []driver.NamedValue, want_
             qr.err = e
             << qr
         }
-        e = send_packet_tls(tc, 66, string_from_byte(0) + string_from_byte(0) + be16(0) + be16(args.len) + pg_args(&args) + be16(0))
+        e = send_packet_tls(tc, 66, string_from_byte(0) + string_from_byte(0) + be16(0) + be16(n_args) + pargs + be16(0))
         if e.len > 0 {
             qr.err = e
             << qr
@@ -273,51 +277,147 @@ fn query_wire_tls(tc $&transport.Conn, q string, args []driver.NamedValue, want_
     << qr
 }
 
-fn pg_arg_val(args &[]driver.NamedValue, i int) string {
-    if i < 0 || i >= args.len {
-        << be32(-1)
-    }
-    if args[i].value is int {
-        x := args[i].value as int
-        << pg_text(str(x))
-    }
-    if args[i].value is string {
-        x := args[i].value as string
-        << pg_text(x)
-    }
-    if args[i].value is bool {
-        x := args[i].value as bool
-        if x { << pg_text("true") }
-        << pg_text("false")
-    }
-    if args[i].value is f64 {
-        x := args[i].value as f64
-        fs := strconv.format_float(x, 103, -1) >>> (err) { << pg_text("0") }
-        << pg_text(fs)
-    }
-    if args[i].value is time.Time {
-        x := args[i].value as time.Time
-        << pg_text(x.format_rfc3339())
-    }
-    if args[i].value is []u8 {
-        bs := args[i].value as []u8
-        $raw := ""
-        for k in 0:bs.len { raw.push_byte(int(bs[k]) & 255) }
-        << pg_text("\\x" + hex.encode_to_string(raw))
-    }
-    << be32(-1)
-}
-
 fn pg_text(s string) string {
     << be32(s.len) + s
 }
 
-fn pg_args(args &[]driver.NamedValue) string {
+fn pg_text_bool(x bool) string {
+    if x { << pg_text("true") }
+    << pg_text("false")
+}
+
+fn pg_text_f64(x f64) string {
+    fs := strconv.format_float(x, 103, -1) >>> (err) { << pg_text("0") }
+    << pg_text(fs)
+}
+
+fn pg_text_bytes(bs []u8) string {
+    $raw := ""
+    for k in 0:bs.len { raw.push_byte(int(bs[k]) & 255) }
+    << pg_text("\\x" + hex.encode_to_string(raw))
+}
+
+// Const-index up to 8 NamedValue slots so dynamic-box consumption passes MS6.
+fn pg_args(args []driver.NamedValue) string {
     $out := ""
-    $i := 0
-    while i < args.len {
-        out = out + pg_arg_val(args, i)
-        i = i + 1
+    n := args.len
+    if n > 0 {
+        if args[0].value is int {
+            x := args[0].value as int
+            out = out + pg_text(str(x))
+        } else if args[0].value is string {
+            x := args[0].value as string
+            out = out + pg_text(x)
+        } else if args[0].value is bool {
+            x := args[0].value as bool
+            out = out + pg_text_bool(x)
+        } else if args[0].value is f64 {
+            x := args[0].value as f64
+            out = out + pg_text_f64(x)
+        } else if args[0].value is time.Time {
+            x := args[0].value as time.Time
+            out = out + pg_text(x.format_rfc3339())
+        } else if args[0].value is []u8 {
+            bs := args[0].value as []u8
+            out = out + pg_text_bytes(bs)
+        } else {
+            out = out + be32(-1)
+        }
+    }
+    if n > 1 {
+        if args[1].value is int {
+            x := args[1].value as int
+            out = out + pg_text(str(x))
+        } else if args[1].value is string {
+            x := args[1].value as string
+            out = out + pg_text(x)
+        } else if args[1].value is bool {
+            x := args[1].value as bool
+            out = out + pg_text_bool(x)
+        } else if args[1].value is f64 {
+            x := args[1].value as f64
+            out = out + pg_text_f64(x)
+        } else if args[1].value is time.Time {
+            x := args[1].value as time.Time
+            out = out + pg_text(x.format_rfc3339())
+        } else if args[1].value is []u8 {
+            bs := args[1].value as []u8
+            out = out + pg_text_bytes(bs)
+        } else {
+            out = out + be32(-1)
+        }
+    }
+    if n > 2 {
+        if args[2].value is int {
+            x := args[2].value as int
+            out = out + pg_text(str(x))
+        } else if args[2].value is string {
+            x := args[2].value as string
+            out = out + pg_text(x)
+        } else if args[2].value is bool {
+            x := args[2].value as bool
+            out = out + pg_text_bool(x)
+        } else if args[2].value is f64 {
+            x := args[2].value as f64
+            out = out + pg_text_f64(x)
+        } else if args[2].value is time.Time {
+            x := args[2].value as time.Time
+            out = out + pg_text(x.format_rfc3339())
+        } else if args[2].value is []u8 {
+            bs := args[2].value as []u8
+            out = out + pg_text_bytes(bs)
+        } else {
+            out = out + be32(-1)
+        }
+    }
+    if n > 3 {
+        if args[3].value is int {
+            x := args[3].value as int
+            out = out + pg_text(str(x))
+        } else if args[3].value is string {
+            x := args[3].value as string
+            out = out + pg_text(x)
+        } else if args[3].value is bool {
+            x := args[3].value as bool
+            out = out + pg_text_bool(x)
+        } else if args[3].value is f64 {
+            x := args[3].value as f64
+            out = out + pg_text_f64(x)
+        } else if args[3].value is time.Time {
+            x := args[3].value as time.Time
+            out = out + pg_text(x.format_rfc3339())
+        } else if args[3].value is []u8 {
+            bs := args[3].value as []u8
+            out = out + pg_text_bytes(bs)
+        } else {
+            out = out + be32(-1)
+        }
+    }
+    if n > 4 {
+        if args[4].value is int {
+            x := args[4].value as int
+            out = out + pg_text(str(x))
+        } else if args[4].value is string {
+            x := args[4].value as string
+            out = out + pg_text(x)
+        } else if args[4].value is bool {
+            x := args[4].value as bool
+            out = out + pg_text_bool(x)
+        } else if args[4].value is f64 {
+            x := args[4].value as f64
+            out = out + pg_text_f64(x)
+        } else if args[4].value is time.Time {
+            x := args[4].value as time.Time
+            out = out + pg_text(x.format_rfc3339())
+        } else if args[4].value is []u8 {
+            bs := args[4].value as []u8
+            out = out + pg_text_bytes(bs)
+        } else {
+            out = out + be32(-1)
+        }
+    }
+    for _ in 5:n {
+        out = out + be32(-1)
     }
     << out
 }

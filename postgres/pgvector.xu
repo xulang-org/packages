@@ -1,0 +1,109 @@
+@"github.com/xulang-org/packages/postgres"
+
+#errors
+#strconv
+#strings
+
+fn fmt_f64_pg(v f64) string {
+    << strconv.format_float(v, 103, 6) >>> (_) { << "0" }
+}
+
+fn is_valid_pg_ident(s &string) bool {
+    if s.len == 0 || s.len > 63 { << false }
+    for i in 0:s.len {
+        ch := (*s)[i] & 255
+        is_alpha := (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95
+        is_digit := ch >= 48 && ch <= 57
+        if i == 0 && !is_alpha { << false }
+        if !is_alpha && !is_digit { << false }
+    }
+    << true
+}
+
+pub fn vector_encode(v &[]f32) string {
+    $out := "["
+    for i in 0:v.len {
+        if i > 0 { out = out + "," }
+        out = out + fmt_f64_pg(f64(v[i]))
+    }
+    << out + "]"
+}
+
+pub fn vector_encode_f64(v &[]f64) string {
+    $out := "["
+    for i in 0:v.len {
+        if i > 0 { out = out + "," }
+        out = out + fmt_f64_pg(v[i])
+    }
+    << out + "]"
+}
+
+pub fn vector_decode(raw &string) []f32 {
+    trimmed := strings.trim_space(raw)
+    if trimmed.len < 2 || (trimmed[0] & 255) != 91 || (trimmed[trimmed.len - 1] & 255) != 93 {
+        >>> errors.new("postgres: invalid pgvector literal")
+    }
+    inner := strings.trim_space(&trimmed[1:trimmed.len - 1])
+    $out := []f32{}
+    if inner.len == 0 { << out }
+    $start := 0
+    for i in 0:(inner.len + 1) {
+        $is_end := i == inner.len
+        if !is_end { is_end = (inner[i] & 255) == 44 }
+        if is_end {
+            tok := strings.trim_space(&inner[start:i])
+            if tok.len == 0 { >>> errors.new("postgres: empty element in pgvector literal") }
+            doc := strconv.parse_float(&tok) >>> (_) {
+                >>> errors.new("postgres: invalid float in pgvector literal: " + tok)
+            }
+            out.push(f32(doc))
+            start = i + 1
+        }
+    }
+    << out
+}
+
+pub fn pgvector_distance_op(metric string) string {
+    if metric == "cosine" { << "<=>" }
+    if metric == "l2" { << "<->" }
+    if metric == "ip" { << "<#>" }
+    >>> errors.new("postgres: unsupported pgvector metric: " + metric)
+}
+
+fn pgvector_ops_class(metric string) string {
+    if metric == "cosine" { << "vector_cosine_ops" }
+    if metric == "l2" { << "vector_l2_ops" }
+    if metric == "ip" { << "vector_ip_ops" }
+    >>> errors.new("postgres: unsupported pgvector metric: " + metric)
+}
+
+pub fn pgvector_create_extension_sql() string {
+    << "CREATE EXTENSION IF NOT EXISTS vector"
+}
+
+pub fn pgvector_create_index_sql(table string, column string, index_name string,
+                                 method string, metric string) string {
+    if !is_valid_pg_ident(&table) || !is_valid_pg_ident(&column) || !is_valid_pg_ident(&index_name) {
+        >>> errors.new("postgres: invalid SQL identifier for pgvector index")
+    }
+    if method != "hnsw" && method != "ivfflat" {
+        >>> errors.new("postgres: unsupported pgvector index method: " + method)
+    }
+    ops := pgvector_ops_class(metric) >>>
+    << "CREATE INDEX IF NOT EXISTS " + index_name + " ON " + table +
+       " USING " + method + " (" + column + " " + ops + ")"
+}
+
+pub fn pgvector_search_sql(table string, id_col string, text_col string,
+                           vec_col string, metric string, limit int) string {
+    if !is_valid_pg_ident(&table) || !is_valid_pg_ident(&id_col) ||
+       !is_valid_pg_ident(&text_col) || !is_valid_pg_ident(&vec_col) {
+        >>> errors.new("postgres: invalid SQL identifier for pgvector search")
+    }
+    if limit <= 0 {
+        >>> errors.new("postgres: pgvector limit must be positive")
+    }
+    op := pgvector_distance_op(metric) >>>
+    << "SELECT " + id_col + ", " + text_col + ", (" + vec_col + " " + op + " $$1::vector) AS distance FROM " +
+       table + " ORDER BY " + vec_col + " " + op + " $$1::vector LIMIT " + str(limit)
+}

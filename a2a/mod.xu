@@ -1,0 +1,497 @@
+@"github.com/xulang-org/packages/a2a"
+
+#crypto/tls
+#encoding/json
+#errors
+#net
+#net/http
+#strings
+transport #github.com/xulang-org/packages/transport
+
+pub struct AgentSkill {
+    pub id string
+    pub name string
+    pub description string
+}
+
+pub struct AgentCard {
+    pub name string
+    pub description string
+    pub url string
+    pub version string
+    pub skills []AgentSkill
+}
+
+pub struct TaskMessage {
+    pub role string
+    pub text string
+}
+
+pub struct Task {
+    pub id string
+    pub state string
+    pub history []TaskMessage
+    pub output string
+}
+
+pub struct Server {
+    pub card AgentCard
+    handler fn(&string, &string) string
+    tasks []Task
+    next_id int
+}
+
+pub struct Client {
+    pub base_url string
+    pub auth_token string
+}
+
+pub fn new_agent_card(name string, description string, url string, version string) AgentCard {
+    $ver := version + ""
+    if ver.len == 0 { ver = "1.0.0" }
+    << AgentCard{
+        name: name,
+        description: description,
+        url: url,
+        version: ver,
+        skills: []AgentSkill{}
+    }
+}
+
+pub fn (c $&AgentCard) add_skill(id string, name string, description string) {
+    c.skills.push(AgentSkill{id: id, name: name, description: description})
+}
+
+fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn doc_get_or(doc &json.Doc, obj int, key string) int {
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn doc_at_or(doc &json.Doc, arr int, idx int) int {
+    << doc.at(arr, idx) >>> (_) { << -1 }
+}
+
+pub fn format_agent_card_json(c &AgentCard) string {
+    $out := "{\"name\":" + json.quote(&c.name) +
+            ",\"description\":" + json.quote(&c.description) +
+            ",\"url\":" + json.quote(&c.url) +
+            ",\"version\":" + json.quote(&c.version) +
+            ",\"capabilities\":{\"streaming\":false,\"pushNotifications\":false}" +
+            ",\"skills\":["
+    for i in 0:c.skills.len {
+        if i > 0 { out = out + "," }
+        sk := &c.skills[i]
+        out = out + "{\"id\":" + json.quote(&sk.id) +
+              ",\"name\":" + json.quote(&sk.name) +
+              ",\"description\":" + json.quote(&sk.description) + "}"
+    }
+    out = out + "]}"
+    << out
+}
+
+pub fn parse_agent_card_json(raw &string) AgentCard {
+    doc := json.parse(raw)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("a2a: invalid AgentCard JSON")
+    }
+    root := doc.root()
+    $card := new_agent_card(
+        json_str_or(&doc, root, "name", ""),
+        json_str_or(&doc, root, "description", ""),
+        json_str_or(&doc, root, "url", ""),
+        json_str_or(&doc, root, "version", "1.0.0")
+    )
+    if doc.has(root, "skills") {
+        sarr := doc_get_or(&doc, root, "skills")
+        if sarr >= 0 && doc.is_list(sarr) {
+            cnt := doc.count(sarr)
+            for i in 0:cnt {
+                sn := doc_at_or(&doc, sarr, i)
+                if sn >= 0 && doc.is_dict(sn) {
+                    card.add_skill(
+                        json_str_or(&doc, sn, "id", ""),
+                        json_str_or(&doc, sn, "name", ""),
+                        json_str_or(&doc, sn, "description", "")
+                    )
+                }
+            }
+        }
+    }
+    << card
+}
+
+pub fn new_server(card AgentCard, handler fn(&string, &string) string) Server {
+    << Server{card: card, handler: handler, tasks: []Task{}, next_id: 1}
+}
+
+fn copy_history(src &[]TaskMessage) []TaskMessage {
+    $out := []TaskMessage{}
+    out.reserve(src.len)
+    for i in 0:src.len {
+        m := &src[i]
+        out.push(TaskMessage{role: m.role + "", text: m.text + ""})
+    }
+    << out
+}
+
+fn copy_task(t &Task) Task {
+    << Task{
+        id: t.id + "",
+        state: t.state + "",
+        history: copy_history(&t.history),
+        output: t.output + ""
+    }
+}
+
+fn task_to_json(t &Task) string {
+    $hjson := "["
+    for i in 0:t.history.len {
+        if i > 0 { hjson = hjson + "," }
+        m := &t.history[i]
+        hjson = hjson + "{\"role\":" + json.quote(&m.role) +
+                ",\"parts\":[{\"type\":\"text\",\"text\":" + json.quote(&m.text) + "}]}"
+    }
+    hjson = hjson + "]"
+    $arts := "[]"
+    if t.output.len > 0 {
+        arts = "[{\"parts\":[{\"type\":\"text\",\"text\":" + json.quote(&t.output) + "}]}]"
+    }
+    << "{\"id\":" + json.quote(&t.id) +
+       ",\"status\":{\"state\":" + json.quote(&t.state) + "}" +
+       ",\"history\":" + hjson +
+       ",\"artifacts\":" + arts +
+       ",\"output\":" + json.quote(&t.output) + "}"
+}
+
+fn parse_task_json(doc &json.Doc, obj int) Task {
+    tid := json_str_or(doc, obj, "id", "")
+    $state := json_str_or(doc, obj, "state", "")
+    if state.len == 0 && doc.has(obj, "status") {
+        sn := doc_get_or(doc, obj, "status")
+        if sn >= 0 && doc.is_dict(sn) {
+            state = json_str_or(doc, sn, "state", "")
+        }
+    }
+    if state.len == 0 { state = "unknown" }
+    $output := json_str_or(doc, obj, "output", "")
+    if output.len == 0 && doc.has(obj, "artifacts") {
+        an := doc_get_or(doc, obj, "artifacts")
+        if an >= 0 && doc.is_list(an) && doc.count(an) > 0 {
+            a0 := doc_at_or(doc, an, 0)
+            if a0 >= 0 && doc.is_dict(a0) && doc.has(a0, "parts") {
+                pn := doc_get_or(doc, a0, "parts")
+                if pn >= 0 && doc.is_list(pn) && doc.count(pn) > 0 {
+                    p0 := doc_at_or(doc, pn, 0)
+                    if p0 >= 0 && doc.is_dict(p0) {
+                        output = json_str_or(doc, p0, "text", "")
+                    }
+                }
+            }
+        }
+    }
+    $hist := []TaskMessage{}
+    if doc.has(obj, "history") {
+        hn := doc_get_or(doc, obj, "history")
+        if hn >= 0 && doc.is_list(hn) {
+            hcnt := doc.count(hn)
+            for i in 0:hcnt {
+                item := doc_at_or(doc, hn, i)
+                if item >= 0 && doc.is_dict(item) {
+                    role := json_str_or(doc, item, "role", "user")
+                    $txt := json_str_or(doc, item, "text", "")
+                    if txt.len == 0 && doc.has(item, "parts") {
+                        pn := doc_get_or(doc, item, "parts")
+                        if pn >= 0 && doc.is_list(pn) && doc.count(pn) > 0 {
+                            p0 := doc_at_or(doc, pn, 0)
+                            if p0 >= 0 && doc.is_dict(p0) {
+                                txt = json_str_or(doc, p0, "text", "")
+                            }
+                        }
+                    }
+                    hist.push(TaskMessage{role: role, text: txt})
+                }
+            }
+        }
+    }
+    << Task{id: tid, state: state, history: ~hist, output: output}
+}
+
+fn rpc_ok(id_json &string, result_json &string) string {
+    << "{\"jsonrpc\":\"2.0\",\"id\":" + (*id_json) + ",\"result\":" + (*result_json) + "}"
+}
+
+fn rpc_err(id_json &string, code int, msg string) string {
+    << "{\"jsonrpc\":\"2.0\",\"id\":" + (*id_json) + ",\"error\":{\"code\":" + str(code) + ",\"message\":" + json.quote(&msg) + "}}"
+}
+
+fn doc_id_json(doc &json.Doc, root int) string {
+    if !doc.has(root, "id") { << "null" }
+    n := doc_get_or(doc, root, "id")
+    if n < 0 { << "null" }
+    << doc.encode(n) >>> (_) { << "null" }
+}
+
+fn extract_send_text(doc &json.Doc, params int) string {
+    if doc.has(params, "message") {
+        mn := doc_get_or(doc, params, "message")
+        if mn >= 0 && doc.is_dict(mn) {
+            if doc.has(mn, "parts") {
+                pn := doc_get_or(doc, mn, "parts")
+                if pn >= 0 && doc.is_list(pn) && doc.count(pn) > 0 {
+                    p0 := doc_at_or(doc, pn, 0)
+                    if p0 >= 0 && doc.is_dict(p0) {
+                        t := json_str_or(doc, p0, "text", "")
+                        if t.len > 0 { << t }
+                    }
+                }
+            }
+            dt := json_str_or(doc, mn, "text", "")
+            if dt.len > 0 { << dt }
+        }
+    }
+    << json_str_or(doc, params, "text", "")
+}
+
+pub fn (s $&Server) handle_rpc(body &string) string {
+    doc := json.parse(body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        << rpc_err(&"null", -32700, "parse error")
+    }
+    root := doc.root()
+    id_json := doc_id_json(&doc, root)
+    method := json_str_or(&doc, root, "method", "")
+    params := doc_get_or(&doc, root, "params")
+
+    if method == "tasks/send" {
+        $tid := ""
+        $inp := ""
+        if params >= 0 && doc.is_dict(params) {
+            tid = json_str_or(&doc, params, "id", "")
+            inp = extract_send_text(&doc, params)
+        }
+        if tid.len == 0 {
+            tid = "task_" + str(s.next_id)
+            s.next_id += 1
+        }
+        h := s.handler
+        out := h(&tid, &inp)
+        $hist := []TaskMessage{}
+        hist.push(TaskMessage{role: "user", text: inp + ""})
+        hist.push(TaskMessage{role: "agent", text: out + ""})
+        t := Task{id: tid + "", state: "completed", history: ~hist, output: out + ""}
+        $found := -1
+        for i in 0:s.tasks.len {
+            if s.tasks[i].id == tid {
+                found = i
+                <-
+            }
+        }
+        if found >= 0 {
+            s.tasks[found] = copy_task(&t)
+        } else {
+            s.tasks.push(copy_task(&t))
+        }
+        tjson := task_to_json(&t)
+        << rpc_ok(&id_json, &tjson)
+    }
+
+    if method == "tasks/get" || method == "tasks/cancel" {
+        $tid := ""
+        if params >= 0 && doc.is_dict(params) {
+            tid = json_str_or(&doc, params, "id", "")
+        }
+        $found := -1
+        for i in 0:s.tasks.len {
+            if s.tasks[i].id == tid {
+                found = i
+                <-
+            }
+        }
+        if found < 0 {
+            << rpc_err(&id_json, -32001, "task not found: " + tid)
+        }
+        if method == "tasks/cancel" {
+            s.tasks[found].state = "canceled"
+        }
+        tf := &s.tasks[found]
+        tjson := task_to_json(tf)
+        << rpc_ok(&id_json, &tjson)
+    }
+
+    << rpc_err(&id_json, -32601, "method not found: " + method)
+}
+
+fn accept_fd_or(lfd int) int {
+    << net.accept(lfd) >>> (_) { << -1 }
+}
+
+fn read_http_req(fd int, hreq $&http.Request) bool {
+    _ := hreq.read(fd) >>> (_) { << false }
+    << true
+}
+
+fn conn_close_quiet(fd int) int {
+    << net.conn_close(fd) >>> (_) { << 0 }
+}
+
+fn conn_write_all_quiet(fd int, data &string) int {
+    $off := 0
+    while off < data.len {
+        part := data[off:data.len]
+        n := net.conn_write(fd, &part) >>> (_) { << 0 }
+        if n <= 0 { << 0 }
+        off += n
+    }
+    << 1
+}
+
+fn write_http_raw(fd int, status_line string, extra_headers string, ctype string, body &string) int {
+    $raw := status_line + "\r\n" + extra_headers
+    if ctype.len > 0 {
+        raw = raw + "Content-Type: " + ctype + "\r\n"
+    }
+    raw = raw + "Content-Length: " + str(body.len) + "\r\nConnection: close\r\n\r\n"
+    if body.len > 0 {
+        raw = raw + *body
+    }
+    << conn_write_all_quiet(fd, &raw)
+}
+
+pub fn (s $&Server) serve_http_server(srv $&http.Server) int {
+    if srv.lfd < 0 {
+        >>> errors.new("a2a: HTTP server is not listening")
+    }
+    cors := "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\n"
+    for {
+        fd := accept_fd_or(srv.lfd)
+        if fd < 0 { <- }
+        $hreq := http.new_request()
+        if !read_http_req(fd, $&hreq) {
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        method := hreq.method()
+        req_path := hreq.path()
+        if method == "OPTIONS" {
+            empty := ""
+            _ := write_http_raw(fd, "HTTP/1.1 204 No Content", cors, "", &empty)
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        if method == "GET" && (req_path == "/.well-known/agent.json" || req_path == "/.well-known/agent-card.json") {
+            card_json := format_agent_card_json(&s.card)
+            _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "application/json", &card_json)
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        if method == "POST" {
+            body := hreq.body()
+            resp := s.handle_rpc(&body)
+            _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "application/json", &resp)
+            _ := conn_close_quiet(fd)
+            ->
+        }
+        msg := "{\"error\":\"not found\"}"
+        _ := write_http_raw(fd, "HTTP/1.1 404 Not Found", cors, "application/json", &msg)
+        _ := conn_close_quiet(fd)
+    }
+    << 0
+}
+
+pub fn new_client(base_url string) Client {
+    $u := base_url + ""
+    if u.len > 0 && u[u.len - 1] == 47 { u = u[0:u.len - 1] }
+    << Client{base_url: u, auth_token: ""}
+}
+
+pub fn (c $&Client) set_auth_token(token string) {
+    c.auth_token = token + ""
+}
+
+fn default_port_for(raw &string) int {
+    if strings.has_prefix(raw, "https://") { << 443 }
+    << 80
+}
+
+fn join_path(base_path string, suffix string) string {
+    if base_path.len == 0 || base_path == "/" { << suffix }
+    if base_path[base_path.len - 1] == 47 {
+        << base_path[0:base_path.len - 1] + suffix
+    }
+    << base_path + suffix
+}
+
+fn a2a_http_call(c &Client, method string, suffix string, body &string) http.Response {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    full_path := join_path(ep.path, suffix)
+    $raw := method + " " + full_path + " HTTP/1.1\r\n"
+    raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\nAccept: application/json\r\n"
+    if c.auth_token.len > 0 {
+        raw = raw + "Authorization: Bearer " + c.auth_token + "\r\n"
+    }
+    if method == "POST" {
+        raw = raw + "Content-Type: application/json\r\nContent-Length: " + str(body.len) + "\r\nConnection: close\r\n\r\n" + *body
+    } else {
+        raw = raw + "Connection: close\r\n\r\n"
+    }
+    cfg := tls.new_config(ep.host + "")
+    resp := transport.request_raw(ep, cfg, raw, method) >>>
+    if resp.status_code < 200 || resp.status_code >= 300 {
+        >>> errors.code(resp.status_code, "a2a: HTTP " + str(resp.status_code))
+    }
+    << resp
+}
+
+pub fn (c &Client) discover() AgentCard {
+    empty := ""
+    resp := a2a_http_call(c, "GET", "/.well-known/agent.json", &empty) >>>
+    << parse_agent_card_json(&resp.body) >>>
+}
+
+fn client_rpc_task(c &Client, method string, params_json &string) Task {
+    rpc := "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":" + json.quote(&method) + ",\"params\":" + (*params_json) + "}"
+    resp := a2a_http_call(c, "POST", "/", &rpc) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("a2a: invalid JSON-RPC response")
+    }
+    root := doc.root()
+    if doc.has(root, "error") {
+        en := doc_get_or(&doc, root, "error")
+        if en >= 0 && doc.is_dict(en) {
+            emsg := json_str_or(&doc, en, "message", "a2a RPC error")
+            >>> errors.new(emsg)
+        }
+    }
+    res := doc_get_or(&doc, root, "result")
+    if res < 0 || !doc.is_dict(res) {
+        >>> errors.new("a2a: missing JSON-RPC result")
+    }
+    << parse_task_json(&doc, res)
+}
+
+pub fn (c &Client) send_task(id string, text string) Task {
+    params := "{\"id\":" + json.quote(&id) +
+              ",\"message\":{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":" + json.quote(&text) + "}]}}"
+    << client_rpc_task(c, "tasks/send", &params) >>>
+}
+
+pub fn (c &Client) get_task(id string) Task {
+    params := "{\"id\":" + json.quote(&id) + "}"
+    << client_rpc_task(c, "tasks/get", &params) >>>
+}
+
+pub fn (c &Client) cancel_task(id string) Task {
+    params := "{\"id\":" + json.quote(&id) + "}"
+    << client_rpc_task(c, "tasks/cancel", &params) >>>
+}

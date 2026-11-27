@@ -1,0 +1,409 @@
+@"github.com/xulang-org/packages/cohere"
+
+#crypto/tls
+#encoding/json
+#errors
+#net/http
+#strconv
+#strings
+#time
+transport #github.com/xulang-org/packages/transport
+
+pub const DEFAULT_TIMEOUT_NS = 60000000000
+pub const DEFAULT_BASE_URL = "https://api.cohere.com"
+
+pub struct Client {
+    pub base_url string
+    pub api_key string
+    pub timeout_ns int
+    pub max_retries int
+    pub extra_headers []string
+}
+
+pub struct ChatMessage {
+    pub role string
+    pub content string
+}
+
+pub struct ChatResponse {
+    pub id string
+    pub text string
+    pub finish_reason string
+    pub input_tokens int
+    pub output_tokens int
+}
+
+pub struct EmbedResponse {
+    pub id string
+    pub embeddings [][]f64
+}
+
+pub struct RerankResult {
+    pub index int
+    pub relevance_score f64
+    pub document string
+}
+
+pub fn new_client(api_key string) Client {
+    << new_client_with_base(DEFAULT_BASE_URL, api_key)
+}
+
+pub fn new_client_with_base(base_url string, api_key string) Client {
+    $url := base_url + ""
+    if url.len > 0 && url[url.len - 1] == 47 {
+        url = url[0:url.len - 1]
+    }
+    if url.len == 0 {
+        url = DEFAULT_BASE_URL
+    }
+    << Client{
+        base_url: url,
+        api_key: api_key,
+        timeout_ns: DEFAULT_TIMEOUT_NS,
+        max_retries: 0,
+        extra_headers: []string{}
+    }
+}
+
+pub fn (c $&Client) set_max_retries(n int) {
+    if n < 0 {
+        c.max_retries = 0
+        <<
+    }
+    c.max_retries = n
+}
+
+pub fn (c $&Client) add_header(name string, value string) {
+    c.extra_headers.push(name + ": " + value)
+}
+
+pub fn (c &Client) clone_client() Client {
+    $hdrs := []string{}
+    for i in 0:c.extra_headers.len {
+        hdrs.push(c.extra_headers[i] + "")
+    }
+    << Client{
+        base_url: c.base_url + "",
+        api_key: c.api_key + "",
+        timeout_ns: c.timeout_ns,
+        max_retries: c.max_retries,
+        extra_headers: ~hdrs
+    }
+}
+
+pub fn message(role string, content string) ChatMessage {
+    << ChatMessage{role: role, content: content}
+}
+
+fn default_port_for(raw &string) int {
+    if strings.has_prefix(raw, "https://") { << 443 }
+    << 80
+}
+
+fn join_path(base_path string, suffix string) string {
+    if base_path.len == 0 || base_path == "/" { << suffix }
+    if base_path[base_path.len - 1] == 47 {
+        << base_path[0:base_path.len - 1] + suffix
+    }
+    << base_path + suffix
+}
+
+fn build_http_req(ep &transport.Endpoint, c &Client, suffix string, body &string) string {
+    full_path := join_path(ep.path, suffix)
+    $raw := "POST " + full_path + " HTTP/1.1\r\n"
+    raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\n"
+    raw = raw + "Accept: application/json\r\n"
+    raw = raw + "Content-Type: application/json\r\n"
+    if c.api_key.len > 0 {
+        raw = raw + "Authorization: Bearer " + c.api_key + "\r\n"
+    }
+    for hi in 0:c.extra_headers.len {
+        raw = raw + c.extra_headers[hi] + "\r\n"
+    }
+    raw = raw + "Content-Length: " + str(body.len) + "\r\nConnection: close\r\n\r\n" + *body
+    << raw
+}
+
+fn is_retriable_status(sc int) bool {
+    << sc == 429 || sc >= 500
+}
+
+fn sleep_retry_backoff(attempt int) {
+    $shift := attempt
+    if shift > 6 { shift = 6 }
+    $ms := 25 << shift
+    if ms > 2000 { ms = 2000 }
+    time.sleep(ms * time.millisecond())
+}
+
+fn try_request_raw(ep &transport.Endpoint, raw_req &string, err_out $&string) http.Response {
+    *err_out = ""
+    ep_copy := transport.Endpoint{
+        scheme: ep.scheme + "",
+        host: ep.host + "",
+        port: ep.port,
+        path: ep.path + "",
+        secure: ep.secure
+    }
+    cfg := tls.new_config(ep_copy.host + "")
+    resp := transport.request_raw(ep_copy, cfg, *raw_req + "", "POST") >>> (err) {
+        *err_out = err.msg()
+        << http.new_response()
+    }
+    << resp
+}
+
+fn request_retry(c &Client, suffix string, body &string) http.Response {
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    raw_req := build_http_req(&ep, c, suffix, body)
+    $max_r := c.max_retries
+    if max_r < 0 { max_r = 0 }
+    $attempt := 0
+    for {
+        $err_msg := ""
+        resp := try_request_raw(&ep, &raw_req, $&err_msg)
+        if err_msg.len > 0 {
+            if attempt < max_r {
+                sleep_retry_backoff(attempt)
+                attempt += 1
+                ->
+            }
+            >>> errors.new(err_msg)
+        }
+        if is_retriable_status(resp.status_code) && attempt < max_r {
+            sleep_retry_backoff(attempt)
+            attempt += 1
+            ->
+        }
+        << resp
+    }
+    << http.new_response()
+}
+
+fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_int_or(doc &json.Doc, obj int, key string, def int) int {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_number(n) {
+        << doc.as_int(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn json_f64_or(doc &json.Doc, obj int, key string, def f64) f64 {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_number(n) {
+        << doc.as_f64(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn doc_get_or(doc &json.Doc, obj int, key string) int {
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn fmt_f64_or(v f64, def string) string {
+    << strconv.format_float(v, 102, 4) >>> (_) { << def }
+}
+
+fn doc_as_str_or(doc &json.Doc, node int, def string) string {
+    << doc.as_string(node) >>> (_) { << def }
+}
+
+fn doc_as_f64_or(doc &json.Doc, node int, def f64) f64 {
+    << doc.as_f64(node) >>> (_) { << def }
+}
+
+fn check_http_error(status int, body &string) int {
+    if status >= 200 && status < 300 { << 0 }
+    $msg := "cohere: HTTP " + str(status)
+    doc := json.parse(body)
+    if doc.ok() && doc.is_dict(doc.root()) {
+        emsg := json_str_or(&doc, doc.root(), "message", "")
+        if emsg.len > 0 { msg = emsg }
+    }
+    >>> errors.code(status, msg)
+}
+
+pub fn (c &Client) chat(model string, messages &[]ChatMessage, max_tokens int, temperature f64) ChatResponse {
+    $body := "{\"model\":" + json.quote(&model) + ",\"messages\":["
+    for i in 0:messages.len {
+        if i > 0 { body = body + "," }
+        m := &messages[i]
+        body = body + "{\"role\":" + json.quote(&m.role) + ",\"content\":" + json.quote(&m.content) + "}"
+    }
+    body = body + "]"
+    if max_tokens > 0 {
+        body = body + ",\"max_tokens\":" + str(max_tokens)
+    }
+    if temperature >= 0.0 {
+        tf := fmt_f64_or(temperature, "0.0")
+        body = body + ",\"temperature\":" + tf
+    }
+    body = body + "}"
+    resp := request_retry(c, "/v2/chat", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("cohere: invalid JSON chat response")
+    }
+    root := doc.root()
+    $txt := ""
+    if doc.has(root, "message") {
+        mn := doc_get_or(&doc, root, "message")
+        if mn >= 0 && doc.is_dict(mn) {
+            if doc.has(mn, "content") {
+                cn := doc_get_or(&doc, mn, "content")
+                if cn >= 0 && doc.is_list(cn) {
+                    cc := doc.count(cn)
+                    for i in 0:cc {
+                        blk := doc.at(cn, i) >>>
+                        if doc.is_dict(blk) {
+                            t := json_str_or(&doc, blk, "text", "")
+                            if t.len > 0 { txt = txt + t }
+                        }
+                    }
+                } else if cn >= 0 && doc.is_string(cn) {
+                    txt = doc_as_str_or(&doc, cn, "")
+                }
+            }
+        }
+    }
+    $in_toks := 0
+    $out_toks := 0
+    if doc.has(root, "usage") {
+        un := doc_get_or(&doc, root, "usage")
+        if un >= 0 && doc.is_dict(un) {
+            if doc.has(un, "tokens") {
+                tn := doc_get_or(&doc, un, "tokens")
+                if tn >= 0 && doc.is_dict(tn) {
+                    in_toks = json_int_or(&doc, tn, "input_tokens", 0)
+                    out_toks = json_int_or(&doc, tn, "output_tokens", 0)
+                }
+            } else if doc.has(un, "billed_units") {
+                bn := doc_get_or(&doc, un, "billed_units")
+                if bn >= 0 && doc.is_dict(bn) {
+                    in_toks = json_int_or(&doc, bn, "input_tokens", 0)
+                    out_toks = json_int_or(&doc, bn, "output_tokens", 0)
+                }
+            }
+        }
+    }
+    << ChatResponse{
+        id: json_str_or(&doc, root, "id", ""),
+        text: txt,
+        finish_reason: json_str_or(&doc, root, "finish_reason", ""),
+        input_tokens: in_toks,
+        output_tokens: out_toks
+    }
+}
+
+pub fn (c &Client) embed(model string, texts &[]string, input_type string) EmbedResponse {
+    $it := input_type + ""
+    if it.len == 0 { it = "search_document" }
+    $body := "{\"model\":" + json.quote(&model) + ",\"input_type\":" + json.quote(&it) +
+             ",\"embedding_types\":[\"float\"],\"texts\":["
+    for i in 0:texts.len {
+        if i > 0 { body = body + "," }
+        t := texts[i] + ""
+        body = body + json.quote(&t)
+    }
+    body = body + "]}"
+    resp := request_retry(c, "/v2/embed", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("cohere: invalid JSON embed response")
+    }
+    root := doc.root()
+    $vecs := [][]f64{}
+    if doc.has(root, "embeddings") {
+        en := doc_get_or(&doc, root, "embeddings")
+        $arr := -1
+        if en >= 0 && doc.is_dict(en) && doc.has(en, "float") {
+            arr = doc_get_or(&doc, en, "float")
+        } else if en >= 0 && doc.is_list(en) {
+            arr = en
+        }
+        if arr >= 0 && doc.is_list(arr) {
+            vc := doc.count(arr)
+            for i in 0:vc {
+                row := doc.at(arr, i) >>>
+                $vec := []f64{}
+                if doc.is_list(row) {
+                    dc := doc.count(row)
+                    vec.reserve(dc)
+                    for j in 0:dc {
+                        vn := doc.at(row, j) >>>
+                        if doc.is_number(vn) {
+                            vec.push(doc_as_f64_or(&doc, vn, 0.0))
+                        }
+                    }
+                }
+                vecs.push(~vec)
+            }
+        }
+    }
+    << EmbedResponse{id: json_str_or(&doc, root, "id", ""), embeddings: ~vecs}
+}
+
+pub fn (c &Client) rerank(model string, query string, documents &[]string, top_n int) []RerankResult {
+    $body := "{\"model\":" + json.quote(&model) + ",\"query\":" + json.quote(&query) + ",\"documents\":["
+    for i in 0:documents.len {
+        if i > 0 { body = body + "," }
+        d := documents[i] + ""
+        body = body + json.quote(&d)
+    }
+    body = body + "]"
+    if top_n > 0 {
+        body = body + ",\"top_n\":" + str(top_n)
+    }
+    body = body + "}"
+    resp := request_retry(c, "/v2/rerank", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("cohere: invalid JSON rerank response")
+    }
+    root := doc.root()
+    $out := []RerankResult{}
+    if doc.has(root, "results") {
+        arr := doc_get_or(&doc, root, "results")
+        if arr >= 0 && doc.is_list(arr) {
+            rc := doc.count(arr)
+            for i in 0:rc {
+                item := doc.at(arr, i) >>>
+                if doc.is_dict(item) {
+                    idx := json_int_or(&doc, item, "index", i)
+                    $dtxt := ""
+                    if idx >= 0 && idx < documents.len { dtxt = documents[idx] + "" }
+                    if doc.has(item, "document") {
+                        dn := doc_get_or(&doc, item, "document")
+                        if dn >= 0 && doc.is_string(dn) {
+                            dtxt = doc_as_str_or(&doc, dn, dtxt)
+                        } else if dn >= 0 && doc.is_dict(dn) {
+                            dtxt = json_str_or(&doc, dn, "text", dtxt)
+                        }
+                    }
+                    out.push(RerankResult{
+                        index: idx,
+                        relevance_score: json_f64_or(&doc, item, "relevance_score", 0.0),
+                        document: dtxt
+                    })
+                }
+            }
+        }
+    }
+    << out
+}

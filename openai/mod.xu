@@ -178,6 +178,43 @@ pub struct ResponsesStreamEvent {
     pub done bool
 }
 
+pub struct ImageGenResult {
+    pub url string
+    pub b64_json string
+    pub revised_prompt string
+}
+
+pub struct RerankResult {
+    pub index int
+    pub relevance_score f64
+    pub document string
+}
+
+pub struct FileObject {
+    pub id string
+    pub object string
+    pub bytes int
+    pub created_at int
+    pub filename string
+    pub purpose string
+    pub status string
+}
+
+pub struct BatchObject {
+    pub id string
+    pub object string
+    pub endpoint string
+    pub input_file_id string
+    pub output_file_id string
+    pub error_file_id string
+    pub completion_window string
+    pub status string
+    pub created_at int
+    pub request_total int
+    pub request_completed int
+    pub request_failed int
+}
+
 pub fn new_client(base_url string, api_key string) Client {
     $url := base_url + ""
     if url.len > 0 && url[url.len - 1] == 47 {
@@ -194,6 +231,22 @@ pub fn new_client(base_url string, api_key string) Client {
         extra_headers: []string{}
     }
 }
+
+pub fn new_deepseek_client(api_key string) Client { << new_client("https://api.deepseek.com", api_key) }
+pub fn new_openrouter_client(api_key string) Client { << new_client("https://openrouter.ai/api/v1", api_key) }
+pub fn new_groq_client(api_key string) Client { << new_client("https://api.groq.com/openai/v1", api_key) }
+pub fn new_xai_client(api_key string) Client { << new_client("https://api.x.ai/v1", api_key) }
+pub fn new_together_client(api_key string) Client { << new_client("https://api.together.xyz/v1", api_key) }
+pub fn new_fireworks_client(api_key string) Client { << new_client("https://api.fireworks.ai/inference/v1", api_key) }
+pub fn new_ollama_client(base_url string) Client {
+    $u := base_url + ""
+    if u.len == 0 { u = "http://127.0.0.1:11434" }
+    << new_client(u, "")
+}
+pub fn new_cohere_client(api_key string) Client { << new_client("https://api.cohere.com/compatibility/v1", api_key) }
+pub fn new_qwen_client(api_key string) Client { << new_client("https://dashscope.aliyuncs.com/compatible-mode/v1", api_key) }
+pub fn new_mistral_client(api_key string) Client { << new_client("https://api.mistral.ai/v1", api_key) }
+pub fn new_minimax_client(api_key string) Client { << new_client("https://api.minimax.chat/v1", api_key) }
 
 pub fn (c $&Client) set_max_retries(n int) {
     if n < 0 {
@@ -365,12 +418,12 @@ fn default_port_for(raw &string) int {
     << 80
 }
 
-fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_key &string,
-                      extra_headers &[]string, body &string) string {
+fn build_http_request_ct(method string, ep &transport.Endpoint, suffix string, api_key &string,
+                         extra_headers &[]string, content_type string, body &string) string {
     full_path := join_endpoint_path(ep.path, suffix)
     $raw := method + " " + full_path + " HTTP/1.1\r\n"
     raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\n"
-    raw = raw + "Accept: application/json, text/event-stream\r\n"
+    raw = raw + "Accept: application/json, text/event-stream, */*\r\n"
     if api_key.len > 0 {
         raw = raw + "Authorization: Bearer " + *api_key + "\r\n"
     }
@@ -378,7 +431,9 @@ fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_
         raw = raw + extra_headers[hi] + "\r\n"
     }
     if body.len > 0 || method == "POST" {
-        raw = raw + "Content-Type: application/json\r\n"
+        $ct := content_type + ""
+        if ct.len == 0 { ct = "application/json" }
+        raw = raw + "Content-Type: " + ct + "\r\n"
         raw = raw + "Content-Length: " + str(body.len) + "\r\n"
     }
     raw = raw + "Connection: close\r\n\r\n"
@@ -386,6 +441,11 @@ fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_
         raw = raw + *body
     }
     << raw
+}
+
+fn build_http_request(method string, ep &transport.Endpoint, suffix string, api_key &string,
+                      extra_headers &[]string, body &string) string {
+    << build_http_request_ct(method, ep, suffix, api_key, extra_headers, "application/json", body)
 }
 
 fn extract_http_error_msg(status int, body &string) string {
@@ -438,12 +498,12 @@ fn try_request_raw(ep &transport.Endpoint, raw_req &string, method &string, err_
     << resp
 }
 
-fn request_raw_retry(c &Client, method string, suffix string, body &string) http.Response {
+fn request_raw_ct_retry(c &Client, method string, suffix string, content_type string, body &string) http.Response {
     bu := c.base_url + ""
     ak := c.api_key + ""
     def_port := default_port_for(&bu)
     ep := transport.parse_endpoint(bu + "", def_port) >>>
-    raw_req := build_http_request(method + "", &ep, suffix, &ak, &c.extra_headers, body)
+    raw_req := build_http_request_ct(method + "", &ep, suffix, &ak, &c.extra_headers, content_type + "", body)
     $max_r := c.max_retries
     if max_r < 0 { max_r = 0 }
     $attempt := 0
@@ -467,6 +527,10 @@ fn request_raw_retry(c &Client, method string, suffix string, body &string) http
         << resp
     }
     << http.new_response()
+}
+
+fn request_raw_retry(c &Client, method string, suffix string, body &string) http.Response {
+    << request_raw_ct_retry(c, method, suffix, "application/json", body) >>>
 }
 
 fn json_str_or(doc &json.Doc, obj int, key string, def string) string {
@@ -1065,6 +1129,140 @@ pub fn (c &Client) chat_stream_chan(req &ChatRequest, delta_ch chan StreamDelta)
     << chat_stream_impl(c, req, false, ignore_delta, true, delta_ch) >>>
 }
 
+fn json_f64_or(doc &json.Doc, obj int, key string, def f64) f64 {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_number(n) {
+        << doc.as_f64(n) >>> (_) { << def }
+    }
+    << def
+}
+
+pub fn (c &Client) audio_transcriptions(model string, filename string, audio_bytes &string,
+                                      language string, prompt string) string {
+    boundary := "xu-openai-boundary-v110"
+    $fname := filename + ""
+    if fname.len == 0 { fname = "audio.wav" }
+    $body := "--" + boundary + "\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n" + model + "\r\n"
+    if language.len > 0 {
+        body = body + "--" + boundary + "\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n" + language + "\r\n"
+    }
+    if prompt.len > 0 {
+        body = body + "--" + boundary + "\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\n" + prompt + "\r\n"
+    }
+    body = body + "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + fname +
+           "\"\r\nContent-Type: application/octet-stream\r\n\r\n" + (*audio_bytes) + "\r\n--" + boundary + "--\r\n"
+    resp := request_raw_ct_retry(c, "POST", "/v1/audio/transcriptions", "multipart/form-data; boundary=" + boundary, &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if doc.ok() && doc.is_dict(doc.root()) && doc.has(doc.root(), "text") {
+        << json_str_or(&doc, doc.root(), "text", "")
+    }
+    << resp.body + ""
+}
+
+pub fn (c &Client) audio_speech(model string, voice string, input string, response_format string) string {
+    $v := voice + ""
+    if v.len == 0 { v = "alloy" }
+    $body := "{\"model\":" + json.quote(&model) + ",\"voice\":" + json.quote(&v) + ",\"input\":" + json.quote(&input)
+    if response_format.len > 0 {
+        body = body + ",\"response_format\":" + json.quote(&response_format)
+    }
+    body = body + "}"
+    resp := request_raw_retry(c, "POST", "/v1/audio/speech", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    << resp.body + ""
+}
+
+pub fn (c &Client) images_generate(model string, prompt string, size string, n int) []ImageGenResult {
+    $cnt := n
+    if cnt <= 0 { cnt = 1 }
+    $body := "{\"model\":" + json.quote(&model) + ",\"prompt\":" + json.quote(&prompt) + ",\"n\":" + str(cnt)
+    if size.len > 0 {
+        body = body + ",\"size\":" + json.quote(&size)
+    }
+    body = body + "}"
+    resp := request_raw_retry(c, "POST", "/v1/images/generations", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $out := []ImageGenResult{}
+    if doc.has(root, "data") {
+        arr := doc.get(root, "data") >>>
+        if doc.is_list(arr) {
+            dc := doc.count(arr)
+            for i in 0:dc {
+                item := doc.at(arr, i) >>>
+                if doc.is_dict(item) {
+                    out.push(ImageGenResult{
+                        url: json_str_or(&doc, item, "url", ""),
+                        b64_json: json_str_or(&doc, item, "b64_json", ""),
+                        revised_prompt: json_str_or(&doc, item, "revised_prompt", "")
+                    })
+                }
+            }
+        }
+    }
+    << out
+}
+
+fn doc_as_str_or(doc &json.Doc, node int, def string) string {
+    << doc.as_string(node) >>> (_) { << def }
+}
+
+pub fn (c &Client) rerank(model string, query string, documents &[]string, top_n int) []RerankResult {
+    $body := "{\"model\":" + json.quote(&model) + ",\"query\":" + json.quote(&query) + ",\"documents\":["
+    for i in 0:documents.len {
+        if i > 0 { body = body + "," }
+        d := documents[i] + ""
+        body = body + json.quote(&d)
+    }
+    body = body + "]"
+    if top_n > 0 {
+        body = body + ",\"top_n\":" + str(top_n)
+    }
+    body = body + "}"
+    resp := request_raw_retry(c, "POST", "/v1/rerank", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $out := []RerankResult{}
+    if doc.has(root, "results") {
+        arr := doc.get(root, "results") >>>
+        if doc.is_list(arr) {
+            rc := doc.count(arr)
+            for i in 0:rc {
+                item := doc.at(arr, i) >>>
+                if doc.is_dict(item) {
+                    idx := json_int_or(&doc, item, "index", i)
+                    $dtxt := ""
+                    if idx >= 0 && idx < documents.len { dtxt = documents[idx] + "" }
+                    if doc.has(item, "document") {
+                        dn := doc_get_or(&doc, item, "document")
+                        if doc.is_string(dn) {
+                            dtxt = doc_as_str_or(&doc, dn, dtxt)
+                        } else if doc.is_dict(dn) {
+                            dtxt = json_str_or(&doc, dn, "text", dtxt)
+                        }
+                    }
+                    out.push(RerankResult{
+                        index: idx,
+                        relevance_score: json_f64_or(&doc, item, "relevance_score", 0.0),
+                        document: dtxt
+                    })
+                }
+            }
+        }
+    }
+    << out
+}
+
 pub fn (c &Client) embeddings(req &EmbedRequest) EmbedResponse {
     $body := "{\"model\":" + json.quote(&req.model) + ",\"input\":["
     for i in 0:req.inputs.len {
@@ -1454,4 +1652,193 @@ pub fn (c &Client) responses_stream(req &ResponsesRequest, on_event fn(Responses
 
 pub fn (c &Client) responses_stream_chan(req &ResponsesRequest, ch chan ResponsesStreamEvent) ResponsesResponse {
     << responses_stream_impl(c, req, false, ignore_resp_ev, true, ch) >>>
+}
+
+fn json_bool_or(doc &json.Doc, obj int, key string, def bool) bool {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_bool(n) {
+        << doc.as_bool(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn parse_file_obj(doc &json.Doc, node int) FileObject {
+    << FileObject{
+        id: json_str_or(doc, node, "id", ""),
+        object: json_str_or(doc, node, "object", "file"),
+        bytes: json_int_or(doc, node, "bytes", 0),
+        created_at: json_int_or(doc, node, "created_at", 0),
+        filename: json_str_or(doc, node, "filename", ""),
+        purpose: json_str_or(doc, node, "purpose", ""),
+        status: json_str_or(doc, node, "status", "")
+    }
+}
+
+fn parse_batch_obj(doc &json.Doc, node int) BatchObject {
+    $tot := 0
+    $comp := 0
+    $fail := 0
+    if doc.has(node, "request_counts") {
+        rc := doc_get_or(doc, node, "request_counts")
+        if rc >= 0 && doc.is_dict(rc) {
+            tot = json_int_or(doc, rc, "total", 0)
+            comp = json_int_or(doc, rc, "completed", 0)
+            fail = json_int_or(doc, rc, "failed", 0)
+        }
+    }
+    << BatchObject{
+        id: json_str_or(doc, node, "id", ""),
+        object: json_str_or(doc, node, "object", "batch"),
+        endpoint: json_str_or(doc, node, "endpoint", ""),
+        input_file_id: json_str_or(doc, node, "input_file_id", ""),
+        output_file_id: json_str_or(doc, node, "output_file_id", ""),
+        error_file_id: json_str_or(doc, node, "error_file_id", ""),
+        completion_window: json_str_or(doc, node, "completion_window", ""),
+        status: json_str_or(doc, node, "status", ""),
+        created_at: json_int_or(doc, node, "created_at", 0),
+        request_total: tot,
+        request_completed: comp,
+        request_failed: fail
+    }
+}
+
+pub fn (c &Client) upload_file(filename string, purpose string, content &string) FileObject {
+    boundary := "xu-openai-file-boundary-v112"
+    $fname := filename + ""
+    if fname.len == 0 { fname = "batch_input.jsonl" }
+    $purp := purpose + ""
+    if purp.len == 0 { purp = "batch" }
+    $body := "--" + boundary + "\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\n" + purp + "\r\n"
+    body = body + "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + fname +
+           "\"\r\nContent-Type: application/octet-stream\r\n\r\n" + (*content) + "\r\n--" + boundary + "--\r\n"
+    resp := request_raw_ct_retry(c, "POST", "/v1/files", "multipart/form-data; boundary=" + boundary, &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    << parse_file_obj(&doc, doc.root())
+}
+
+pub fn (c &Client) get_file(file_id string) FileObject {
+    empty := ""
+    resp := request_raw_retry(c, "GET", "/v1/files/" + file_id, &empty) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    << parse_file_obj(&doc, doc.root())
+}
+
+pub fn (c &Client) list_files(purpose string) []FileObject {
+    $suffix := "/v1/files"
+    if purpose.len > 0 { suffix = suffix + "?purpose=" + purpose }
+    empty := ""
+    resp := request_raw_retry(c, "GET", suffix, &empty) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $out := []FileObject{}
+    if doc.has(root, "data") {
+        arr := doc.get(root, "data") >>>
+        if doc.is_list(arr) {
+            dc := doc.count(arr)
+            for i in 0:dc {
+                item := doc.at(arr, i) >>>
+                if doc.is_dict(item) { out.push(parse_file_obj(&doc, item)) }
+            }
+        }
+    }
+    << out
+}
+
+pub fn (c &Client) delete_file(file_id string) bool {
+    empty := ""
+    resp := request_raw_retry(c, "DELETE", "/v1/files/" + file_id, &empty) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if doc.ok() && doc.is_dict(doc.root()) {
+        << json_bool_or(&doc, doc.root(), "deleted", true)
+    }
+    << true
+}
+
+pub fn (c &Client) get_file_content(file_id string) string {
+    empty := ""
+    resp := request_raw_retry(c, "GET", "/v1/files/" + file_id + "/content", &empty) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    << resp.body + ""
+}
+
+pub fn (c &Client) create_batch(input_file_id string, endpoint string, completion_window string, metadata_json string) BatchObject {
+    $ep_path := endpoint + ""
+    if ep_path.len == 0 { ep_path = "/v1/chat/completions" }
+    $cw := completion_window + ""
+    if cw.len == 0 { cw = "24h" }
+    $body := "{\"input_file_id\":" + json.quote(&input_file_id) +
+             ",\"endpoint\":" + json.quote(&ep_path) +
+             ",\"completion_window\":" + json.quote(&cw)
+    if metadata_json.len > 0 {
+        body = body + ",\"metadata\":" + metadata_json
+    }
+    body = body + "}"
+    resp := request_raw_retry(c, "POST", "/v1/batches", &body) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    << parse_batch_obj(&doc, doc.root())
+}
+
+pub fn (c &Client) get_batch(batch_id string) BatchObject {
+    empty := ""
+    resp := request_raw_retry(c, "GET", "/v1/batches/" + batch_id, &empty) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    << parse_batch_obj(&doc, doc.root())
+}
+
+pub fn (c &Client) cancel_batch(batch_id string) BatchObject {
+    empty_json := "{}"
+    resp := request_raw_retry(c, "POST", "/v1/batches/" + batch_id + "/cancel", &empty_json) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    << parse_batch_obj(&doc, doc.root())
+}
+
+pub fn (c &Client) list_batches(limit int) []BatchObject {
+    $suffix := "/v1/batches"
+    if limit > 0 { suffix = suffix + "?limit=" + str(limit) }
+    empty := ""
+    resp := request_raw_retry(c, "GET", suffix, &empty) >>>
+    _ := check_http_error(resp.status_code, &resp.body) >>>
+    doc := json.parse(&resp.body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        >>> errors.new("openai: invalid JSON response")
+    }
+    root := doc.root()
+    $out := []BatchObject{}
+    if doc.has(root, "data") {
+        arr := doc.get(root, "data") >>>
+        if doc.is_list(arr) {
+            dc := doc.count(arr)
+            for i in 0:dc {
+                item := doc.at(arr, i) >>>
+                if doc.is_dict(item) { out.push(parse_batch_obj(&doc, item)) }
+            }
+        }
+    }
+    << out
 }

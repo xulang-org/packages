@@ -1,0 +1,251 @@
+@"github.com/xulang-org/packages/prompt"
+
+#encoding/json
+#errors
+#strings
+#tensor
+openai #github.com/xulang-org/packages/openai
+
+pub struct PromptTemplate {
+    pub name string
+    pub version string
+    pub system_template string
+    pub user_template string
+    pub required_vars []string
+}
+
+pub struct PromptRegistry {
+    templates []PromptTemplate
+}
+
+pub struct FewShotExample {
+    pub input string
+    pub output string
+    pub embedding []f32
+}
+
+fn copy_req_vars(src &[]string) []string {
+    $out := []string{}
+    for i in 0:src.len { out.push(src[i] + "") }
+    << out
+}
+
+fn copy_tpl(t &PromptTemplate) PromptTemplate {
+    << PromptTemplate{
+        name: t.name + "",
+        version: t.version + "",
+        system_template: t.system_template + "",
+        user_template: t.user_template + "",
+        required_vars: copy_req_vars(&t.required_vars)
+    }
+}
+
+pub fn new_template(name string, version string, system_template string,
+                    user_template string, required_vars &[]string) PromptTemplate {
+    << PromptTemplate{
+        name: name,
+        version: version,
+        system_template: system_template,
+        user_template: user_template,
+        required_vars: copy_req_vars(required_vars)
+    }
+}
+
+pub fn render_template(tpl &string, vars &map[string]string, required &[]string) string {
+    missing_sentinel := "__xu_prompt_missing_var_sentinel__"
+    for ri in 0:required.len {
+        rk := required[ri] + ""
+        if vars.get_or(rk, missing_sentinel) == missing_sentinel {
+            >>> errors.new("prompt: missing required variable: " + rk)
+        }
+    }
+    $out := ""
+    $i := 0
+    while i < tpl.len {
+        if i + 4 <= tpl.len && ((*tpl)[i] & 255) == 123 && ((*tpl)[i + 1] & 255) == 123 {
+            $close := -1
+            $j := i + 2
+            while j + 1 < tpl.len {
+                if ((*tpl)[j] & 255) == 125 && ((*tpl)[j + 1] & 255) == 125 {
+                    close = j
+                    <-
+                }
+                j += 1
+            }
+            if close > i + 2 {
+                raw_k := (*tpl)[i + 2:close]
+                k := strings.trim_space(&raw_k)
+                val := vars.get_or(k + "", missing_sentinel)
+                if val != missing_sentinel {
+                    out = out + val
+                    i = close + 2
+                    ->
+                }
+            }
+        }
+        out.push_str(string_from_byte((*tpl)[i] & 255))
+        i += 1
+    }
+    << out
+}
+
+pub fn new_registry() PromptRegistry {
+    << PromptRegistry{templates: []PromptTemplate{}}
+}
+
+pub fn (r $&PromptRegistry) register(t PromptTemplate) {
+    r.templates.push(~t)
+}
+
+pub fn (r &PromptRegistry) get(name &string, version &string) PromptTemplate {
+    $found := -1
+    for i in 0:r.templates.len {
+        t := &r.templates[i]
+        if t.name == *name {
+            if version.len == 0 || t.version == *version {
+                found = i
+            }
+        }
+    }
+    if found < 0 {
+        >>> errors.new("prompt: template not found: " + (*name))
+    }
+    << copy_tpl(&r.templates[found])
+}
+
+pub fn (r &PromptRegistry) render_messages(name &string, version &string,
+                                          vars &map[string]string) []openai.Message {
+    t := r.get(name, version) >>>
+    $msgs := []openai.Message{}
+    if t.system_template.len > 0 {
+        sys_txt := render_template(&t.system_template, vars, &t.required_vars) >>>
+        msgs.push(openai.message("system", sys_txt))
+    }
+    if t.user_template.len > 0 {
+        usr_txt := render_template(&t.user_template, vars, &t.required_vars) >>>
+        msgs.push(openai.message("user", usr_txt))
+    }
+    << msgs
+}
+
+pub fn (r &PromptRegistry) list_names() []string {
+    $out := []string{}
+    for i in 0:r.templates.len {
+        nm := r.templates[i].name + ""
+        $dup := false
+        for j in 0:out.len {
+            if out[j] == nm {
+                dup = true
+                <-
+            }
+        }
+        if !dup { out.push(nm) }
+    }
+    << out
+}
+
+fn copy_f32_vec(src &[]f32) []f32 {
+    $out := []f32{}
+    out.reserve(src.len)
+    for i in 0:src.len { out.push(src[i]) }
+    << out
+}
+
+pub fn select_few_shot(examples &[]FewShotExample, query_emb &[]f32, k int) []FewShotExample {
+    $out := []FewShotExample{}
+    if k <= 0 || examples.len == 0 || query_emb.len == 0 { << out }
+    dim := query_emb.len
+    $valid := []int{}
+    $corpus := []f32{}
+    for i in 0:examples.len {
+        if examples[i].embedding.len == dim {
+            valid.push(i)
+            for d in 0:dim { corpus.push(examples[i].embedding[d]) }
+        }
+    }
+    if valid.len == 0 {
+        $lim := k
+        if lim > examples.len { lim = examples.len }
+        for i in 0:lim {
+            e := &examples[i]
+            out.push(FewShotExample{input: e.input + "", output: e.output + "", embedding: copy_f32_vec(&e.embedding)})
+        }
+        << out
+    }
+    $lim := k
+    if lim > valid.len { lim = valid.len }
+    $idx := []int{}
+    $scores := []f32{}
+    for _ in 0:lim {
+        idx.push(0)
+        scores.push(f32(0))
+    }
+    picked := tensor.topk_cosine_f32(query_emb, &corpus, valid.len, dim, lim, $&idx, $&scores)
+    for r in 0:picked {
+        vi := idx[r]
+        if vi >= 0 && vi < valid.len {
+            orig := valid[vi]
+            e := &examples[orig]
+            out.push(FewShotExample{input: e.input + "", output: e.output + "", embedding: copy_f32_vec(&e.embedding)})
+        }
+    }
+    << out
+}
+
+pub fn format_few_shot_messages(system_prompt string, examples &[]FewShotExample,
+                                user_query string) []openai.Message {
+    $msgs := []openai.Message{}
+    if system_prompt.len > 0 {
+        msgs.push(openai.message("system", system_prompt))
+    }
+    for i in 0:examples.len {
+        e := &examples[i]
+        msgs.push(openai.message("user", e.input + ""))
+        msgs.push(openai.message("assistant", e.output + ""))
+    }
+    msgs.push(openai.message("user", user_query))
+    << msgs
+}
+
+pub fn extract_json_block(raw &string) string {
+    trimmed := strings.trim_space(raw)
+    if trimmed.len > 0 {
+        d0 := json.parse(&trimmed)
+        if d0.ok() && (d0.is_dict(d0.root()) || d0.is_list(d0.root())) {
+            << trimmed
+        }
+    }
+    // Scan from first '{' or '[' and locate matching closing brace outside strings
+    for i in 0:raw.len {
+        ch := (*raw)[i] & 255
+        if ch != 123 && ch != 91 { -> }
+        $depth := 0
+        $in_str := false
+        $esc := false
+        $j := i
+        while j < raw.len {
+            c := (*raw)[j] & 255
+            if in_str {
+                if esc { esc = false }
+                else if c == 92 { esc = true }
+                else if c == 34 { in_str = false }
+            } else {
+                if c == 34 { in_str = true }
+                else if c == 123 || c == 91 { depth += 1 }
+                else if c == 125 || c == 93 {
+                    depth -= 1
+                    if depth == 0 {
+                        cand := (*raw)[i:(j + 1)]
+                        dc := json.parse(&cand)
+                        if dc.ok() && (dc.is_dict(dc.root()) || dc.is_list(dc.root())) {
+                            << cand
+                        }
+                        <-
+                    }
+                }
+            }
+            j += 1
+        }
+    }
+    >>> errors.new("prompt: no valid JSON object or array found")
+}
