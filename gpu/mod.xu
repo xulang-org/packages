@@ -1,0 +1,867 @@
+@"github.com/xulang-org/packages/gpu"
+
+// Cross-platform unified GPU compute facade over Metal (macOS), CUDA (NVIDIA Linux/Windows),
+// Vulkan (cross-platform SPIR-V compute), and pure-Xu CPU reference fallback.
+
+#errors
+#math
+metal #"github.com/xulang-org/packages/metal"
+cuda #"github.com/xulang-org/packages/cuda_native"
+vulkan #"github.com/xulang-org/packages/vulkan_native"
+
+
+fn qclose_metal_dev(x $&metal.Device) { _ := x.close() >>> (_) { << } }
+fn qclose_cuda_dev(x $&cuda.CudaDevice) { _ := x.close() >>> (_) { << } }
+fn qclose_vk_dev(x $&vulkan.VulkanDevice) { _ := x.close() >>> (_) { << } }
+fn qclose_metal_f32(x $&metal.F32Matrix) { _ := x.close() >>> (_) { << } }
+fn qclose_metal_q4(x $&metal.Q4Matrix) { _ := x.close() >>> (_) { << } }
+fn qclose_metal_q8(x $&metal.Q8Matrix) { _ := x.close() >>> (_) { << } }
+fn qclose_metal_q4k(x $&metal.Q4KMatrix) { _ := x.close() >>> (_) { << } }
+fn qclose_metal_q5k(x $&metal.Q5KMatrix) { _ := x.close() >>> (_) { << } }
+fn qclose_metal_q6k(x $&metal.Q6KMatrix) { _ := x.close() >>> (_) { << } }
+fn qclose_cuda_buf(x $&cuda.CudaBuffer) { _ := x.close() >>> (_) { << } }
+fn qclose_vk_buf(x $&vulkan.VulkanBuffer) { _ := x.close() >>> (_) { << } }
+fn qclose_metal_fence(x $&metal.Fence) { _ := x.close() >>> (_) { << } }
+
+pub const BACKEND_METAL = 1
+pub const BACKEND_CUDA = 2
+pub const BACKEND_VULKAN = 3
+pub const BACKEND_CPU = 4
+
+pub struct Device {
+    pub backend int
+    pub dev_name string
+    metal_dev []metal.Device
+    cuda_dev []cuda.CudaDevice
+    vk_dev []vulkan.VulkanDevice
+    pub closed bool
+}
+
+pub struct F32Matrix {
+    pub backend int
+    pub n_rows int
+    pub n_cols int
+    metal_mat []metal.F32Matrix
+    cuda_buf []cuda.CudaBuffer
+    vk_buf []vulkan.VulkanBuffer
+    cpu_bits []int
+    pub closed bool
+}
+
+pub struct Q4Matrix {
+    pub backend int
+    pub n_rows int
+    pub n_cols int
+    metal_mat []metal.Q4Matrix
+    cuda_buf []cuda.CudaBuffer
+    raw string
+    pub closed bool
+}
+
+pub struct Q8Matrix {
+    pub backend int
+    pub n_rows int
+    pub n_cols int
+    metal_mat []metal.Q8Matrix
+    cuda_buf []cuda.CudaBuffer
+    raw string
+    pub closed bool
+}
+
+pub struct Q4KMatrix {
+    pub backend int
+    pub n_rows int
+    pub n_cols int
+    metal_mat []metal.Q4KMatrix
+    cuda_buf []cuda.CudaBuffer
+    raw string
+    pub closed bool
+}
+
+pub struct Q5KMatrix {
+    pub backend int
+    pub n_rows int
+    pub n_cols int
+    metal_mat []metal.Q5KMatrix
+    cuda_buf []cuda.CudaBuffer
+    raw string
+    pub closed bool
+}
+
+pub struct Q6KMatrix {
+    pub backend int
+    pub n_rows int
+    pub n_cols int
+    metal_mat []metal.Q6KMatrix
+    cuda_buf []cuda.CudaBuffer
+    raw string
+    pub closed bool
+}
+
+pub fn detect_backends() []string {
+    $out := []string{}
+    if metal.available() { out.push("metal") }
+    if cuda.available() { out.push("cuda") }
+    if vulkan.available() { out.push("vulkan") }
+    out.push("cpu")
+    << out
+}
+
+pub fn backend_name(b int) string {
+    if b == BACKEND_METAL { << "metal" }
+    if b == BACKEND_CUDA { << "cuda" }
+    if b == BACKEND_VULKAN { << "vulkan" }
+    << "cpu"
+}
+
+pub fn open_auto() Device {
+    if metal.available() { << open_backend("metal") >>> }
+    if cuda.available() { << open_backend("cuda") >>> }
+    if vulkan.available() { << open_backend("vulkan") >>> }
+    << open_backend("cpu") >>>
+}
+
+pub fn open_backend(name string) Device {
+    if name == "auto" { << open_auto() >>> }
+    if name == "metal" {
+        if !metal.available() { >>> errors.new("gpu: Metal backend unavailable") }
+        $md := metal.open() >>>
+        dn := md.name() >>>
+        $marr := []metal.Device{}
+        marr.push(md)
+        << Device{
+            backend: BACKEND_METAL,
+            dev_name: dn,
+            metal_dev: marr,
+            cuda_dev: []cuda.CudaDevice{},
+            vk_dev: []vulkan.VulkanDevice{},
+            closed: false
+        }
+    }
+    if name == "cuda" {
+        if !cuda.available() { >>> errors.new("gpu: CUDA backend unavailable") }
+        $cd := cuda.open(0) >>>
+        dn := cd.name() >>>
+        $carr := []cuda.CudaDevice{}
+        carr.push(cd)
+        << Device{
+            backend: BACKEND_CUDA,
+            dev_name: dn,
+            metal_dev: []metal.Device{},
+            cuda_dev: carr,
+            vk_dev: []vulkan.VulkanDevice{},
+            closed: false
+        }
+    }
+    if name == "vulkan" {
+        if !vulkan.available() { >>> errors.new("gpu: Vulkan backend unavailable") }
+        $vd := vulkan.open(0) >>>
+        dn := vd.name()
+        $varr := []vulkan.VulkanDevice{}
+        varr.push(vd)
+        << Device{
+            backend: BACKEND_VULKAN,
+            dev_name: dn,
+            metal_dev: []metal.Device{},
+            cuda_dev: []cuda.CudaDevice{},
+            vk_dev: varr,
+            closed: false
+        }
+    }
+    if name == "cpu" {
+        << Device{
+            backend: BACKEND_CPU,
+            dev_name: "cpu-ref",
+            metal_dev: []metal.Device{},
+            cuda_dev: []cuda.CudaDevice{},
+            vk_dev: []vulkan.VulkanDevice{},
+            closed: false
+        }
+    }
+    >>> errors.new("gpu: unknown backend '" + name + "'")
+}
+
+pub fn (d &Device) name() string { << d.dev_name }
+pub fn (d &Device) backend_id() int { << d.backend }
+
+pub fn (d $&Device) close() int {
+    if d.closed { << 0 }
+    d.closed = true
+    for i in 0:d.metal_dev.len { qclose_metal_dev($&d.metal_dev[i]) }
+    for i in 0:d.cuda_dev.len { qclose_cuda_dev($&d.cuda_dev[i]) }
+    for i in 0:d.vk_dev.len { qclose_vk_dev($&d.vk_dev[i]) }
+    << 0
+}
+
+pub fn (d &Device) matrix_f32(rows int, columns int) F32Matrix {
+    if d.closed { >>> errors.new("gpu: device closed") }
+    if rows < 0 || columns < 0 { >>> errors.new("gpu: negative dimensions") }
+    n := rows * columns
+    if d.backend == BACKEND_METAL {
+        mm := d.metal_dev[0].matrix_f32(rows, columns) >>>
+        $arr := []metal.F32Matrix{}
+        arr.push(mm)
+        << F32Matrix{
+            backend: BACKEND_METAL, n_rows: rows, n_cols: columns,
+            metal_mat: arr, cuda_buf: []cuda.CudaBuffer{}, vk_buf: []vulkan.VulkanBuffer{},
+            cpu_bits: []int{}, closed: false
+        }
+    }
+    if d.backend == BACKEND_CUDA {
+        cb := d.cuda_dev[0].alloc_f32(n) >>>
+        $arr := []cuda.CudaBuffer{}
+        arr.push(cb)
+        << F32Matrix{
+            backend: BACKEND_CUDA, n_rows: rows, n_cols: columns,
+            metal_mat: []metal.F32Matrix{}, cuda_buf: arr, vk_buf: []vulkan.VulkanBuffer{},
+            cpu_bits: []int{}, closed: false
+        }
+    }
+    if d.backend == BACKEND_VULKAN {
+        vb := d.vk_dev[0].create_f32_buffer(n) >>>
+        $arr := []vulkan.VulkanBuffer{}
+        arr.push(vb)
+        << F32Matrix{
+            backend: BACKEND_VULKAN, n_rows: rows, n_cols: columns,
+            metal_mat: []metal.F32Matrix{}, cuda_buf: []cuda.CudaBuffer{}, vk_buf: arr,
+            cpu_bits: []int{}, closed: false
+        }
+    }
+    $bits := []int{}
+    bits.reserve(n)
+    for _ in 0:n { bits.push(0) }
+    << F32Matrix{
+        backend: BACKEND_CPU, n_rows: rows, n_cols: columns,
+        metal_mat: []metal.F32Matrix{}, cuda_buf: []cuda.CudaBuffer{}, vk_buf: []vulkan.VulkanBuffer{},
+        cpu_bits: bits, closed: false
+    }
+}
+
+pub fn (m &F32Matrix) rows() int { << m.n_rows }
+pub fn (m &F32Matrix) columns() int { << m.n_cols }
+
+pub fn (m $&F32Matrix) write_bits(values &[]int) int {
+    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if values.len != m.n_rows * m.n_cols { >>> errors.new("gpu: write_bits length mismatch") }
+    if m.backend == BACKEND_METAL {
+        el := $&m.metal_mat[0]
+        << el.write_bits(values) >>>
+    }
+    if m.backend == BACKEND_CUDA {
+        el := $&m.cuda_buf[0]
+        << el.write_f32_bits(values) >>>
+    }
+    if m.backend == BACKEND_VULKAN {
+        el := $&m.vk_buf[0]
+        << el.write_f32_bits(values) >>>
+    }
+    for i in 0:values.len { m.cpu_bits[i] = values[i] }
+    << 0
+}
+
+pub fn (m $&F32Matrix) write_f32(values &[]f32) int {
+    $bits := []int{}
+    bits.reserve(values.len)
+    for i in 0:values.len { bits.push(math.float32_bits(f64(values[i]))) }
+    << m.write_bits(&bits) >>>
+}
+
+pub fn (m &F32Matrix) copy_bits(out $&[]int) int {
+    if m.closed { >>> errors.new("gpu: matrix closed") }
+    n := m.n_rows * m.n_cols
+    if out.len != n { >>> errors.new("gpu: copy_bits length mismatch") }
+    if m.backend == BACKEND_METAL { << m.metal_mat[0].copy_bits(out) >>> }
+    if m.backend == BACKEND_CUDA { << m.cuda_buf[0].copy_f32_bits(out) >>> }
+    if m.backend == BACKEND_VULKAN { << m.vk_buf[0].copy_f32_bits(out) >>> }
+    for i in 0:n { out[i] = m.cpu_bits[i] }
+    << 0
+}
+
+pub fn (m &F32Matrix) bits() []int {
+    n := m.n_rows * m.n_cols
+    $out := []int{}
+    out.reserve(n)
+    for _ in 0:n { out.push(0) }
+    m.copy_bits($&out) >>>
+    << out
+}
+
+pub fn (m &F32Matrix) to_f32() []f32 {
+    bs := m.bits() >>>
+    $out := []f32{}
+    out.reserve(bs.len)
+    for i in 0:bs.len { out.push(f32(math.float32_from_bits(bs[i]))) }
+    << out
+}
+
+pub fn (m $&F32Matrix) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    for i in 0:m.metal_mat.len { qclose_metal_f32($&m.metal_mat[i]) }
+    for i in 0:m.cuda_buf.len { qclose_cuda_buf($&m.cuda_buf[i]) }
+    for i in 0:m.vk_buf.len { qclose_vk_buf($&m.vk_buf[i]) }
+    m.cpu_bits = []int{}
+    << 0
+}
+
+pub fn (d &Device) matrix_q4_0(rows int, columns int) Q4Matrix {
+    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.backend == BACKEND_METAL {
+        $arr := []metal.Q4Matrix{}
+        arr.push(d.metal_dev[0].matrix_q4_0(rows, columns) >>>)
+        << Q4Matrix{backend: BACKEND_METAL, n_rows: rows, n_cols: columns, metal_mat: arr, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+    }
+    if d.backend == BACKEND_CUDA {
+        bytes := rows * (columns / 32) * 18
+        $arr := []cuda.CudaBuffer{}
+        arr.push(d.cuda_dev[0].alloc_bytes(bytes) >>>)
+        << Q4Matrix{backend: BACKEND_CUDA, n_rows: rows, n_cols: columns, metal_mat: []metal.Q4Matrix{}, cuda_buf: arr, raw: "", closed: false}
+    }
+    << Q4Matrix{backend: d.backend, n_rows: rows, n_cols: columns, metal_mat: []metal.Q4Matrix{}, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+}
+pub fn (m &Q4Matrix) rows() int { << m.n_rows }
+pub fn (m &Q4Matrix) columns() int { << m.n_cols }
+pub fn (m $&Q4Matrix) write_bytes(bytes &string) int {
+    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.backend == BACKEND_METAL {
+        el := $&m.metal_mat[0]
+        << el.write_bytes(bytes) >>>
+    }
+    if m.backend == BACKEND_CUDA {
+        el := $&m.cuda_buf[0]
+        << el.write_bytes(bytes) >>>
+    }
+    m.raw = *bytes + ""
+    << 0
+}
+pub fn (m $&Q4Matrix) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    for i in 0:m.metal_mat.len { qclose_metal_q4($&m.metal_mat[i]) }
+    for i in 0:m.cuda_buf.len { qclose_cuda_buf($&m.cuda_buf[i]) }
+    m.raw = ""
+    << 0
+}
+
+pub fn (d &Device) matrix_q8_0(rows int, columns int) Q8Matrix {
+    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.backend == BACKEND_METAL {
+        $arr := []metal.Q8Matrix{}
+        arr.push(d.metal_dev[0].matrix_q8_0(rows, columns) >>>)
+        << Q8Matrix{backend: BACKEND_METAL, n_rows: rows, n_cols: columns, metal_mat: arr, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+    }
+    if d.backend == BACKEND_CUDA {
+        bytes := rows * (columns / 32) * 34
+        $arr := []cuda.CudaBuffer{}
+        arr.push(d.cuda_dev[0].alloc_bytes(bytes) >>>)
+        << Q8Matrix{backend: BACKEND_CUDA, n_rows: rows, n_cols: columns, metal_mat: []metal.Q8Matrix{}, cuda_buf: arr, raw: "", closed: false}
+    }
+    << Q8Matrix{backend: d.backend, n_rows: rows, n_cols: columns, metal_mat: []metal.Q8Matrix{}, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+}
+pub fn (m &Q8Matrix) rows() int { << m.n_rows }
+pub fn (m &Q8Matrix) columns() int { << m.n_cols }
+pub fn (m $&Q8Matrix) write_bytes(bytes &string) int {
+    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.backend == BACKEND_METAL {
+        el := $&m.metal_mat[0]
+        << el.write_bytes(bytes) >>>
+    }
+    if m.backend == BACKEND_CUDA {
+        el := $&m.cuda_buf[0]
+        << el.write_bytes(bytes) >>>
+    }
+    m.raw = *bytes + ""
+    << 0
+}
+pub fn (m $&Q8Matrix) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    for i in 0:m.metal_mat.len { qclose_metal_q8($&m.metal_mat[i]) }
+    for i in 0:m.cuda_buf.len { qclose_cuda_buf($&m.cuda_buf[i]) }
+    m.raw = ""
+    << 0
+}
+
+pub fn (d &Device) matrix_q4_k(rows int, columns int) Q4KMatrix {
+    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.backend == BACKEND_METAL {
+        $arr := []metal.Q4KMatrix{}
+        arr.push(d.metal_dev[0].matrix_q4_k(rows, columns) >>>)
+        << Q4KMatrix{backend: BACKEND_METAL, n_rows: rows, n_cols: columns, metal_mat: arr, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+    }
+    if d.backend == BACKEND_CUDA {
+        bytes := rows * (columns / 256) * 144
+        $arr := []cuda.CudaBuffer{}
+        arr.push(d.cuda_dev[0].alloc_bytes(bytes) >>>)
+        << Q4KMatrix{backend: BACKEND_CUDA, n_rows: rows, n_cols: columns, metal_mat: []metal.Q4KMatrix{}, cuda_buf: arr, raw: "", closed: false}
+    }
+    << Q4KMatrix{backend: d.backend, n_rows: rows, n_cols: columns, metal_mat: []metal.Q4KMatrix{}, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+}
+pub fn (m &Q4KMatrix) rows() int { << m.n_rows }
+pub fn (m &Q4KMatrix) columns() int { << m.n_cols }
+pub fn (m $&Q4KMatrix) write_bytes(bytes &string) int {
+    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.backend == BACKEND_METAL {
+        el := $&m.metal_mat[0]
+        << el.write_bytes(bytes) >>>
+    }
+    if m.backend == BACKEND_CUDA {
+        el := $&m.cuda_buf[0]
+        << el.write_bytes(bytes) >>>
+    }
+    m.raw = *bytes + ""
+    << 0
+}
+pub fn (m $&Q4KMatrix) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    for i in 0:m.metal_mat.len { qclose_metal_q4k($&m.metal_mat[i]) }
+    for i in 0:m.cuda_buf.len { qclose_cuda_buf($&m.cuda_buf[i]) }
+    m.raw = ""
+    << 0
+}
+
+pub fn (d &Device) matrix_q5_k(rows int, columns int) Q5KMatrix {
+    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.backend == BACKEND_METAL {
+        $arr := []metal.Q5KMatrix{}
+        arr.push(d.metal_dev[0].matrix_q5_k(rows, columns) >>>)
+        << Q5KMatrix{backend: BACKEND_METAL, n_rows: rows, n_cols: columns, metal_mat: arr, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+    }
+    if d.backend == BACKEND_CUDA {
+        bytes := rows * (columns / 256) * 176
+        $arr := []cuda.CudaBuffer{}
+        arr.push(d.cuda_dev[0].alloc_bytes(bytes) >>>)
+        << Q5KMatrix{backend: BACKEND_CUDA, n_rows: rows, n_cols: columns, metal_mat: []metal.Q5KMatrix{}, cuda_buf: arr, raw: "", closed: false}
+    }
+    << Q5KMatrix{backend: d.backend, n_rows: rows, n_cols: columns, metal_mat: []metal.Q5KMatrix{}, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+}
+pub fn (m &Q5KMatrix) rows() int { << m.n_rows }
+pub fn (m &Q5KMatrix) columns() int { << m.n_cols }
+pub fn (m $&Q5KMatrix) write_bytes(bytes &string) int {
+    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.backend == BACKEND_METAL {
+        el := $&m.metal_mat[0]
+        << el.write_bytes(bytes) >>>
+    }
+    if m.backend == BACKEND_CUDA {
+        el := $&m.cuda_buf[0]
+        << el.write_bytes(bytes) >>>
+    }
+    m.raw = *bytes + ""
+    << 0
+}
+pub fn (m $&Q5KMatrix) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    for i in 0:m.metal_mat.len { qclose_metal_q5k($&m.metal_mat[i]) }
+    for i in 0:m.cuda_buf.len { qclose_cuda_buf($&m.cuda_buf[i]) }
+    m.raw = ""
+    << 0
+}
+
+pub fn (d &Device) matrix_q6_k(rows int, columns int) Q6KMatrix {
+    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.backend == BACKEND_METAL {
+        $arr := []metal.Q6KMatrix{}
+        arr.push(d.metal_dev[0].matrix_q6_k(rows, columns) >>>)
+        << Q6KMatrix{backend: BACKEND_METAL, n_rows: rows, n_cols: columns, metal_mat: arr, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+    }
+    if d.backend == BACKEND_CUDA {
+        bytes := rows * (columns / 256) * 210
+        $arr := []cuda.CudaBuffer{}
+        arr.push(d.cuda_dev[0].alloc_bytes(bytes) >>>)
+        << Q6KMatrix{backend: BACKEND_CUDA, n_rows: rows, n_cols: columns, metal_mat: []metal.Q6KMatrix{}, cuda_buf: arr, raw: "", closed: false}
+    }
+    << Q6KMatrix{backend: d.backend, n_rows: rows, n_cols: columns, metal_mat: []metal.Q6KMatrix{}, cuda_buf: []cuda.CudaBuffer{}, raw: "", closed: false}
+}
+pub fn (m &Q6KMatrix) rows() int { << m.n_rows }
+pub fn (m &Q6KMatrix) columns() int { << m.n_cols }
+pub fn (m $&Q6KMatrix) write_bytes(bytes &string) int {
+    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.backend == BACKEND_METAL {
+        el := $&m.metal_mat[0]
+        << el.write_bytes(bytes) >>>
+    }
+    if m.backend == BACKEND_CUDA {
+        el := $&m.cuda_buf[0]
+        << el.write_bytes(bytes) >>>
+    }
+    m.raw = *bytes + ""
+    << 0
+}
+pub fn (m $&Q6KMatrix) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    for i in 0:m.metal_mat.len { qclose_metal_q6k($&m.metal_mat[i]) }
+    for i in 0:m.cuda_buf.len { qclose_cuda_buf($&m.cuda_buf[i]) }
+    m.raw = ""
+    << 0
+}
+
+fn wait_metal(f $&metal.Fence) int {
+    rc := f.wait() >>>
+    qclose_metal_fence(f)
+    << rc
+}
+
+fn check_same_backend(dev &Device, a int, b int) int {
+    if dev.closed { >>> errors.new("gpu: device closed") }
+    if a != dev.backend || b != dev.backend {
+        >>> errors.new("gpu: matrix belongs to a different backend")
+    }
+    << 0
+}
+
+pub fn gemm_f32(dev $&Device, dst $&F32Matrix, a &F32Matrix, b &F32Matrix) int {
+    check_same_backend(dev, dst.backend, a.backend) >>>
+    check_same_backend(dev, dst.backend, b.backend) >>>
+    m := a.n_rows
+    k := a.n_cols
+    n := b.n_cols
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemm_f32(dm, &a.metal_mat[0], &b.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemm_f32(dc, &a.cuda_buf[0], &b.cuda_buf[0], m, n, k) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        vd := $&dev.vk_dev[0]
+        dv := $&dst.vk_buf[0]
+        << vd.gemm_f32(dv, &a.vk_buf[0], &b.vk_buf[0], m, n, k) >>>
+    }
+    cpu_gemm_f32($&dst.cpu_bits, &a.cpu_bits, &b.cpu_bits, m, n, k)
+    << 0
+}
+
+pub fn gemm_f32_nt(dev $&Device, dst $&F32Matrix, a &F32Matrix, b &F32Matrix) int {
+    check_same_backend(dev, dst.backend, a.backend) >>>
+    check_same_backend(dev, dst.backend, b.backend) >>>
+    m := a.n_rows
+    k := a.n_cols
+    n := b.n_rows
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemm_f32_nt(dm, &a.metal_mat[0], &b.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemm_f32_nt(dc, &a.cuda_buf[0], &b.cuda_buf[0], m, n, k) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        vd := $&dev.vk_dev[0]
+        dv := $&dst.vk_buf[0]
+        << vd.gemm_f32_nt(dv, &a.vk_buf[0], &b.vk_buf[0], m, n, k) >>>
+    }
+    cpu_gemm_f32_nt($&dst.cpu_bits, &a.cpu_bits, &b.cpu_bits, m, n, k)
+    << 0
+}
+
+pub fn gemm_f32_tn(dev $&Device, dst $&F32Matrix, a &F32Matrix, b &F32Matrix) int {
+    check_same_backend(dev, dst.backend, a.backend) >>>
+    check_same_backend(dev, dst.backend, b.backend) >>>
+    k := a.n_rows
+    m := a.n_cols
+    n := b.n_cols
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemm_f32_tn(dm, &a.metal_mat[0], &b.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemm_f32_tn(dc, &a.cuda_buf[0], &b.cuda_buf[0], m, n, k) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        vd := $&dev.vk_dev[0]
+        dv := $&dst.vk_buf[0]
+        << vd.gemm_f32_tn(dv, &a.vk_buf[0], &b.vk_buf[0], m, n, k) >>>
+    }
+    cpu_gemm_f32_tn($&dst.cpu_bits, &a.cpu_bits, &b.cpu_bits, m, n, k)
+    << 0
+}
+
+pub fn add_f32(dev $&Device, dst $&F32Matrix, a &F32Matrix, b &F32Matrix) int {
+    check_same_backend(dev, dst.backend, a.backend) >>>
+    check_same_backend(dev, dst.backend, b.backend) >>>
+    n := dst.n_rows * dst.n_cols
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.add_f32(dm, &a.metal_mat[0], &b.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.add_f32(dc, &a.cuda_buf[0], &b.cuda_buf[0], n) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        vd := $&dev.vk_dev[0]
+        dv := $&dst.vk_buf[0]
+        << vd.add_f32(dv, &a.vk_buf[0], &b.vk_buf[0], n) >>>
+    }
+    cpu_add_f32($&dst.cpu_bits, &a.cpu_bits, &b.cpu_bits)
+    << 0
+}
+
+pub fn mul_f32(dev $&Device, dst $&F32Matrix, a &F32Matrix, b &F32Matrix) int {
+    check_same_backend(dev, dst.backend, a.backend) >>>
+    check_same_backend(dev, dst.backend, b.backend) >>>
+    n := dst.n_rows * dst.n_cols
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.mul_f32(dm, &a.metal_mat[0], &b.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.mul_f32(dc, &a.cuda_buf[0], &b.cuda_buf[0], n) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        vd := $&dev.vk_dev[0]
+        dv := $&dst.vk_buf[0]
+        << vd.mul_f32(dv, &a.vk_buf[0], &b.vk_buf[0], n) >>>
+    }
+    cpu_mul_f32($&dst.cpu_bits, &a.cpu_bits, &b.cpu_bits)
+    << 0
+}
+
+pub fn scale_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, alpha f64) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    n := dst.n_rows * dst.n_cols
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.scale_f32(dm, &x.metal_mat[0], alpha) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.scale_f32(dc, &x.cuda_buf[0], n, alpha) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        vd := $&dev.vk_dev[0]
+        dv := $&dst.vk_buf[0]
+        << vd.scale_f32(dv, &x.vk_buf[0], n, alpha) >>>
+    }
+    cpu_scale_f32($&dst.cpu_bits, &x.cpu_bits, alpha)
+    << 0
+}
+
+pub fn rmsnorm_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, weight &F32Matrix, eps f64) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    check_same_backend(dev, dst.backend, weight.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.rmsnorm_f32(dm, &x.metal_mat[0], &weight.metal_mat[0], eps) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.rmsnorm_f32(dc, &x.cuda_buf[0], &weight.cuda_buf[0], x.n_rows, x.n_cols, eps) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        wb := weight.bits() >>>
+        $db := dst.bits() >>>
+        cpu_rmsnorm_f32($&db, &xb, &wb, x.n_rows, x.n_cols, eps)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_rmsnorm_f32($&dst.cpu_bits, &x.cpu_bits, &weight.cpu_bits, x.n_rows, x.n_cols, eps)
+    << 0
+}
+
+pub fn softmax_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.softmax_f32(dm, &x.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.softmax_f32(dc, &x.cuda_buf[0], x.n_rows, x.n_cols) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        $db := dst.bits() >>>
+        cpu_softmax_f32($&db, &xb, x.n_rows, x.n_cols)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_softmax_f32($&dst.cpu_bits, &x.cpu_bits, x.n_rows, x.n_cols)
+    << 0
+}
+
+pub fn swiglu_f32(dev $&Device, dst $&F32Matrix, gate &F32Matrix, up &F32Matrix) int {
+    check_same_backend(dev, dst.backend, gate.backend) >>>
+    check_same_backend(dev, dst.backend, up.backend) >>>
+    n := dst.n_rows * dst.n_cols
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.swiglu_f32(dm, &gate.metal_mat[0], &up.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.swiglu_f32(dc, &gate.cuda_buf[0], &up.cuda_buf[0], n) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        gb := gate.bits() >>>
+        ub := up.bits() >>>
+        $db := dst.bits() >>>
+        cpu_swiglu_f32($&db, &gb, &ub)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_swiglu_f32($&dst.cpu_bits, &gate.cpu_bits, &up.cpu_bits)
+    << 0
+}
+
+pub fn rope_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, pos_offset int, head_dim int, theta f64) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.rope_f32(dm, &x.metal_mat[0], pos_offset, head_dim, theta) >>>
+        << wait_metal($&f) >>>
+    }
+    if head_dim <= 0 { >>> errors.new("gpu: invalid head_dim") }
+    n_heads := x.n_cols / head_dim
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.rope_f32(dc, &x.cuda_buf[0], x.n_rows, n_heads, head_dim, pos_offset, theta) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        $db := dst.bits() >>>
+        cpu_rope_f32($&db, &xb, x.n_rows, n_heads, head_dim, pos_offset, theta)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_rope_f32($&dst.cpu_bits, &x.cpu_bits, x.n_rows, n_heads, head_dim, pos_offset, theta)
+    << 0
+}
+
+pub fn gemv_q4_0_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, w &Q4Matrix) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    check_same_backend(dev, dst.backend, w.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemv_q4_0_f32(dm, &x.metal_mat[0], &w.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemv_q4_0_f32(dc, &x.cuda_buf[0], &w.cuda_buf[0], w.n_rows, w.n_cols, x.n_rows) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        $db := dst.bits() >>>
+        cpu_gemv_q4_0_f32($&db, &xb, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_gemv_q4_0_f32($&dst.cpu_bits, &x.cpu_bits, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+    << 0
+}
+
+pub fn gemv_q8_0_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, w &Q8Matrix) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    check_same_backend(dev, dst.backend, w.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemv_q8_0_f32(dm, &x.metal_mat[0], &w.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemv_q8_0_f32(dc, &x.cuda_buf[0], &w.cuda_buf[0], w.n_rows, w.n_cols, x.n_rows) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        $db := dst.bits() >>>
+        cpu_gemv_q8_0_f32($&db, &xb, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_gemv_q8_0_f32($&dst.cpu_bits, &x.cpu_bits, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+    << 0
+}
+
+pub fn gemv_q4_k_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, w &Q4KMatrix) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    check_same_backend(dev, dst.backend, w.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemv_q4_k_f32(dm, &x.metal_mat[0], &w.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemv_q4_k_f32(dc, &x.cuda_buf[0], &w.cuda_buf[0], w.n_rows, w.n_cols, x.n_rows) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        $db := dst.bits() >>>
+        cpu_gemv_q4_k_f32($&db, &xb, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_gemv_q4_k_f32($&dst.cpu_bits, &x.cpu_bits, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+    << 0
+}
+
+pub fn gemv_q5_k_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, w &Q5KMatrix) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    check_same_backend(dev, dst.backend, w.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemv_q5_k_f32(dm, &x.metal_mat[0], &w.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemv_q5_k_f32(dc, &x.cuda_buf[0], &w.cuda_buf[0], w.n_rows, w.n_cols, x.n_rows) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        $db := dst.bits() >>>
+        cpu_gemv_q5_k_f32($&db, &xb, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_gemv_q5_k_f32($&dst.cpu_bits, &x.cpu_bits, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+    << 0
+}
+
+pub fn gemv_q6_k_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, w &Q6KMatrix) int {
+    check_same_backend(dev, dst.backend, x.backend) >>>
+    check_same_backend(dev, dst.backend, w.backend) >>>
+    if dev.backend == BACKEND_METAL {
+        dm := $&dst.metal_mat[0]
+        $f := metal.gemv_q6_k_f32(dm, &x.metal_mat[0], &w.metal_mat[0]) >>>
+        << wait_metal($&f) >>>
+    }
+    if dev.backend == BACKEND_CUDA {
+        cd := $&dev.cuda_dev[0]
+        dc := $&dst.cuda_buf[0]
+        << cd.gemv_q6_k_f32(dc, &x.cuda_buf[0], &w.cuda_buf[0], w.n_rows, w.n_cols, x.n_rows) >>>
+    }
+    if dev.backend == BACKEND_VULKAN {
+        xb := x.bits() >>>
+        $db := dst.bits() >>>
+        cpu_gemv_q6_k_f32($&db, &xb, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+        << dst.write_bits(&db) >>>
+    }
+    cpu_gemv_q6_k_f32($&dst.cpu_bits, &x.cpu_bits, &w.raw, w.n_rows, w.n_cols, x.n_rows)
+    << 0
+}

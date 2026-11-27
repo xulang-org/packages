@@ -1,0 +1,518 @@
+@"github.com/xulang-org/packages/vulkan_native"
+
+// Pure-Xu SPIR-V 1.0 binary compute shader emitter and validator.
+// Emits standard Vulkan compute shaders strictly following SPIR-V Section 2.4
+// logical module layout (header -> capabilities -> memory model -> entry point ->
+// execution mode -> decorations -> types/constants/variables -> functions).
+
+const SPV_MAGIC = 0x07230203
+const SPV_VERSION_1_0 = 0x00010000
+const SPV_GENERATOR_XU = 0x00585500
+
+const OP_MEMORY_MODEL = 14
+const OP_ENTRY_POINT = 15
+const OP_EXECUTION_MODE = 16
+const OP_CAPABILITY = 17
+const OP_TYPE_VOID = 19
+const OP_TYPE_BOOL = 20
+const OP_TYPE_INT = 21
+const OP_TYPE_FLOAT = 22
+const OP_TYPE_VECTOR = 23
+const OP_TYPE_RUNTIME_ARRAY = 29
+const OP_TYPE_STRUCT = 30
+const OP_TYPE_POINTER = 32
+const OP_TYPE_FUNCTION = 33
+const OP_CONSTANT = 43
+const OP_FUNCTION = 54
+const OP_FUNCTION_END = 56
+const OP_VARIABLE = 59
+const OP_LOAD = 61
+const OP_STORE = 62
+const OP_ACCESS_CHAIN = 65
+const OP_DECORATE = 71
+const OP_MEMBER_DECORATE = 72
+const OP_COMPOSITE_EXTRACT = 81
+const OP_BITCAST = 124
+const OP_IADD = 128
+const OP_FADD = 129
+const OP_IMUL = 132
+const OP_FMUL = 133
+const OP_ULESS_THAN = 176
+const OP_LOOP_MERGE = 246
+const OP_SELECTION_MERGE = 247
+const OP_LABEL = 248
+const OP_BRANCH = 249
+const OP_BRANCH_CONDITIONAL = 250
+const OP_RETURN = 253
+
+const CAP_SHADER = 1
+const ADDR_LOGICAL = 0
+const MEM_GLSL450 = 1
+const EXEC_GLCOMPUTE = 5
+const MODE_LOCAL_SIZE = 17
+
+const DEC_BLOCK = 2
+const DEC_BUFFER_BLOCK = 3
+const DEC_ARRAY_STRIDE = 6
+const DEC_BUILTIN = 11
+const DEC_BINDING = 33
+const DEC_DESCRIPTOR_SET = 34
+const DEC_OFFSET = 35
+const BUILTIN_GLOBAL_INVOCATION_ID = 28
+
+const SC_INPUT = 1
+const SC_UNIFORM = 2
+const SC_FUNCTION = 7
+const SC_PUSH_CONSTANT = 9
+
+pub struct SpirvBuilder {
+    pub cap []int
+    pub ep []int
+    pub exec []int
+    pub dec []int
+    pub types []int
+    pub funcs []int
+    pub next_id int
+}
+
+pub fn new_builder() SpirvBuilder {
+    << SpirvBuilder{
+        cap: []int{},
+        ep: []int{},
+        exec: []int{},
+        dec: []int{},
+        types: []int{},
+        funcs: []int{},
+        next_id: 1
+    }
+}
+
+fn (b $&SpirvBuilder) fresh() int {
+    id := b.next_id
+    b.next_id += 1
+    << id
+}
+
+fn push_op1(out $&[]int, op int, a int) {
+    out.push((2 << 16) | op)
+    out.push(a)
+}
+
+fn push_op2(out $&[]int, op int, a int, b int) {
+    out.push((3 << 16) | op)
+    out.push(a)
+    out.push(b)
+}
+
+fn push_op3(out $&[]int, op int, a int, b int, c int) {
+    out.push((4 << 16) | op)
+    out.push(a)
+    out.push(b)
+    out.push(c)
+}
+
+fn push_op4(out $&[]int, op int, a int, b int, c int, d int) {
+    out.push((5 << 16) | op)
+    out.push(a)
+    out.push(b)
+    out.push(c)
+    out.push(d)
+}
+
+fn push_op5(out $&[]int, op int, a int, b int, c int, d int, e int) {
+    out.push((6 << 16) | op)
+    out.push(a)
+    out.push(b)
+    out.push(c)
+    out.push(d)
+    out.push(e)
+}
+
+fn (b $&SpirvBuilder) build() []int {
+    $out := []int{}
+    out.push(SPV_MAGIC)
+    out.push(SPV_VERSION_1_0)
+    out.push(SPV_GENERATOR_XU)
+    out.push(b.next_id)
+    out.push(0)
+    for i in 0:b.cap.len { out.push(b.cap[i]) }
+    push_op2($&out, OP_MEMORY_MODEL, ADDR_LOGICAL, MEM_GLSL450)
+    for i in 0:b.ep.len { out.push(b.ep[i]) }
+    for i in 0:b.exec.len { out.push(b.exec[i]) }
+    for i in 0:b.dec.len { out.push(b.dec[i]) }
+    for i in 0:b.types.len { out.push(b.types[i]) }
+    for i in 0:b.funcs.len { out.push(b.funcs[i]) }
+    << out
+}
+
+pub fn validate_spirv(words &[]int) bool {
+    if words.len < 5 { << false }
+    if words[0] != SPV_MAGIC { << false }
+    if words[1] == 0 { << false }
+    bound := words[3]
+    if bound <= 1 { << false }
+    $pos := 5
+    $has_cap := false
+    $has_mem := false
+    $has_ep := false
+    $has_fn := false
+    $has_fn_end := false
+    while pos < words.len {
+        w := words[pos] & 0xFFFFFFFF
+        wc := (w >> 16) & 0xFFFF
+        op := w & 0xFFFF
+        if wc <= 0 || pos + wc > words.len { << false }
+        if op == OP_CAPABILITY { has_cap = true }
+        if op == OP_MEMORY_MODEL { has_mem = true }
+        if op == OP_ENTRY_POINT { has_ep = true }
+        if op == OP_FUNCTION { has_fn = true }
+        if op == OP_FUNCTION_END { has_fn_end = true }
+        pos += wc
+    }
+    << has_cap && has_mem && has_ep && has_fn && has_fn_end
+}
+
+struct CommonIds {
+    void_ty int
+    bool_ty int
+    u32_ty int
+    f32_ty int
+    v3u32_ty int
+    ptr_input_v3u32 int
+    ptr_uniform_f32 int
+    ptr_push_u32 int
+    ptr_func_u32 int
+    ptr_func_f32 int
+    c_u32_0 int
+    c_u32_1 int
+    c_u32_2 int
+    c_u32_3 int
+    c_f32_0 int
+    var_gid int
+    var_push int
+    var_bufs []int
+    fn_main int
+}
+
+fn emit_common_preamble(b $&SpirvBuilder, num_buffers int, lx int, ly int, lz int) CommonIds {
+    push_op1($&b.cap, OP_CAPABILITY, CAP_SHADER)
+
+    void_ty := b.fresh()
+    bool_ty := b.fresh()
+    u32_ty := b.fresh()
+    f32_ty := b.fresh()
+    v3u32_ty := b.fresh()
+    rt_f32_ty := b.fresh()
+    ssbo_struct := b.fresh()
+    push_struct := b.fresh()
+    fn_void_ty := b.fresh()
+
+    ptr_input_v3u32 := b.fresh()
+    ptr_uniform_ssbo := b.fresh()
+    ptr_uniform_f32 := b.fresh()
+    ptr_push_struct := b.fresh()
+    ptr_push_u32 := b.fresh()
+    ptr_func_u32 := b.fresh()
+    ptr_func_f32 := b.fresh()
+
+    c_u32_0 := b.fresh()
+    c_u32_1 := b.fresh()
+    c_u32_2 := b.fresh()
+    c_u32_3 := b.fresh()
+    c_f32_0 := b.fresh()
+
+    var_gid := b.fresh()
+    var_push := b.fresh()
+    $var_bufs := []int{}
+    for _ in 0:num_buffers { var_bufs.push(b.fresh()) }
+    fn_main := b.fresh()
+
+    // EntryPoint(GLCompute=5, fn_main, "main", var_gid) — SPIR-V 1.0 interface IDs (Input/Output only).
+    b.ep.push((6 << 16) | OP_ENTRY_POINT)
+    b.ep.push(EXEC_GLCOMPUTE)
+    b.ep.push(fn_main)
+    b.ep.push(0x6E69616D) // "main"
+    b.ep.push(0)
+    b.ep.push(var_gid)
+
+    push_op5($&b.exec, OP_EXECUTION_MODE, fn_main, MODE_LOCAL_SIZE, lx, ly, lz)
+
+    // Annotations
+    push_op3($&b.dec, OP_DECORATE, var_gid, DEC_BUILTIN, BUILTIN_GLOBAL_INVOCATION_ID)
+    push_op3($&b.dec, OP_DECORATE, rt_f32_ty, DEC_ARRAY_STRIDE, 4)
+    push_op2($&b.dec, OP_DECORATE, ssbo_struct, DEC_BUFFER_BLOCK)
+    push_op4($&b.dec, OP_MEMBER_DECORATE, ssbo_struct, 0, DEC_OFFSET, 0)
+    for i in 0:num_buffers {
+        push_op3($&b.dec, OP_DECORATE, var_bufs[i], DEC_DESCRIPTOR_SET, 0)
+        push_op3($&b.dec, OP_DECORATE, var_bufs[i], DEC_BINDING, i)
+    }
+    push_op2($&b.dec, OP_DECORATE, push_struct, DEC_BLOCK)
+    push_op4($&b.dec, OP_MEMBER_DECORATE, push_struct, 0, DEC_OFFSET, 0)
+    push_op4($&b.dec, OP_MEMBER_DECORATE, push_struct, 1, DEC_OFFSET, 4)
+    push_op4($&b.dec, OP_MEMBER_DECORATE, push_struct, 2, DEC_OFFSET, 8)
+    push_op4($&b.dec, OP_MEMBER_DECORATE, push_struct, 3, DEC_OFFSET, 12)
+
+    // Types
+    push_op1($&b.types, OP_TYPE_VOID, void_ty)
+    push_op1($&b.types, OP_TYPE_BOOL, bool_ty)
+    push_op3($&b.types, OP_TYPE_INT, u32_ty, 32, 0)
+    push_op2($&b.types, OP_TYPE_FLOAT, f32_ty, 32)
+    push_op3($&b.types, OP_TYPE_VECTOR, v3u32_ty, u32_ty, 3)
+    push_op2($&b.types, OP_TYPE_RUNTIME_ARRAY, rt_f32_ty, f32_ty)
+    push_op2($&b.types, OP_TYPE_STRUCT, ssbo_struct, rt_f32_ty)
+    push_op5($&b.types, OP_TYPE_STRUCT, push_struct, u32_ty, u32_ty, u32_ty, u32_ty)
+    push_op2($&b.types, OP_TYPE_FUNCTION, fn_void_ty, void_ty)
+
+    push_op3($&b.types, OP_TYPE_POINTER, ptr_input_v3u32, SC_INPUT, v3u32_ty)
+    push_op3($&b.types, OP_TYPE_POINTER, ptr_uniform_ssbo, SC_UNIFORM, ssbo_struct)
+    push_op3($&b.types, OP_TYPE_POINTER, ptr_uniform_f32, SC_UNIFORM, f32_ty)
+    push_op3($&b.types, OP_TYPE_POINTER, ptr_push_struct, SC_PUSH_CONSTANT, push_struct)
+    push_op3($&b.types, OP_TYPE_POINTER, ptr_push_u32, SC_PUSH_CONSTANT, u32_ty)
+    push_op3($&b.types, OP_TYPE_POINTER, ptr_func_u32, SC_FUNCTION, u32_ty)
+    push_op3($&b.types, OP_TYPE_POINTER, ptr_func_f32, SC_FUNCTION, f32_ty)
+
+    // Constants
+    push_op3($&b.types, OP_CONSTANT, u32_ty, c_u32_0, 0)
+    push_op3($&b.types, OP_CONSTANT, u32_ty, c_u32_1, 1)
+    push_op3($&b.types, OP_CONSTANT, u32_ty, c_u32_2, 2)
+    push_op3($&b.types, OP_CONSTANT, u32_ty, c_u32_3, 3)
+    push_op3($&b.types, OP_CONSTANT, f32_ty, c_f32_0, 0)
+
+    // Global Variables
+    push_op3($&b.types, OP_VARIABLE, ptr_input_v3u32, var_gid, SC_INPUT)
+    push_op3($&b.types, OP_VARIABLE, ptr_push_struct, var_push, SC_PUSH_CONSTANT)
+    for i in 0:num_buffers {
+        push_op3($&b.types, OP_VARIABLE, ptr_uniform_ssbo, var_bufs[i], SC_UNIFORM)
+    }
+
+    // Function header
+    push_op4($&b.funcs, OP_FUNCTION, void_ty, fn_main, 0, fn_void_ty)
+
+    << CommonIds{
+        void_ty: void_ty,
+        bool_ty: bool_ty,
+        u32_ty: u32_ty,
+        f32_ty: f32_ty,
+        v3u32_ty: v3u32_ty,
+        ptr_input_v3u32: ptr_input_v3u32,
+        ptr_uniform_f32: ptr_uniform_f32,
+        ptr_push_u32: ptr_push_u32,
+        ptr_func_u32: ptr_func_u32,
+        ptr_func_f32: ptr_func_f32,
+        c_u32_0: c_u32_0,
+        c_u32_1: c_u32_1,
+        c_u32_2: c_u32_2,
+        c_u32_3: c_u32_3,
+        c_f32_0: c_f32_0,
+        var_gid: var_gid,
+        var_push: var_push,
+        var_bufs: var_bufs,
+        fn_main: fn_main
+    }
+}
+
+fn load_push_u32(b $&SpirvBuilder, id &CommonIds, field_const int) int {
+    p := b.fresh()
+    v := b.fresh()
+    push_op4($&b.funcs, OP_ACCESS_CHAIN, id.ptr_push_u32, p, id.var_push, field_const)
+    push_op3($&b.funcs, OP_LOAD, id.u32_ty, v, p)
+    << v
+}
+
+fn load_ssbo_f32(b $&SpirvBuilder, id &CommonIds, buf_idx int, elem_idx int) int {
+    p := b.fresh()
+    v := b.fresh()
+    push_op5($&b.funcs, OP_ACCESS_CHAIN, id.ptr_uniform_f32, p, id.var_bufs[buf_idx], id.c_u32_0, elem_idx)
+    push_op3($&b.funcs, OP_LOAD, id.f32_ty, v, p)
+    << v
+}
+
+fn store_ssbo_f32(b $&SpirvBuilder, id &CommonIds, buf_idx int, elem_idx int, val int) {
+    p := b.fresh()
+    push_op5($&b.funcs, OP_ACCESS_CHAIN, id.ptr_uniform_f32, p, id.var_bufs[buf_idx], id.c_u32_0, elem_idx)
+    push_op2($&b.funcs, OP_STORE, p, val)
+}
+
+fn emit_binary_ew_f32(is_mul bool) []int {
+    // binding 0: dst, binding 1: a, binding 2: b; push[0] = n
+    $b := new_builder()
+    id := emit_common_preamble($&b, 3, 64, 1, 1)
+    lbl_entry := b.fresh()
+    lbl_then := b.fresh()
+    lbl_end := b.fresh()
+
+    push_op1($&b.funcs, OP_LABEL, lbl_entry)
+    gid_vec := b.fresh()
+    gid_x := b.fresh()
+    push_op3($&b.funcs, OP_LOAD, id.v3u32_ty, gid_vec, id.var_gid)
+    push_op4($&b.funcs, OP_COMPOSITE_EXTRACT, id.u32_ty, gid_x, gid_vec, 0)
+    n := load_push_u32($&b, &id, id.c_u32_0)
+    cond := b.fresh()
+    push_op4($&b.funcs, OP_ULESS_THAN, id.bool_ty, cond, gid_x, n)
+    push_op2($&b.funcs, OP_SELECTION_MERGE, lbl_end, 0)
+    push_op3($&b.funcs, OP_BRANCH_CONDITIONAL, cond, lbl_then, lbl_end)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_then)
+    va := load_ssbo_f32($&b, &id, 1, gid_x)
+    vb := load_ssbo_f32($&b, &id, 2, gid_x)
+    res := b.fresh()
+    $arith := OP_FADD
+    if is_mul { arith = OP_FMUL }
+    push_op4($&b.funcs, arith, id.f32_ty, res, va, vb)
+    store_ssbo_f32($&b, &id, 0, gid_x, res)
+    push_op1($&b.funcs, OP_BRANCH, lbl_end)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_end)
+    b.funcs.push((1 << 16) | OP_RETURN)
+    b.funcs.push((1 << 16) | OP_FUNCTION_END)
+    << b.build()
+}
+
+pub fn spv_add_f32() []int { << emit_binary_ew_f32(false) }
+pub fn spv_mul_f32() []int { << emit_binary_ew_f32(true) }
+
+pub fn spv_scale_f32() []int {
+    // binding 0: dst, binding 1: x; push[0] = n, push[1] = alpha_f32_bits
+    $b := new_builder()
+    id := emit_common_preamble($&b, 2, 64, 1, 1)
+    lbl_entry := b.fresh()
+    lbl_then := b.fresh()
+    lbl_end := b.fresh()
+
+    push_op1($&b.funcs, OP_LABEL, lbl_entry)
+    gid_vec := b.fresh()
+    gid_x := b.fresh()
+    push_op3($&b.funcs, OP_LOAD, id.v3u32_ty, gid_vec, id.var_gid)
+    push_op4($&b.funcs, OP_COMPOSITE_EXTRACT, id.u32_ty, gid_x, gid_vec, 0)
+    n := load_push_u32($&b, &id, id.c_u32_0)
+    alpha_bits := load_push_u32($&b, &id, id.c_u32_1)
+    alpha := b.fresh()
+    push_op3($&b.funcs, OP_BITCAST, id.f32_ty, alpha, alpha_bits)
+    cond := b.fresh()
+    push_op4($&b.funcs, OP_ULESS_THAN, id.bool_ty, cond, gid_x, n)
+    push_op2($&b.funcs, OP_SELECTION_MERGE, lbl_end, 0)
+    push_op3($&b.funcs, OP_BRANCH_CONDITIONAL, cond, lbl_then, lbl_end)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_then)
+    vx := load_ssbo_f32($&b, &id, 1, gid_x)
+    res := b.fresh()
+    push_op4($&b.funcs, OP_FMUL, id.f32_ty, res, vx, alpha)
+    store_ssbo_f32($&b, &id, 0, gid_x, res)
+    push_op1($&b.funcs, OP_BRANCH, lbl_end)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_end)
+    b.funcs.push((1 << 16) | OP_RETURN)
+    b.funcs.push((1 << 16) | OP_FUNCTION_END)
+    << b.build()
+}
+
+// mode 0: dst[r, c] = sum_p a[r*K + p] * b[p*N + c]
+// mode 1 (NT): dst[r, c] = sum_p a[r*K + p] * b[c*K + p]
+// mode 2 (TN): dst[r, c] = sum_p a[p*M + r] * b[p*N + c]
+pub fn spv_gemm_f32(mode int) []int {
+    // binding 0: dst, binding 1: a, binding 2: b; push[0]=M, push[1]=N, push[2]=K, push[3]=mode
+    $b := new_builder()
+    id := emit_common_preamble($&b, 3, 16, 16, 1)
+    lbl_entry := b.fresh()
+    lbl_inbounds := b.fresh()
+    lbl_loop_hdr := b.fresh()
+    lbl_loop_body := b.fresh()
+    lbl_loop_cont := b.fresh()
+    lbl_loop_end := b.fresh()
+    lbl_end := b.fresh()
+
+    var_p := b.fresh()
+    var_acc := b.fresh()
+
+    push_op1($&b.funcs, OP_LABEL, lbl_entry)
+    // Function-scope variables MUST precede other instructions in entry block.
+    push_op3($&b.funcs, OP_VARIABLE, id.ptr_func_u32, var_p, SC_FUNCTION)
+    push_op3($&b.funcs, OP_VARIABLE, id.ptr_func_f32, var_acc, SC_FUNCTION)
+
+    gid_vec := b.fresh()
+    col := b.fresh()
+    row := b.fresh()
+    push_op3($&b.funcs, OP_LOAD, id.v3u32_ty, gid_vec, id.var_gid)
+    push_op4($&b.funcs, OP_COMPOSITE_EXTRACT, id.u32_ty, col, gid_vec, 0)
+    push_op4($&b.funcs, OP_COMPOSITE_EXTRACT, id.u32_ty, row, gid_vec, 1)
+
+    m_dim := load_push_u32($&b, &id, id.c_u32_0)
+    n_dim := load_push_u32($&b, &id, id.c_u32_1)
+    k_dim := load_push_u32($&b, &id, id.c_u32_2)
+
+    cm := b.fresh()
+    cn := b.fresh()
+    cond := b.fresh()
+    push_op4($&b.funcs, OP_ULESS_THAN, id.bool_ty, cm, row, m_dim)
+    push_op4($&b.funcs, OP_ULESS_THAN, id.bool_ty, cn, col, n_dim)
+    push_op4($&b.funcs, 167, id.bool_ty, cond, cm, cn) // OpLogicalAnd = 167
+    push_op2($&b.funcs, OP_SELECTION_MERGE, lbl_end, 0)
+    push_op3($&b.funcs, OP_BRANCH_CONDITIONAL, cond, lbl_inbounds, lbl_end)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_inbounds)
+    push_op2($&b.funcs, OP_STORE, var_p, id.c_u32_0)
+    push_op2($&b.funcs, OP_STORE, var_acc, id.c_f32_0)
+    push_op1($&b.funcs, OP_BRANCH, lbl_loop_hdr)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_loop_hdr)
+    p_cur := b.fresh()
+    push_op3($&b.funcs, OP_LOAD, id.u32_ty, p_cur, var_p)
+    loop_cond := b.fresh()
+    push_op4($&b.funcs, OP_ULESS_THAN, id.bool_ty, loop_cond, p_cur, k_dim)
+    push_op3($&b.funcs, OP_LOOP_MERGE, lbl_loop_end, lbl_loop_cont, 0)
+    push_op3($&b.funcs, OP_BRANCH_CONDITIONAL, loop_cond, lbl_loop_body, lbl_loop_end)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_loop_body)
+    // Index A: mode==2 ? (p_cur*M + row) : (row*K + p_cur)
+    $a_idx := b.fresh()
+    a_mul := b.fresh()
+    if mode == 2 {
+        push_op4($&b.funcs, OP_IMUL, id.u32_ty, a_mul, p_cur, m_dim)
+        push_op4($&b.funcs, OP_IADD, id.u32_ty, a_idx, a_mul, row)
+    } else {
+        push_op4($&b.funcs, OP_IMUL, id.u32_ty, a_mul, row, k_dim)
+        push_op4($&b.funcs, OP_IADD, id.u32_ty, a_idx, a_mul, p_cur)
+    }
+    // Index B: mode==1 ? (col*K + p_cur) : (p_cur*N + col)
+    $b_idx := b.fresh()
+    b_mul := b.fresh()
+    if mode == 1 {
+        push_op4($&b.funcs, OP_IMUL, id.u32_ty, b_mul, col, k_dim)
+        push_op4($&b.funcs, OP_IADD, id.u32_ty, b_idx, b_mul, p_cur)
+    } else {
+        push_op4($&b.funcs, OP_IMUL, id.u32_ty, b_mul, p_cur, n_dim)
+        push_op4($&b.funcs, OP_IADD, id.u32_ty, b_idx, b_mul, col)
+    }
+
+    va := load_ssbo_f32($&b, &id, 1, a_idx)
+    vb := load_ssbo_f32($&b, &id, 2, b_idx)
+    prod := b.fresh()
+    acc_old := b.fresh()
+    acc_new := b.fresh()
+    push_op4($&b.funcs, OP_FMUL, id.f32_ty, prod, va, vb)
+    push_op3($&b.funcs, OP_LOAD, id.f32_ty, acc_old, var_acc)
+    push_op4($&b.funcs, OP_FADD, id.f32_ty, acc_new, acc_old, prod)
+    push_op2($&b.funcs, OP_STORE, var_acc, acc_new)
+    push_op1($&b.funcs, OP_BRANCH, lbl_loop_cont)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_loop_cont)
+    p_next := b.fresh()
+    push_op4($&b.funcs, OP_IADD, id.u32_ty, p_next, p_cur, id.c_u32_1)
+    push_op2($&b.funcs, OP_STORE, var_p, p_next)
+    push_op1($&b.funcs, OP_BRANCH, lbl_loop_hdr)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_loop_end)
+    acc_fin := b.fresh()
+    push_op3($&b.funcs, OP_LOAD, id.f32_ty, acc_fin, var_acc)
+    dst_mul := b.fresh()
+    dst_idx := b.fresh()
+    push_op4($&b.funcs, OP_IMUL, id.u32_ty, dst_mul, row, n_dim)
+    push_op4($&b.funcs, OP_IADD, id.u32_ty, dst_idx, dst_mul, col)
+    store_ssbo_f32($&b, &id, 0, dst_idx, acc_fin)
+    push_op1($&b.funcs, OP_BRANCH, lbl_end)
+
+    push_op1($&b.funcs, OP_LABEL, lbl_end)
+    b.funcs.push((1 << 16) | OP_RETURN)
+    b.funcs.push((1 << 16) | OP_FUNCTION_END)
+    << b.build()
+}

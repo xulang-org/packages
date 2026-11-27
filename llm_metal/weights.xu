@@ -1,0 +1,905 @@
+@"github.com/xulang-org/packages/llm_metal"
+
+#encoding/json
+#errors
+#math
+#os
+#strconv
+#tensor
+metal #"github.com/xulang-org/packages/metal"
+
+pub const WT_F32 = 0
+pub const WT_Q4_0 = 2
+pub const WT_Q5_0 = 6
+pub const WT_Q8_0 = 8
+pub const WT_Q4_K = 12
+pub const WT_Q5_K = 13
+pub const WT_Q6_K = 14
+
+pub struct MetalConfig {
+    pub arch string
+    pub dim int
+    pub hidden_dim int
+    pub n_layers int
+    pub n_heads int
+    pub n_kv_heads int
+    pub vocab_size int
+    pub max_seq_len int
+    pub head_dim int
+    pub kv_dim int
+    pub rope_theta f64
+    pub rope_interleaved bool
+    pub eps f64
+    pub tied_output bool
+    pub bos_id int
+    pub eos_id int
+}
+
+pub struct GpuWeightRef {
+    pub kind int
+    pub idx int
+    pub rows int
+    pub cols int
+}
+
+pub struct MetalLayerWeights {
+    pub attn_norm_idx int
+    pub wq GpuWeightRef
+    pub wk GpuWeightRef
+    pub wv GpuWeightRef
+    pub wo GpuWeightRef
+    pub bq_idx int
+    pub bk_idx int
+    pub bv_idx int
+    pub q_norm_idx int
+    pub k_norm_idx int
+    pub ffn_norm_idx int
+    pub wg GpuWeightRef
+    pub wu GpuWeightRef
+    pub wd GpuWeightRef
+}
+
+pub struct MetalModel {
+    pub dev metal.Device
+    pub cfg MetalConfig
+    pub vocab []string
+    pub embed_table metal.F32Matrix
+    pub norm_idx int
+    pub lm_head GpuWeightRef
+    pub layers []MetalLayerWeights
+    pub f32_mats []metal.F32Matrix
+    pub q4_mats []metal.Q4Matrix
+    pub q5_mats []metal.Q5Matrix
+    pub q8_mats []metal.Q8Matrix
+    pub q4k_mats []metal.Q4KMatrix
+    pub q5k_mats []metal.Q5KMatrix
+    pub q6k_mats []metal.Q6KMatrix
+    pub closed bool
+}
+
+struct GgufTensorMeta {
+    name string
+    dims []int
+    gtype int
+    n_elems int
+    offset int
+}
+
+struct StTensorMeta {
+    dtype string
+    shape []int
+    start int
+    end int
+}
+
+fn qclose_f32(x $&metal.F32Matrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_f16(x $&metal.F16Matrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_q4(x $&metal.Q4Matrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_q5(x $&metal.Q5Matrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_q8(x $&metal.Q8Matrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_q4k(x $&metal.Q4KMatrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_q5k(x $&metal.Q5KMatrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_q6k(x $&metal.Q6KMatrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn qclose_dev(d $&metal.Device) {
+    _ := d.close() >>> (_) { << }
+}
+fn qclose_fence(f $&metal.Fence) {
+    _ := f.close() >>> (_) { << }
+}
+fn qclose_model(m $&MetalModel) {
+    _ := m.close()
+}
+
+fn read_u16_le(s &string, off int) int {
+    << (s[off] & 255) | ((s[off + 1] & 255) << 8)
+}
+
+fn read_u32_le(s &string, off int) int {
+    << (s[off] & 255) | ((s[off + 1] & 255) << 8) | ((s[off + 2] & 255) << 16) | ((s[off + 3] & 255) << 24)
+}
+
+fn read_i32_le(s &string, off int) int {
+    u := read_u32_le(s, off)
+    if (u & 2147483648) != 0 {
+        << u - 4294967296
+    }
+    << u
+}
+
+fn read_u64_le(s &string, off int) int {
+    lo := read_u32_le(s, off)
+    hi := read_u32_le(s, off + 4)
+    << lo | (hi << 32)
+}
+
+fn gguf_read_str(raw &string, pos $&int) string {
+    if *pos + 8 > raw.len { >>> errors.new("llm_metal.gguf: truncated string len") }
+    slen := read_u64_le(raw, *pos)
+    *pos += 8
+    if slen < 0 || slen > raw.len - *pos { >>> errors.new("llm_metal.gguf: truncated string") }
+    out := (*raw)[(*pos):(*pos + slen)]
+    *pos += slen
+    << out
+}
+
+fn gguf_scalar_bytes(vtype int) int {
+    if vtype == 0 || vtype == 1 || vtype == 7 { << 1 }
+    if vtype == 2 || vtype == 3 { << 2 }
+    if vtype == 4 || vtype == 5 || vtype == 6 { << 4 }
+    if vtype == 10 || vtype == 11 || vtype == 12 { << 8 }
+    << 0
+}
+
+fn gguf_read_int(raw &string, pos $&int, vtype int) int {
+    sb := gguf_scalar_bytes(vtype)
+    if sb <= 0 || *pos + sb > raw.len { >>> errors.new("llm_metal.gguf: truncated int kv") }
+    $v := 0
+    if vtype == 0 || vtype == 7 { v = raw[*pos] & 255 }
+    else if vtype == 1 {
+        b := raw[*pos] & 255
+        v = b
+        if b >= 128 { v = b - 256 }
+    } else if vtype == 2 { v = read_u16_le(raw, *pos) }
+    else if vtype == 3 {
+        u := read_u16_le(raw, *pos)
+        v = u
+        if u >= 32768 { v = u - 65536 }
+    } else if vtype == 4 { v = read_u32_le(raw, *pos) }
+    else if vtype == 5 { v = read_i32_le(raw, *pos) }
+    else if vtype == 10 || vtype == 11 { v = read_u64_le(raw, *pos) }
+    *pos += sb
+    << v
+}
+
+fn gguf_read_f64(raw &string, pos $&int, vtype int) f64 {
+    if vtype == 6 {
+        if *pos + 4 > raw.len { >>> errors.new("llm_metal.gguf: truncated f32 kv") }
+        bits := read_u32_le(raw, *pos)
+        *pos += 4
+        << math.float32_from_bits(bits)
+    }
+    if vtype == 12 {
+        if *pos + 8 > raw.len { >>> errors.new("llm_metal.gguf: truncated f64 kv") }
+        bits := read_u64_le(raw, *pos)
+        *pos += 8
+        << math.float64_from_bits(bits)
+    }
+    iv := gguf_read_int(raw, pos, vtype) >>>
+    << f64(iv)
+}
+
+fn gguf_skip_val(raw &string, pos $&int, vtype int) int {
+    if vtype == 8 {
+        _ := gguf_read_str(raw, pos) >>>
+        << 0
+    }
+    if vtype == 9 {
+        if *pos + 12 > raw.len { >>> errors.new("llm_metal.gguf: truncated array kv") }
+        et := read_u32_le(raw, *pos)
+        cnt := read_u64_le(raw, *pos + 4)
+        *pos += 12
+        sb := gguf_scalar_bytes(et)
+        if sb > 0 {
+            if cnt < 0 || cnt > (raw.len - *pos) / sb { >>> errors.new("llm_metal.gguf: truncated array body") }
+            *pos += cnt * sb
+            << 0
+        }
+        for _ in 0:cnt {
+            gguf_skip_val(raw, pos, et) >>>
+        }
+        << 0
+    }
+    sb := gguf_scalar_bytes(vtype)
+    if sb <= 0 || *pos + sb > raw.len { >>> errors.new("llm_metal.gguf: truncated scalar kv") }
+    *pos += sb
+    << 0
+}
+
+fn gguf_find(ts &[]GgufTensorMeta, name string) int {
+    for i in 0:ts.len {
+        if ts[i].name == name { << i }
+    }
+    << -1
+}
+
+fn gguf_byte_size(gtype int, n_elems int) int {
+    if gtype == 0 { << n_elems * 4 }
+    if gtype == 1 || gtype == 30 { << n_elems * 2 }
+    if gtype == WT_Q4_0 { << (n_elems / tensor.GGML_BLOCK_VALUES) * tensor.Q4_0_BYTES }
+    if gtype == WT_Q5_0 { << (n_elems / tensor.GGML_BLOCK_VALUES) * tensor.Q5_0_BYTES }
+    if gtype == WT_Q8_0 { << (n_elems / tensor.GGML_BLOCK_VALUES) * tensor.Q8_0_BYTES }
+    if gtype == WT_Q4_K { << (n_elems / tensor.QK_K) * tensor.Q4_K_BYTES }
+    if gtype == WT_Q5_K { << (n_elems / tensor.QK_K) * tensor.Q5_K_BYTES }
+    if gtype == WT_Q6_K { << (n_elems / tensor.QK_K) * tensor.Q6_K_BYTES }
+    >>> errors.new("llm_metal: unsupported GGUF tensor dtype " + str(gtype))
+}
+
+fn f32_slice_to_bits(vals &[]f32) []int {
+    $bits := []int{}
+    bits.reserve(vals.len)
+    for i in 0:vals.len {
+        bits.push(math.float32_bits(f64(vals[i])))
+    }
+    << bits
+}
+
+fn upload_f32_bytes(dev &metal.Device, f32_mats $&[]metal.F32Matrix, bytes &string, rows int, cols int) int {
+    $mat := dev.matrix_f32(rows, cols) >>>
+    _ := mat.write_bytes(bytes) >>> (err) {
+        qclose_f32($&mat)
+        >>> err
+    }
+    idx := f32_mats.len
+    f32_mats.push(mat)
+    << idx
+}
+
+fn upload_f16_bytes_as_f32(dev &metal.Device, f32_mats $&[]metal.F32Matrix, bytes &string, rows int, cols int) int {
+    $mf16 := dev.matrix_f16(rows, cols) >>>
+    _ := mf16.write_bytes(bytes) >>> (err) {
+        qclose_f16($&mf16)
+        >>> err
+    }
+    $mf32 := dev.matrix_f32(rows, cols) >>> (err) {
+        qclose_f16($&mf16)
+        >>> err
+    }
+    $f := metal.f16_to_f32($&mf32, &mf16) >>> (err) {
+        qclose_f16($&mf16)
+        qclose_f32($&mf32)
+        >>> err
+    }
+    _ := f.wait() >>> (err) {
+        qclose_fence($&f)
+        qclose_f16($&mf16)
+        qclose_f32($&mf32)
+        >>> err
+    }
+    qclose_fence($&f)
+    qclose_f16($&mf16)
+    idx := f32_mats.len
+    f32_mats.push(mf32)
+    << idx
+}
+
+fn upload_bf16_bytes_as_f32(dev &metal.Device, f32_mats $&[]metal.F32Matrix, bytes &string, rows int, cols int) int {
+    n := rows * cols
+    if bytes.len != n * 2 { >>> errors.new("llm_metal: BF16 byte length mismatch") }
+    $bits := []int{}
+    bits.reserve(n)
+    for i in 0:n {
+        bf := u16(read_u16_le(bytes, i * 2))
+        fv := (tensor.BF16{bits: bf}).to_f32()
+        bits.push(math.float32_bits(f64(fv)))
+    }
+    $mf32 := dev.matrix_f32(rows, cols) >>>
+    _ := mf32.write_bits(&bits) >>> (err) {
+        qclose_f32($&mf32)
+        >>> err
+    }
+    idx := f32_mats.len
+    f32_mats.push(mf32)
+    << idx
+}
+
+fn dequant_to_f32_mat(dev &metal.Device, raw &string, gtype int, rows int, cols int) metal.F32Matrix {
+    n := rows * cols
+    if gtype == 0 {
+        $m := dev.matrix_f32(rows, cols) >>>
+        _ := m.write_bytes(raw) >>> (err) { _ := m.close()
+        >>> err }
+        << m
+    }
+    if gtype == 1 {
+        $mf16 := dev.matrix_f16(rows, cols) >>>
+        _ := mf16.write_bytes(raw) >>> (err) { _ := mf16.close()
+        >>> err }
+        $mf32 := dev.matrix_f32(rows, cols) >>> (err) { _ := mf16.close()
+        >>> err }
+        $f := metal.f16_to_f32($&mf32, &mf16) >>> (err) { _ := mf16.close()
+        qclose_f32($&mf32)
+        >>> err }
+        _ := f.wait() >>> (err) { _ := f.close()
+        qclose_f16($&mf16)
+        qclose_f32($&mf32)
+        >>> err }
+        qclose_fence($&f)
+        qclose_f16($&mf16)
+        << mf32
+    }
+    $vals := []f32{}
+    vals.reserve(n)
+    if gtype == WT_Q4_0 {
+        nb := n / tensor.GGML_BLOCK_VALUES
+        for b in 0:nb {
+            blk := tensor.read_q4_0(raw, b * tensor.Q4_0_BYTES) >>>
+            blk.append_f32($&vals)
+        }
+    } else if gtype == WT_Q5_0 {
+        nb := n / tensor.GGML_BLOCK_VALUES
+        for b in 0:nb {
+            blk := tensor.read_q5_0(raw, b * tensor.Q5_0_BYTES) >>>
+            blk.append_f32($&vals)
+        }
+    } else if gtype == WT_Q8_0 {
+        nb := n / tensor.GGML_BLOCK_VALUES
+        for b in 0:nb {
+            blk := tensor.read_q8_0(raw, b * tensor.Q8_0_BYTES) >>>
+            blk.append_f32($&vals)
+        }
+    } else if gtype == WT_Q4_K {
+        nb := n / tensor.QK_K
+        for b in 0:nb {
+            blk := tensor.read_q4_k(raw, b * tensor.Q4_K_BYTES) >>>
+            blk.append_f32($&vals)
+        }
+    } else if gtype == WT_Q5_K {
+        nb := n / tensor.QK_K
+        for b in 0:nb {
+            blk := tensor.read_q5_k(raw, b * tensor.Q5_K_BYTES) >>>
+            blk.append_f32($&vals)
+        }
+    } else if gtype == WT_Q6_K {
+        nb := n / tensor.QK_K
+        for b in 0:nb {
+            blk := tensor.read_q6_k(raw, b * tensor.Q6_K_BYTES) >>>
+            blk.append_f32($&vals)
+        }
+    } else {
+        >>> errors.new("llm_metal: unsupported embedding dtype " + str(gtype))
+    }
+    bits := f32_slice_to_bits(&vals)
+    $m := dev.matrix_f32(rows, cols) >>>
+    _ := m.write_bits(&bits) >>> (err) { _ := m.close()
+    >>> err }
+    << m
+}
+
+fn upload_gguf_matrix(m $&MetalModel, raw &string, data_base int, t &GgufTensorMeta, rows int, cols int) GpuWeightRef {
+    if t.n_elems != rows * cols {
+        >>> errors.new("llm_metal.gguf: shape mismatch for " + t.name + " (got " + str(t.n_elems) + ", expected " + str(rows * cols) + ")")
+    }
+    blen := gguf_byte_size(t.gtype, t.n_elems) >>>
+    start := data_base + t.offset
+    if start < 0 || blen > raw.len - start {
+        >>> errors.new("llm_metal.gguf: truncated tensor " + t.name)
+    }
+    slice := (*raw)[start:(start + blen)]
+    if t.gtype == 0 {
+        idx := upload_f32_bytes(&m.dev, $&m.f32_mats, &slice, rows, cols) >>>
+        << GpuWeightRef{kind: WT_F32, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == 1 {
+        idx := upload_f16_bytes_as_f32(&m.dev, $&m.f32_mats, &slice, rows, cols) >>>
+        << GpuWeightRef{kind: WT_F32, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == 30 {
+        idx := upload_bf16_bytes_as_f32(&m.dev, $&m.f32_mats, &slice, rows, cols) >>>
+        << GpuWeightRef{kind: WT_F32, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == WT_Q4_0 {
+        $mat := m.dev.matrix_q4_0(rows, cols) >>>
+        _ := mat.write_bytes(&slice) >>> (err) { _ := mat.close()
+        >>> err }
+        idx := m.q4_mats.len
+        m.q4_mats.push(mat)
+        << GpuWeightRef{kind: WT_Q4_0, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == WT_Q5_0 {
+        $mat := m.dev.matrix_q5_0(rows, cols) >>>
+        _ := mat.write_bytes(&slice) >>> (err) { _ := mat.close()
+        >>> err }
+        idx := m.q5_mats.len
+        m.q5_mats.push(mat)
+        << GpuWeightRef{kind: WT_Q5_0, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == WT_Q8_0 {
+        $mat := m.dev.matrix_q8_0(rows, cols) >>>
+        _ := mat.write_bytes(&slice) >>> (err) { _ := mat.close()
+        >>> err }
+        idx := m.q8_mats.len
+        m.q8_mats.push(mat)
+        << GpuWeightRef{kind: WT_Q8_0, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == WT_Q4_K {
+        $mat := m.dev.matrix_q4_k(rows, cols) >>>
+        _ := mat.write_bytes(&slice) >>> (err) { _ := mat.close()
+        >>> err }
+        idx := m.q4k_mats.len
+        m.q4k_mats.push(mat)
+        << GpuWeightRef{kind: WT_Q4_K, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == WT_Q5_K {
+        $mat := m.dev.matrix_q5_k(rows, cols) >>>
+        _ := mat.write_bytes(&slice) >>> (err) { _ := mat.close()
+        >>> err }
+        idx := m.q5k_mats.len
+        m.q5k_mats.push(mat)
+        << GpuWeightRef{kind: WT_Q5_K, idx: idx, rows: rows, cols: cols}
+    }
+    if t.gtype == WT_Q6_K {
+        $mat := m.dev.matrix_q6_k(rows, cols) >>>
+        _ := mat.write_bytes(&slice) >>> (err) { _ := mat.close()
+        >>> err }
+        idx := m.q6k_mats.len
+        m.q6k_mats.push(mat)
+        << GpuWeightRef{kind: WT_Q6_K, idx: idx, rows: rows, cols: cols}
+    }
+    >>> errors.new("llm_metal: unsupported GGUF weight dtype " + str(t.gtype) + " for " + t.name)
+}
+
+fn upload_gguf_vec(m $&MetalModel, raw &string, data_base int, t &GgufTensorMeta, cols int) int {
+    r := upload_gguf_matrix(m, raw, data_base, t, 1, cols) >>>
+    if r.kind != WT_F32 { >>> errors.new("llm_metal: expected float vector for " + t.name) }
+    << r.idx
+}
+
+fn gguf_req_matrix(m $&MetalModel, raw &string, data_base int, ts &[]GgufTensorMeta, name string, rows int, cols int) GpuWeightRef {
+    ti := gguf_find(ts, "" + name)
+    if ti < 0 { >>> errors.new("llm_metal.gguf: missing tensor " + name) }
+    << upload_gguf_matrix(m, raw, data_base, &ts[ti], rows, cols) >>>
+}
+
+fn gguf_req_vec(m $&MetalModel, raw &string, data_base int, ts &[]GgufTensorMeta, name string, cols int) int {
+    ti := gguf_find(ts, "" + name)
+    if ti < 0 { >>> errors.new("llm_metal.gguf: missing tensor " + name) }
+    << upload_gguf_vec(m, raw, data_base, &ts[ti], cols) >>>
+}
+
+fn gguf_opt_vec(m $&MetalModel, raw &string, data_base int, ts &[]GgufTensorMeta, name string, cols int) int {
+    ti := gguf_find(ts, "" + name)
+    if ti < 0 { << -1 }
+    << upload_gguf_vec(m, raw, data_base, &ts[ti], cols) >>>
+}
+
+pub fn load_gguf(path string, max_seq_override int) MetalModel {
+    if !metal.available() { >>> errors.new("llm_metal: Metal GPU unavailable") }
+    raw := os.read(path + "") >>>
+    if raw.len < 24 || raw[0:4] != "GGUF" {
+        >>> errors.new("llm_metal: invalid GGUF file")
+    }
+    ver := read_u32_le(&raw, 4)
+    if ver < 2 || ver > 3 { >>> errors.new("llm_metal.gguf: unsupported version " + str(ver)) }
+    n_tensors := read_u64_le(&raw, 8)
+    n_kv := read_u64_le(&raw, 16)
+    $pos := 24
+    $align := 32
+    $arch := "llama"
+    $dim := 0
+    $hidden_dim := 0
+    $n_layers := 0
+    $n_heads := 0
+    $n_kv_heads := 0
+    $max_seq := 512
+    $rope_theta := 10000.0
+    $rope_interleaved := false
+    $eps := 0.00001
+    $bos_id := 1
+    $eos_id := 2
+    $vocab := []string{}
+
+    for _ in 0:n_kv {
+        k := gguf_read_str(&raw, $&pos) >>>
+        if pos + 4 > raw.len { >>> errors.new("llm_metal.gguf: truncated kv type") }
+        vt := read_u32_le(&raw, pos)
+        pos += 4
+        if k == "general.architecture" && vt == 8 {
+            arch = gguf_read_str(&raw, $&pos) >>>
+        } else if k == "general.alignment" {
+            a := gguf_read_int(&raw, $&pos, vt) >>>
+            if a > 0 { align = a }
+        } else if k == arch + ".embedding_length" {
+            dim = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == arch + ".feed_forward_length" {
+            hidden_dim = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == arch + ".block_count" {
+            n_layers = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == arch + ".attention.head_count" {
+            n_heads = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == arch + ".attention.head_count_kv" {
+            n_kv_heads = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == arch + ".context_length" {
+            max_seq = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == arch + ".rope.freq_base" {
+            rope_theta = gguf_read_f64(&raw, $&pos, vt) >>>
+        } else if k == arch + ".rope.interleaved" {
+            rope_interleaved = gguf_read_int(&raw, $&pos, vt) != 0
+        } else if k == arch + ".attention.layer_norm_rms_epsilon" {
+            eps = gguf_read_f64(&raw, $&pos, vt) >>>
+        } else if k == "tokenizer.ggml.bos_token_id" {
+            bos_id = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == "tokenizer.ggml.eos_token_id" {
+            eos_id = gguf_read_int(&raw, $&pos, vt) >>>
+        } else if k == "tokenizer.ggml.tokens" && vt == 9 {
+            if pos + 12 > raw.len { >>> errors.new("llm_metal.gguf: truncated tokens array") }
+            et := read_u32_le(&raw, pos)
+            cnt := read_u64_le(&raw, pos + 4)
+            pos += 12
+            if et != 8 { >>> errors.new("llm_metal.gguf: expected string tokens") }
+            vocab.reserve(cnt)
+            for _ in 0:cnt {
+                tok := gguf_read_str(&raw, $&pos) >>>
+                vocab.push(~tok)
+            }
+        } else {
+            gguf_skip_val(&raw, $&pos, vt) >>>
+        }
+    }
+
+    $ts := []GgufTensorMeta{}
+    ts.reserve(n_tensors)
+    for _ in 0:n_tensors {
+        tname := gguf_read_str(&raw, $&pos) >>>
+        if pos + 4 > raw.len { >>> errors.new("llm_metal.gguf: truncated ndims") }
+        nd := read_u32_le(&raw, pos)
+        pos += 4
+        $dims := []int{}
+        $nelems := 1
+        for _ in 0:nd {
+            if pos + 8 > raw.len { >>> errors.new("llm_metal.gguf: truncated dim") }
+            d := read_u64_le(&raw, pos)
+            pos += 8
+            dims.push(d)
+            nelems = nelems * d
+        }
+        if pos + 12 > raw.len { >>> errors.new("llm_metal.gguf: truncated tensor meta") }
+        gt := read_u32_le(&raw, pos)
+        off := read_u64_le(&raw, pos + 4)
+        pos += 12
+        ts.push(GgufTensorMeta{name: ~tname, dims: ~dims, gtype: gt, n_elems: nelems, offset: off})
+    }
+    data_base := ((pos + align - 1) / align) * align
+    if max_seq_override > 0 { max_seq = max_seq_override }
+    if n_kv_heads <= 0 { n_kv_heads = n_heads }
+    if dim <= 0 || hidden_dim <= 0 || n_layers <= 0 || n_heads <= 0 || dim % n_heads != 0 {
+        >>> errors.new("llm_metal.gguf: invalid model metadata")
+    }
+    head_dim := dim / n_heads
+    kv_dim := n_kv_heads * head_dim
+
+    emb_i := gguf_find(&ts, "token_embd.weight")
+    if emb_i < 0 { >>> errors.new("llm_metal.gguf: missing token_embd.weight") }
+    vocab_size := vocab.len
+    $vsz := vocab_size
+    if vsz <= 0 { vsz = ts[emb_i].n_elems / dim }
+
+    $dev := metal.open() >>>
+    emb_blen := gguf_byte_size(ts[emb_i].gtype, ts[emb_i].n_elems) >>> (err) {
+        qclose_dev($&dev)
+        >>> err
+    }
+    emb_start := data_base + ts[emb_i].offset
+    emb_raw := raw[emb_start:(emb_start + emb_blen)]
+    $emb_mat := dequant_to_f32_mat(&dev, &emb_raw, ts[emb_i].gtype, vsz, dim) >>> (err) {
+        qclose_dev($&dev)
+        >>> err
+    }
+
+    out_i := gguf_find(&ts, "output.weight")
+    tied := out_i < 0
+    cfg := MetalConfig{
+        arch: arch, dim: dim, hidden_dim: hidden_dim, n_layers: n_layers,
+        n_heads: n_heads, n_kv_heads: n_kv_heads, vocab_size: vsz, max_seq_len: max_seq,
+        head_dim: head_dim, kv_dim: kv_dim, rope_theta: rope_theta,
+        rope_interleaved: rope_interleaved, eps: eps, tied_output: tied,
+        bos_id: bos_id, eos_id: eos_id
+    }
+
+    $model := MetalModel{
+        dev: dev, cfg: cfg, vocab: ~vocab, embed_table: emb_mat,
+        norm_idx: -1, lm_head: GpuWeightRef{kind: WT_F32, idx: 0, rows: vsz, cols: dim},
+        layers: []MetalLayerWeights{}, f32_mats: []metal.F32Matrix{},
+        q4_mats: []metal.Q4Matrix{}, q5_mats: []metal.Q5Matrix{}, q8_mats: []metal.Q8Matrix{},
+        q4k_mats: []metal.Q4KMatrix{}, q5k_mats: []metal.Q5KMatrix{}, q6k_mats: []metal.Q6KMatrix{},
+        closed: false
+    }
+
+    model.norm_idx = gguf_req_vec($&model, &raw, data_base, &ts, "output_norm.weight", dim) >>> (err) {
+        qclose_model($&model)
+        >>> err
+    }
+    if tied {
+        model.lm_head = upload_gguf_matrix($&model, &raw, data_base, &ts[emb_i], vsz, dim) >>> (err) {
+            qclose_model($&model)
+            >>> err
+        }
+    } else {
+        model.lm_head = upload_gguf_matrix($&model, &raw, data_base, &ts[out_i], vsz, dim) >>> (err) {
+            qclose_model($&model)
+            >>> err
+        }
+    }
+
+    for l in 0:n_layers {
+        lp := "blk." + str(l) + "."
+        an := gguf_req_vec($&model, &raw, data_base, &ts, lp + "attn_norm.weight", dim) >>> (err) { _ := model.close()
+        >>> err }
+        wq := gguf_req_matrix($&model, &raw, data_base, &ts, lp + "attn_q.weight", dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wk := gguf_req_matrix($&model, &raw, data_base, &ts, lp + "attn_k.weight", kv_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wv := gguf_req_matrix($&model, &raw, data_base, &ts, lp + "attn_v.weight", kv_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wo := gguf_req_matrix($&model, &raw, data_base, &ts, lp + "attn_output.weight", dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        bq := gguf_opt_vec($&model, &raw, data_base, &ts, lp + "attn_q.bias", dim) >>> (err) { _ := model.close()
+        >>> err }
+        bk := gguf_opt_vec($&model, &raw, data_base, &ts, lp + "attn_k.bias", kv_dim) >>> (err) { _ := model.close()
+        >>> err }
+        bv := gguf_opt_vec($&model, &raw, data_base, &ts, lp + "attn_v.bias", kv_dim) >>> (err) { _ := model.close()
+        >>> err }
+        qn := gguf_opt_vec($&model, &raw, data_base, &ts, lp + "attn_q_norm.weight", head_dim) >>> (err) { _ := model.close()
+        >>> err }
+        kn := gguf_opt_vec($&model, &raw, data_base, &ts, lp + "attn_k_norm.weight", head_dim) >>> (err) { _ := model.close()
+        >>> err }
+        fnm := gguf_req_vec($&model, &raw, data_base, &ts, lp + "ffn_norm.weight", dim) >>> (err) { _ := model.close()
+        >>> err }
+        wg := gguf_req_matrix($&model, &raw, data_base, &ts, lp + "ffn_gate.weight", hidden_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wu := gguf_req_matrix($&model, &raw, data_base, &ts, lp + "ffn_up.weight", hidden_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wd := gguf_req_matrix($&model, &raw, data_base, &ts, lp + "ffn_down.weight", dim, hidden_dim) >>> (err) { _ := model.close()
+        >>> err }
+        model.layers.push(MetalLayerWeights{
+            attn_norm_idx: an, wq: wq, wk: wk, wv: wv, wo: wo,
+            bq_idx: bq, bk_idx: bk, bv_idx: bv, q_norm_idx: qn, k_norm_idx: kn,
+            ffn_norm_idx: fnm, wg: wg, wu: wu, wd: wd
+        })
+    }
+    << model
+}
+
+fn doc_child_idx(doc &json.Doc, obj int, key string) int {
+    if obj < 0 || !doc.is_dict(obj) || !doc.has(obj, key) { << -1 }
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn st_meta_int(doc &json.Doc, obj int, key string, def int) int {
+    n := doc_child_idx(doc, obj, key)
+    if n < 0 { << def }
+    if doc.is_number(n) { << doc.as_int(n) >>> (_) { << def } }
+    if doc.is_string(n) {
+        s := doc.as_string(n) >>> (_) { << def }
+        << strconv.atoi(&s) >>> (_) { << def }
+    }
+    << def
+}
+
+fn st_meta_f64(doc &json.Doc, obj int, key string, def f64) f64 {
+    n := doc_child_idx(doc, obj, key)
+    if n < 0 { << def }
+    if doc.is_number(n) { << doc.as_f64(n) >>> (_) { << def } }
+    if doc.is_string(n) {
+        s := doc.as_string(n) >>> (_) { << def }
+        << strconv.parse_float(&s) >>> (_) { << def }
+    }
+    << def
+}
+
+fn st_parse_tensor(doc &json.Doc, root int, name string) StTensorMeta {
+    n := doc_child_idx(doc, root, "" + name)
+    if n < 0 || !doc.is_dict(n) { >>> errors.new("llm_metal.safetensors: missing tensor " + name) }
+    dn := doc_child_idx(doc, n, "dtype")
+    dt := doc.as_string(dn) >>>
+    sn := doc_child_idx(doc, n, "shape")
+    if sn < 0 || !doc.is_list(sn) { >>> errors.new("llm_metal.safetensors: bad shape " + name) }
+    $sh := []int{}
+    scnt := doc.count(sn)
+    for i in 0:scnt {
+        si := doc.at(sn, i) >>>
+        sh.push(doc.as_int(si) >>>)
+    }
+    on := doc_child_idx(doc, n, "data_offsets")
+    if on < 0 || !doc.is_list(on) || doc.count(on) != 2 { >>> errors.new("llm_metal.safetensors: bad offsets " + name) }
+    s0 := doc.at(on, 0) >>>
+    s1 := doc.at(on, 1) >>>
+    st := doc.as_int(s0) >>>
+    en := doc.as_int(s1) >>>
+    << StTensorMeta{dtype: dt, shape: ~sh, start: st, end: en}
+}
+
+fn upload_st_matrix(m $&MetalModel, raw &string, base int, doc &json.Doc, root int, name string, rows int, cols int) GpuWeightRef {
+    meta := st_parse_tensor(doc, root, "" + name) >>>
+    if meta.start < 0 || meta.end < meta.start || base + meta.end > raw.len {
+        >>> errors.new("llm_metal.safetensors: truncated tensor " + name)
+    }
+    slice := (*raw)[(base + meta.start):(base + meta.end)]
+    if meta.dtype == "F32" {
+        if slice.len != rows * cols * 4 { >>> errors.new("llm_metal.safetensors: size mismatch " + name) }
+        idx := upload_f32_bytes(&m.dev, $&m.f32_mats, &slice, rows, cols) >>>
+        << GpuWeightRef{kind: WT_F32, idx: idx, rows: rows, cols: cols}
+    }
+    if meta.dtype == "F16" {
+        if slice.len != rows * cols * 2 { >>> errors.new("llm_metal.safetensors: size mismatch " + name) }
+        idx := upload_f16_bytes_as_f32(&m.dev, $&m.f32_mats, &slice, rows, cols) >>>
+        << GpuWeightRef{kind: WT_F32, idx: idx, rows: rows, cols: cols}
+    }
+    if meta.dtype == "BF16" {
+        if slice.len != rows * cols * 2 { >>> errors.new("llm_metal.safetensors: size mismatch " + name) }
+        idx := upload_bf16_bytes_as_f32(&m.dev, $&m.f32_mats, &slice, rows, cols) >>>
+        << GpuWeightRef{kind: WT_F32, idx: idx, rows: rows, cols: cols}
+    }
+    >>> errors.new("llm_metal.safetensors: unsupported dtype " + meta.dtype)
+}
+
+fn upload_st_vec(m $&MetalModel, raw &string, base int, doc &json.Doc, root int, name string, cols int) int {
+    r := upload_st_matrix(m, raw, base, doc, root, name, 1, cols) >>>
+    << r.idx
+}
+
+pub fn load_safetensors(path string, max_seq_override int) MetalModel {
+    if !metal.available() { >>> errors.new("llm_metal: Metal GPU unavailable") }
+    raw := os.read(path + "") >>>
+    if raw.len < 8 { >>> errors.new("llm_metal.safetensors: truncated file") }
+    hlen := read_u64_le(&raw, 0)
+    if hlen <= 0 || hlen > raw.len - 8 { >>> errors.new("llm_metal.safetensors: bad header len") }
+    base := 8 + hlen
+    hstr := raw[8:base]
+    doc := json.parse(&hstr) >>>
+    root := doc.root()
+    if !doc.is_dict(root) { >>> errors.new("llm_metal.safetensors: invalid json") }
+    meta := doc_child_idx(&doc, root, "__metadata__")
+    if meta < 0 { >>> errors.new("llm_metal.safetensors: missing __metadata__") }
+    dim := st_meta_int(&doc, meta, "dim", 0)
+    hidden_dim := st_meta_int(&doc, meta, "hidden_dim", 0)
+    n_layers := st_meta_int(&doc, meta, "n_layers", 0)
+    n_heads := st_meta_int(&doc, meta, "n_heads", 0)
+    n_kv_heads := st_meta_int(&doc, meta, "n_kv_heads", n_heads)
+    vocab_size := st_meta_int(&doc, meta, "vocab_size", 0)
+    $max_seq := st_meta_int(&doc, meta, "max_seq_len", 512)
+    if max_seq_override > 0 { max_seq = max_seq_override }
+    rope_theta := st_meta_f64(&doc, meta, "rope_theta", 10000.0)
+    eps := st_meta_f64(&doc, meta, "norm_eps", 0.00001)
+    if dim <= 0 || hidden_dim <= 0 || n_layers <= 0 || n_heads <= 0 || vocab_size <= 0 || dim % n_heads != 0 {
+        >>> errors.new("llm_metal.safetensors: invalid metadata dimensions")
+    }
+    head_dim := dim / n_heads
+    kv_dim := n_kv_heads * head_dim
+
+    emb_meta := st_parse_tensor(&doc, root, "embed_tokens.weight") >>>
+    emb_slice := raw[(base + emb_meta.start):(base + emb_meta.end)]
+    $gdt := 0
+    if emb_meta.dtype == "F16" { gdt = 1 }
+    else if emb_meta.dtype != "F32" { >>> errors.new("llm_metal.safetensors: unsupported embed dtype") }
+
+    $dev := metal.open() >>>
+    $emb_mat := dequant_to_f32_mat(&dev, &emb_slice, gdt, vocab_size, dim) >>> (err) {
+        qclose_dev($&dev)
+        >>> err
+    }
+
+    has_head := doc_child_idx(&doc, root, "lm_head.weight") >= 0
+    cfg := MetalConfig{
+        arch: "llama", dim: dim, hidden_dim: hidden_dim, n_layers: n_layers,
+        n_heads: n_heads, n_kv_heads: n_kv_heads, vocab_size: vocab_size, max_seq_len: max_seq,
+        head_dim: head_dim, kv_dim: kv_dim, rope_theta: rope_theta,
+        rope_interleaved: false, eps: eps, tied_output: !has_head, bos_id: 1, eos_id: 2
+    }
+
+    $model := MetalModel{
+        dev: dev, cfg: cfg, vocab: []string{}, embed_table: emb_mat,
+        norm_idx: -1, lm_head: GpuWeightRef{kind: WT_F32, idx: 0, rows: vocab_size, cols: dim},
+        layers: []MetalLayerWeights{}, f32_mats: []metal.F32Matrix{},
+        q4_mats: []metal.Q4Matrix{}, q5_mats: []metal.Q5Matrix{}, q8_mats: []metal.Q8Matrix{},
+        q4k_mats: []metal.Q4KMatrix{}, q5k_mats: []metal.Q5KMatrix{}, q6k_mats: []metal.Q6KMatrix{},
+        closed: false
+    }
+
+    model.norm_idx = upload_st_vec($&model, &raw, base, &doc, root, "norm.weight", dim) >>> (err) { _ := model.close()
+    >>> err }
+    if has_head {
+        model.lm_head = upload_st_matrix($&model, &raw, base, &doc, root, "lm_head.weight", vocab_size, dim) >>> (err) { _ := model.close()
+        >>> err }
+    } else {
+        model.lm_head = upload_st_matrix($&model, &raw, base, &doc, root, "embed_tokens.weight", vocab_size, dim) >>> (err) { _ := model.close()
+        >>> err }
+    }
+
+    for l in 0:n_layers {
+        lp := "layers." + str(l) + "."
+        an := upload_st_vec($&model, &raw, base, &doc, root, lp + "input_layernorm.weight", dim) >>> (err) { _ := model.close()
+        >>> err }
+        wq := upload_st_matrix($&model, &raw, base, &doc, root, lp + "self_attn.q_proj.weight", dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wk := upload_st_matrix($&model, &raw, base, &doc, root, lp + "self_attn.k_proj.weight", kv_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wv := upload_st_matrix($&model, &raw, base, &doc, root, lp + "self_attn.v_proj.weight", kv_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wo := upload_st_matrix($&model, &raw, base, &doc, root, lp + "self_attn.o_proj.weight", dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        fnm := upload_st_vec($&model, &raw, base, &doc, root, lp + "post_attention_layernorm.weight", dim) >>> (err) { _ := model.close()
+        >>> err }
+        wg := upload_st_matrix($&model, &raw, base, &doc, root, lp + "mlp.gate_proj.weight", hidden_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wu := upload_st_matrix($&model, &raw, base, &doc, root, lp + "mlp.up_proj.weight", hidden_dim, dim) >>> (err) { _ := model.close()
+        >>> err }
+        wd := upload_st_matrix($&model, &raw, base, &doc, root, lp + "mlp.down_proj.weight", dim, hidden_dim) >>> (err) { _ := model.close()
+        >>> err }
+        model.layers.push(MetalLayerWeights{
+            attn_norm_idx: an, wq: wq, wk: wk, wv: wv, wo: wo,
+            bq_idx: -1, bk_idx: -1, bv_idx: -1, q_norm_idx: -1, k_norm_idx: -1,
+            ffn_norm_idx: fnm, wg: wg, wu: wu, wd: wd
+        })
+    }
+    << model
+}
+
+pub fn load_model(path string, max_seq_override int) MetalModel {
+    raw := os.read(path + "") >>>
+    if raw.len >= 4 && raw[0:4] == "GGUF" {
+        << load_gguf(path, max_seq_override) >>>
+    }
+    << load_safetensors(path, max_seq_override) >>>
+}
+
+pub fn (m $&MetalModel) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    qclose_f32($&m.embed_table)
+    for i in 0:m.f32_mats.len {
+        el := $&m.f32_mats[i]
+        qclose_f32(el)
+    }
+    for i in 0:m.q4_mats.len {
+        el := $&m.q4_mats[i]
+        qclose_q4(el)
+    }
+    for i in 0:m.q5_mats.len {
+        el := $&m.q5_mats[i]
+        qclose_q5(el)
+    }
+    for i in 0:m.q8_mats.len {
+        el := $&m.q8_mats[i]
+        qclose_q8(el)
+    }
+    for i in 0:m.q4k_mats.len {
+        el := $&m.q4k_mats[i]
+        qclose_q4k(el)
+    }
+    for i in 0:m.q5k_mats.len {
+        el := $&m.q5k_mats[i]
+        qclose_q5k(el)
+    }
+    for i in 0:m.q6k_mats.len {
+        el := $&m.q6k_mats[i]
+        qclose_q6k(el)
+    }
+    qclose_dev($&m.dev)
+    << 0
+}

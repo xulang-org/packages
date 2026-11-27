@@ -1,0 +1,1024 @@
+@"github.com/xulang-org/packages/cuda_native"
+
+// Pure-Xu dlopen backend for CUDA Driver API + NVRTC + cuBLAS.
+// No C wrapper or compile-time link flags required: loads libcuda / libnvrtc / libcublas
+// dynamically at runtime on Linux/Windows and allows XU_CUDA_LIBRARY / XU_NVRTC_LIBRARY /
+// XU_CUBLAS_LIBRARY overrides for custom driver paths or test mocks.
+
+#ffi
+#os
+#errors
+#math
+
+const SLOT = 3 // process_ptr; 0=#internal/sdl, 1=sqlite_native, 2=metal_native, 3=cuda_native, 4=vulkan_native
+
+const OFF_CUDA_LIB = 0
+const OFF_NVRTC_LIB = 8
+const OFF_CUBLAS_LIB = 16
+const OFF_LOADED = 24
+const OFF_CUDA_OK = 32
+const OFF_NVRTC_OK = 40
+const OFF_CUBLAS_OK = 48
+const OFF_CUDA_INIT = 56
+const OFF_SYMS = 64
+const SYM_COUNT = 34
+const BLOB_SIZE = 336
+
+const SYM_CU_INIT = 0
+const SYM_CU_DEVICE_GET_COUNT = 1
+const SYM_CU_DEVICE_GET = 2
+const SYM_CU_DEVICE_GET_NAME = 3
+const SYM_CU_DEVICE_TOTAL_MEM = 4
+const SYM_CU_DEVICE_GET_ATTR = 5
+const SYM_CU_CTX_CREATE = 6
+const SYM_CU_CTX_DESTROY = 7
+const SYM_CU_CTX_SET_CURRENT = 8
+const SYM_CU_CTX_SYNCHRONIZE = 9
+const SYM_CU_MEM_ALLOC = 10
+const SYM_CU_MEM_FREE = 11
+const SYM_CU_MEMCPY_HTOD = 12
+const SYM_CU_MEMCPY_DTOH = 13
+const SYM_CU_MEMCPY_DTOD = 14
+const SYM_CU_MEMSET_D8 = 15
+const SYM_CU_MODULE_LOAD_DATA = 16
+const SYM_CU_MODULE_UNLOAD = 17
+const SYM_CU_MODULE_GET_FUNCTION = 18
+const SYM_CU_LAUNCH_KERNEL = 19
+const SYM_CU_STREAM_CREATE = 20
+const SYM_CU_STREAM_DESTROY = 21
+const SYM_CU_STREAM_SYNCHRONIZE = 22
+
+const SYM_NVRTC_CREATE_PROGRAM = 23
+const SYM_NVRTC_COMPILE_PROGRAM = 24
+const SYM_NVRTC_GET_PTX_SIZE = 25
+const SYM_NVRTC_GET_PTX = 26
+const SYM_NVRTC_GET_LOG_SIZE = 27
+const SYM_NVRTC_GET_LOG = 28
+const SYM_NVRTC_DESTROY_PROGRAM = 29
+
+const SYM_CUBLAS_CREATE = 30
+const SYM_CUBLAS_DESTROY = 31
+const SYM_CUBLAS_SET_STREAM = 32
+const SYM_CUBLAS_SGEMM = 33
+
+const CU_ATTR_MAX_THREADS_PER_BLOCK = 1
+const CU_ATTR_MULTIPROCESSOR_COUNT = 16
+const CU_ATTR_COMPUTE_CAPABILITY_MAJOR = 75
+const CU_ATTR_COMPUTE_CAPABILITY_MINOR = 76
+
+const CUBLAS_OP_N = 0
+const CUBLAS_OP_T = 1
+
+extern "C" fn xc_cu_init(fn_ptr c_ptr, flags u32) c_int = dynamic
+extern "C" fn xc_cu_device_get_count(fn_ptr c_ptr, out c_ptr) c_int = dynamic
+extern "C" fn xc_cu_device_get(fn_ptr c_ptr, out c_ptr, ordinal c_int) c_int = dynamic
+extern "C" fn xc_cu_device_get_name(fn_ptr c_ptr, name c_ptr, len c_int, dev c_int) c_int = dynamic
+extern "C" fn xc_cu_device_total_mem(fn_ptr c_ptr, bytes_out c_ptr, dev c_int) c_int = dynamic
+extern "C" fn xc_cu_device_get_attr(fn_ptr c_ptr, val_out c_ptr, attr c_int, dev c_int) c_int = dynamic
+extern "C" fn xc_cu_ctx_create(fn_ptr c_ptr, ctx_out c_ptr, flags u32, dev c_int) c_int = dynamic
+extern "C" fn xc_cu_ctx_destroy(fn_ptr c_ptr, ctx c_ptr) c_int = dynamic
+extern "C" fn xc_cu_ctx_set_current(fn_ptr c_ptr, ctx c_ptr) c_int = dynamic
+extern "C" fn xc_cu_ctx_synchronize(fn_ptr c_ptr) c_int = dynamic
+extern "C" fn xc_cu_mem_alloc(fn_ptr c_ptr, dptr_out c_ptr, bytes u64) c_int = dynamic
+extern "C" fn xc_cu_mem_free(fn_ptr c_ptr, dptr u64) c_int = dynamic
+extern "C" fn xc_cu_memcpy_htod(fn_ptr c_ptr, dst u64, src c_ptr, bytes u64) c_int = dynamic
+extern "C" fn xc_cu_memcpy_dtoh(fn_ptr c_ptr, dst c_ptr, src u64, bytes u64) c_int = dynamic
+extern "C" fn xc_cu_memcpy_dtod(fn_ptr c_ptr, dst u64, src u64, bytes u64) c_int = dynamic
+extern "C" fn xc_cu_memset_d8(fn_ptr c_ptr, dst u64, v u8, n u64) c_int = dynamic
+extern "C" fn xc_cu_module_load_data(fn_ptr c_ptr, mod_out c_ptr, image c_ptr) c_int = dynamic
+extern "C" fn xc_cu_module_unload(fn_ptr c_ptr, hmod c_ptr) c_int = dynamic
+extern "C" fn xc_cu_module_get_function(fn_ptr c_ptr, fn_out c_ptr, hmod c_ptr, name c_ptr) c_int = dynamic
+extern "C" fn xc_cu_launch_kernel(fn_ptr c_ptr, f c_ptr, gx u32, gy u32, gz u32, bx u32, by u32, bz u32, smem u32, stream c_ptr, kparams c_ptr, extra c_ptr) c_int = dynamic
+extern "C" fn xc_cu_stream_create(fn_ptr c_ptr, st_out c_ptr, flags u32) c_int = dynamic
+extern "C" fn xc_cu_stream_destroy(fn_ptr c_ptr, st c_ptr) c_int = dynamic
+extern "C" fn xc_cu_stream_synchronize(fn_ptr c_ptr, st c_ptr) c_int = dynamic
+
+extern "C" fn xc_nvrtc_create_program(fn_ptr c_ptr, prog_out c_ptr, src c_ptr, name c_ptr, n_hdr c_int, hdrs c_ptr, inc_names c_ptr) c_int = dynamic
+extern "C" fn xc_nvrtc_compile_program(fn_ptr c_ptr, prog c_ptr, n_opts c_int, opts c_ptr) c_int = dynamic
+extern "C" fn xc_nvrtc_get_ptx_size(fn_ptr c_ptr, prog c_ptr, sz_out c_ptr) c_int = dynamic
+extern "C" fn xc_nvrtc_get_ptx(fn_ptr c_ptr, prog c_ptr, ptx c_ptr) c_int = dynamic
+extern "C" fn xc_nvrtc_get_log_size(fn_ptr c_ptr, prog c_ptr, sz_out c_ptr) c_int = dynamic
+extern "C" fn xc_nvrtc_get_log(fn_ptr c_ptr, prog c_ptr, log c_ptr) c_int = dynamic
+extern "C" fn xc_nvrtc_destroy_program(fn_ptr c_ptr, prog_ptr c_ptr) c_int = dynamic
+
+extern "C" fn xc_cublas_create(fn_ptr c_ptr, handle_out c_ptr) c_int = dynamic
+extern "C" fn xc_cublas_destroy(fn_ptr c_ptr, handle c_ptr) c_int = dynamic
+extern "C" fn xc_cublas_set_stream(fn_ptr c_ptr, handle c_ptr, st c_ptr) c_int = dynamic
+extern "C" fn xc_cublas_sgemm(fn_ptr c_ptr, handle c_ptr, ta c_int, tb c_int, m c_int, n c_int, k c_int, alpha c_ptr, a u64, lda c_int, b u64, ldb c_int, beta c_ptr, c u64, ldc c_int) c_int = dynamic
+
+pub struct CudaDevice {
+    pub ordinal int
+    pub handle int
+    pub ctx c_ptr
+    pub stream c_ptr
+    pub cublas c_ptr
+    pub llm_mod c_ptr
+    pub fn_add_f32 c_ptr
+    pub fn_mul_f32 c_ptr
+    pub fn_scale_f32 c_ptr
+    pub fn_rmsnorm_f32 c_ptr
+    pub fn_softmax_f32 c_ptr
+    pub fn_swiglu_f32 c_ptr
+    pub fn_rope_f32 c_ptr
+    pub fn_gemm_f32 c_ptr
+    pub fn_gemm_f32_nt c_ptr
+    pub fn_gemm_f32_tn c_ptr
+    pub fn_gemv_q4_0_f32 c_ptr
+    pub fn_gemv_q8_0_f32 c_ptr
+    pub fn_gemv_q4_k_f32 c_ptr
+    pub fn_gemv_q5_k_f32 c_ptr
+    pub fn_gemv_q6_k_f32 c_ptr
+    pub closed bool
+}
+
+pub struct CudaBuffer {
+    pub dptr u64
+    pub byte_len int
+    pub ctx c_ptr
+    pub closed bool
+}
+
+pub struct CudaModule {
+    pub handle c_ptr
+    pub closed bool
+}
+
+pub struct CudaFunction {
+    pub handle c_ptr
+}
+
+fn sym_name(i int) string {
+    if i == SYM_CU_INIT { << "cuInit" }
+    if i == SYM_CU_DEVICE_GET_COUNT { << "cuDeviceGetCount" }
+    if i == SYM_CU_DEVICE_GET { << "cuDeviceGet" }
+    if i == SYM_CU_DEVICE_GET_NAME { << "cuDeviceGetName" }
+    if i == SYM_CU_DEVICE_TOTAL_MEM { << "cuDeviceTotalMem_v2" }
+    if i == SYM_CU_DEVICE_GET_ATTR { << "cuDeviceGetAttribute" }
+    if i == SYM_CU_CTX_CREATE { << "cuCtxCreate_v2" }
+    if i == SYM_CU_CTX_DESTROY { << "cuCtxDestroy_v2" }
+    if i == SYM_CU_CTX_SET_CURRENT { << "cuCtxSetCurrent" }
+    if i == SYM_CU_CTX_SYNCHRONIZE { << "cuCtxSynchronize" }
+    if i == SYM_CU_MEM_ALLOC { << "cuMemAlloc_v2" }
+    if i == SYM_CU_MEM_FREE { << "cuMemFree_v2" }
+    if i == SYM_CU_MEMCPY_HTOD { << "cuMemcpyHtoD_v2" }
+    if i == SYM_CU_MEMCPY_DTOH { << "cuMemcpyDtoH_v2" }
+    if i == SYM_CU_MEMCPY_DTOD { << "cuMemcpyDtoD_v2" }
+    if i == SYM_CU_MEMSET_D8 { << "cuMemsetD8_v2" }
+    if i == SYM_CU_MODULE_LOAD_DATA { << "cuModuleLoadData" }
+    if i == SYM_CU_MODULE_UNLOAD { << "cuModuleUnload" }
+    if i == SYM_CU_MODULE_GET_FUNCTION { << "cuModuleGetFunction" }
+    if i == SYM_CU_LAUNCH_KERNEL { << "cuLaunchKernel" }
+    if i == SYM_CU_STREAM_CREATE { << "cuStreamCreate" }
+    if i == SYM_CU_STREAM_DESTROY { << "cuStreamDestroy_v2" }
+    if i == SYM_CU_STREAM_SYNCHRONIZE { << "cuStreamSynchronize" }
+
+    if i == SYM_NVRTC_CREATE_PROGRAM { << "nvrtcCreateProgram" }
+    if i == SYM_NVRTC_COMPILE_PROGRAM { << "nvrtcCompileProgram" }
+    if i == SYM_NVRTC_GET_PTX_SIZE { << "nvrtcGetPTXSize" }
+    if i == SYM_NVRTC_GET_PTX { << "nvrtcGetPTX" }
+    if i == SYM_NVRTC_GET_LOG_SIZE { << "nvrtcGetProgramLogSize" }
+    if i == SYM_NVRTC_GET_LOG { << "nvrtcGetProgramLog" }
+    if i == SYM_NVRTC_DESTROY_PROGRAM { << "nvrtcDestroyProgram" }
+
+    if i == SYM_CUBLAS_CREATE { << "cublasCreate_v2" }
+    if i == SYM_CUBLAS_DESTROY { << "cublasDestroy_v2" }
+    if i == SYM_CUBLAS_SET_STREAM { << "cublasSetStream_v2" }
+    if i == SYM_CUBLAS_SGEMM { << "cublasSgemm_v2" }
+    << ""
+}
+
+fn blob() c_ptr {
+    unsafe {
+        $p := ffi.process_get(SLOT)
+        if !ffi.is_null(p) { << p }
+        p = ffi.calloc(BLOB_SIZE)
+        if ffi.is_null(p) { << ffi.null() }
+        ffi.process_set(SLOT, p)
+        << p
+    }
+}
+
+fn sym(i int) c_ptr {
+    unsafe {
+        p := blob()
+        if ffi.is_null(p) || i < 0 || i >= SYM_COUNT { << ffi.null() }
+        << ffi.read_ptr(p, OFF_SYMS + i * 8)
+    }
+}
+
+fn open_first_lib(env_key string, cands &[]string) c_ptr {
+    unsafe {
+        over := os.getenv(env_key)
+        if over.len > 0 {
+            << ffi.dlopen_local(&over)
+        }
+        for i in 0:cands.len {
+            c := cands[i]
+            h := ffi.dlopen_local(&c)
+            if !ffi.is_null(h) { << h }
+        }
+        << ffi.null()
+    }
+}
+
+fn load_sym_range(p c_ptr, lib c_ptr, lo int, hi int) bool {
+    unsafe {
+        if ffi.is_null(lib) { << false }
+        for i in lo:hi {
+            n := sym_name(i)
+            $f := ffi.dlsym(lib, &n)
+            if ffi.is_null(f) && i == SYM_CU_DEVICE_TOTAL_MEM {
+                alt := "cuDeviceTotalMem"
+                f = ffi.dlsym(lib, &alt)
+            }
+            if ffi.is_null(f) && i == SYM_CU_CTX_CREATE {
+                alt := "cuCtxCreate"
+                f = ffi.dlsym(lib, &alt)
+            }
+            if ffi.is_null(f) && i == SYM_CU_MEM_ALLOC {
+                alt := "cuMemAlloc"
+                f = ffi.dlsym(lib, &alt)
+            }
+            if ffi.is_null(f) && i == SYM_CU_MEM_FREE {
+                alt := "cuMemFree"
+                f = ffi.dlsym(lib, &alt)
+            }
+            if ffi.is_null(f) && i == SYM_CU_MEMCPY_HTOD {
+                alt := "cuMemcpyHtoD"
+                f = ffi.dlsym(lib, &alt)
+            }
+            if ffi.is_null(f) && i == SYM_CU_MEMCPY_DTOH {
+                alt := "cuMemcpyDtoH"
+                f = ffi.dlsym(lib, &alt)
+            }
+            if ffi.is_null(f) && i == SYM_CU_MEMCPY_DTOD {
+                alt := "cuMemcpyDtoD"
+                f = ffi.dlsym(lib, &alt)
+            }
+            if ffi.is_null(f) { << false }
+            ffi.write_ptr(p, OFF_SYMS + i * 8, f)
+        }
+        << true
+    }
+}
+
+fn ensure() bool {
+    unsafe {
+        p := blob()
+        if ffi.is_null(p) { << false }
+        cuda_over := os.getenv("XU_CUDA_LIBRARY")
+        nvrtc_over := os.getenv("XU_NVRTC_LIBRARY")
+        cublas_over := os.getenv("XU_CUBLAS_LIBRARY")
+        // Fast path if already probed cleanly without env override changes.
+        if ffi.read_i64(p, OFF_LOADED) != 0 && cuda_over.len == 0 && nvrtc_over.len == 0 && cublas_over.len == 0 {
+            << ffi.read_i64(p, OFF_CUDA_OK) == 1
+        }
+
+        cuda_cands := ["libcuda.so.1", "libcuda.so", "/usr/lib/x86_64-linux-gnu/libcuda.so.1", "/usr/lib/aarch64-linux-gnu/libcuda.so.1", "/usr/local/cuda/lib64/stubs/libcuda.so", "nvcuda.dll"]
+        cuda_lib := open_first_lib("XU_CUDA_LIBRARY", &cuda_cands)
+        $cuda_ok := load_sym_range(p, cuda_lib, SYM_CU_INIT, SYM_NVRTC_CREATE_PROGRAM)
+        if !cuda_ok && !ffi.is_null(cuda_lib) {
+            ffi.dlclose(cuda_lib)
+        }
+        if cuda_ok {
+            if ffi.read_i64(p, OFF_CUDA_INIT) == 0 {
+                rc := int(xc_cu_init(sym(SYM_CU_INIT), u32(0)))
+                if rc != 0 {
+                    cuda_ok = false
+                } else {
+                    ffi.write_i64(p, OFF_CUDA_INIT, 1)
+                }
+            }
+            if cuda_ok {
+                ffi.write_ptr(p, OFF_CUDA_LIB, cuda_lib)
+            }
+        }
+        if !cuda_ok {
+            ffi.write_i64(p, OFF_CUDA_OK, 0)
+            ffi.write_i64(p, OFF_NVRTC_OK, 0)
+            ffi.write_i64(p, OFF_CUBLAS_OK, 0)
+            ffi.write_i64(p, OFF_LOADED, 1)
+            << false
+        }
+        ffi.write_i64(p, OFF_CUDA_OK, 1)
+
+        nvrtc_cands := ["libnvrtc.so.12", "libnvrtc.so.11.2", "libnvrtc.so", "/usr/local/cuda/lib64/libnvrtc.so", "nvrtc64_120_0.dll", "nvrtc64_112_0.dll"]
+        nvrtc_lib := open_first_lib("XU_NVRTC_LIBRARY", &nvrtc_cands)
+        nvrtc_ok := load_sym_range(p, nvrtc_lib, SYM_NVRTC_CREATE_PROGRAM, SYM_CUBLAS_CREATE)
+        if nvrtc_ok {
+            ffi.write_ptr(p, OFF_NVRTC_LIB, nvrtc_lib)
+            ffi.write_i64(p, OFF_NVRTC_OK, 1)
+        } else {
+            if !ffi.is_null(nvrtc_lib) { ffi.dlclose(nvrtc_lib) }
+            ffi.write_i64(p, OFF_NVRTC_OK, 0)
+        }
+
+        cublas_cands := ["libcublas.so.12", "libcublas.so.11", "libcublas.so", "/usr/local/cuda/lib64/libcublas.so", "cublas64_12.dll", "cublas64_11.dll"]
+        cublas_lib := open_first_lib("XU_CUBLAS_LIBRARY", &cublas_cands)
+        cublas_ok := load_sym_range(p, cublas_lib, SYM_CUBLAS_CREATE, SYM_COUNT)
+        if cublas_ok {
+            ffi.write_ptr(p, OFF_CUBLAS_LIB, cublas_lib)
+            ffi.write_i64(p, OFF_CUBLAS_OK, 1)
+        } else {
+            if !ffi.is_null(cublas_lib) { ffi.dlclose(cublas_lib) }
+            ffi.write_i64(p, OFF_CUBLAS_OK, 0)
+        }
+
+        ffi.write_i64(p, OFF_LOADED, 1)
+        << true
+    }
+}
+
+pub fn available() bool {
+    if !ensure() { << false }
+    << device_count() > 0
+}
+
+pub fn has_nvrtc() bool {
+    if !ensure() { << false }
+    unsafe { << ffi.read_i64(blob(), OFF_NVRTC_OK) == 1 }
+}
+
+pub fn has_cublas() bool {
+    if !ensure() { << false }
+    unsafe { << ffi.read_i64(blob(), OFF_CUBLAS_OK) == 1 }
+}
+
+pub fn device_count() int {
+    if !ensure() { << 0 }
+    unsafe {
+        out := ffi.calloc(8)
+        if ffi.is_null(out) { << 0 }
+        rc := int(xc_cu_device_get_count(sym(SYM_CU_DEVICE_GET_COUNT), out))
+        cnt := int(ffi.read_i32(out, 0))
+        ffi.free(out)
+        if rc != 0 || cnt < 0 { << 0 }
+        << cnt
+    }
+}
+
+fn cu_err(op string, rc int) int {
+    >>> errors.code(rc, "cuda_native: " + op + " failed (code=" + str(rc) + ")")
+}
+
+pub fn open(ordinal int) CudaDevice {
+    if !ensure() { >>> errors.new("cuda_native: CUDA driver library unavailable") }
+    unsafe {
+        dev_box := ffi.calloc(8)
+        ctx_box := ffi.calloc(8)
+        st_box := ffi.calloc(8)
+        cb_box := ffi.calloc(8)
+        if ffi.is_null(dev_box) || ffi.is_null(ctx_box) || ffi.is_null(st_box) || ffi.is_null(cb_box) {
+            if !ffi.is_null(dev_box) { ffi.free(dev_box) }
+            if !ffi.is_null(ctx_box) { ffi.free(ctx_box) }
+            if !ffi.is_null(st_box) { ffi.free(st_box) }
+            if !ffi.is_null(cb_box) { ffi.free(cb_box) }
+            >>> errors.new("cuda_native: host allocation failed")
+        }
+        rc1 := int(xc_cu_device_get(sym(SYM_CU_DEVICE_GET), dev_box, i32(ordinal)))
+        dev_handle := int(ffi.read_i32(dev_box, 0))
+        ffi.free(dev_box)
+        if rc1 != 0 {
+            ffi.free(ctx_box)
+            ffi.free(st_box)
+            ffi.free(cb_box)
+            _ := cu_err("cuDeviceGet", rc1) >>>
+        }
+
+        rc2 := int(xc_cu_ctx_create(sym(SYM_CU_CTX_CREATE), ctx_box, u32(0), i32(dev_handle)))
+        ctx := ffi.read_ptr(ctx_box, 0)
+        ffi.free(ctx_box)
+        if rc2 != 0 || ffi.is_null(ctx) {
+            ffi.free(st_box)
+            ffi.free(cb_box)
+            _ := cu_err("cuCtxCreate_v2", rc2) >>>
+        }
+
+        rc3 := int(xc_cu_stream_create(sym(SYM_CU_STREAM_CREATE), st_box, u32(0)))
+        stream := ffi.read_ptr(st_box, 0)
+        ffi.free(st_box)
+        if rc3 != 0 {
+            _ := xc_cu_ctx_destroy(sym(SYM_CU_CTX_DESTROY), ctx)
+            ffi.free(cb_box)
+            _ := cu_err("cuStreamCreate", rc3) >>>
+        }
+
+        $cublas := ffi.null()
+        if has_cublas() {
+            rc4 := int(xc_cublas_create(sym(SYM_CUBLAS_CREATE), cb_box))
+            if rc4 == 0 {
+                cublas = ffi.read_ptr(cb_box, 0)
+                if !ffi.is_null(cublas) && !ffi.is_null(stream) {
+                    _ := xc_cublas_set_stream(sym(SYM_CUBLAS_SET_STREAM), cublas, stream)
+                }
+            }
+        }
+        ffi.free(cb_box)
+
+        << CudaDevice{
+            ordinal: ordinal,
+            handle: dev_handle,
+            ctx: ctx,
+            stream: stream,
+            cublas: cublas,
+            llm_mod: ffi.null(),
+            fn_add_f32: ffi.null(),
+            fn_mul_f32: ffi.null(),
+            fn_scale_f32: ffi.null(),
+            fn_rmsnorm_f32: ffi.null(),
+            fn_softmax_f32: ffi.null(),
+            fn_swiglu_f32: ffi.null(),
+            fn_rope_f32: ffi.null(),
+            fn_gemm_f32: ffi.null(),
+            fn_gemm_f32_nt: ffi.null(),
+            fn_gemm_f32_tn: ffi.null(),
+            fn_gemv_q4_0_f32: ffi.null(),
+            fn_gemv_q8_0_f32: ffi.null(),
+            fn_gemv_q4_k_f32: ffi.null(),
+            fn_gemv_q5_k_f32: ffi.null(),
+            fn_gemv_q6_k_f32: ffi.null(),
+            closed: false
+        }
+    }
+}
+
+pub fn (d &CudaDevice) make_current() int {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    unsafe {
+        rc := int(xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), d.ctx))
+        if rc != 0 { _ := cu_err("cuCtxSetCurrent", rc) >>> }
+        << 0
+    }
+}
+
+pub fn (d &CudaDevice) name() string {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    unsafe {
+        buf := ffi.calloc(256)
+        if ffi.is_null(buf) { >>> errors.new("cuda_native: host alloc failed") }
+        rc := int(xc_cu_device_get_name(sym(SYM_CU_DEVICE_GET_NAME), buf, i32(256), i32(d.handle)))
+        if rc != 0 {
+            ffi.free(buf)
+            _ := cu_err("cuDeviceGetName", rc) >>>
+        }
+        s := ffi.string_from(buf)
+        ffi.free(buf)
+        << s
+    }
+}
+
+pub fn (d &CudaDevice) total_mem() int {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    unsafe {
+        out := ffi.calloc(8)
+        if ffi.is_null(out) { >>> errors.new("cuda_native: host alloc failed") }
+        rc := int(xc_cu_device_total_mem(sym(SYM_CU_DEVICE_TOTAL_MEM), out, i32(d.handle)))
+        sz := ffi.read_i64(out, 0)
+        ffi.free(out)
+        if rc != 0 { _ := cu_err("cuDeviceTotalMem_v2", rc) >>> }
+        << sz
+    }
+}
+
+fn (d &CudaDevice) attr(a int) int {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    unsafe {
+        out := ffi.calloc(8)
+        if ffi.is_null(out) { >>> errors.new("cuda_native: host alloc failed") }
+        rc := int(xc_cu_device_get_attr(sym(SYM_CU_DEVICE_GET_ATTR), out, i32(a), i32(d.handle)))
+        v := int(ffi.read_i32(out, 0))
+        ffi.free(out)
+        if rc != 0 { _ := cu_err("cuDeviceGetAttribute", rc) >>> }
+        << v
+    }
+}
+
+pub fn (d &CudaDevice) sm_count() int { << d.attr(CU_ATTR_MULTIPROCESSOR_COUNT) >>> }
+pub fn (d &CudaDevice) cc_major() int { << d.attr(CU_ATTR_COMPUTE_CAPABILITY_MAJOR) >>> }
+pub fn (d &CudaDevice) cc_minor() int { << d.attr(CU_ATTR_COMPUTE_CAPABILITY_MINOR) >>> }
+
+pub fn (d &CudaDevice) sync() int {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    unsafe {
+        d.make_current() >>>
+        if !ffi.is_null(d.stream) {
+            rc := int(xc_cu_stream_synchronize(sym(SYM_CU_STREAM_SYNCHRONIZE), d.stream))
+            if rc != 0 { _ := cu_err("cuStreamSynchronize", rc) >>> }
+            << 0
+        }
+        rc2 := int(xc_cu_ctx_synchronize(sym(SYM_CU_CTX_SYNCHRONIZE)))
+        if rc2 != 0 { _ := cu_err("cuCtxSynchronize", rc2) >>> }
+        << 0
+    }
+}
+
+pub fn (d $&CudaDevice) close() int {
+    if d.closed { << 0 }
+    d.closed = true
+    unsafe {
+        if !ffi.is_null(d.llm_mod) {
+            _ := xc_cu_module_unload(sym(SYM_CU_MODULE_UNLOAD), d.llm_mod)
+            d.llm_mod = ffi.null()
+        }
+        if !ffi.is_null(d.cublas) {
+            _ := xc_cublas_destroy(sym(SYM_CUBLAS_DESTROY), d.cublas)
+            d.cublas = ffi.null()
+        }
+        if !ffi.is_null(d.stream) {
+            _ := xc_cu_stream_destroy(sym(SYM_CU_STREAM_DESTROY), d.stream)
+            d.stream = ffi.null()
+        }
+        if !ffi.is_null(d.ctx) {
+            _ := xc_cu_ctx_destroy(sym(SYM_CU_CTX_DESTROY), d.ctx)
+            d.ctx = ffi.null()
+        }
+    }
+    << 0
+}
+
+pub fn (d &CudaDevice) alloc_bytes(byte_len int) CudaBuffer {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if byte_len < 0 { >>> errors.new("cuda_native: negative allocation size") }
+    unsafe {
+        d.make_current() >>>
+        $sz := byte_len
+        if sz == 0 { sz = 16 }
+        out := ffi.calloc(8)
+        if ffi.is_null(out) { >>> errors.new("cuda_native: host alloc failed") }
+        rc := int(xc_cu_mem_alloc(sym(SYM_CU_MEM_ALLOC), out, u64(sz)))
+        dptr := ffi.read_u64(out, 0)
+        ffi.free(out)
+        if rc != 0 { _ := cu_err("cuMemAlloc_v2", rc) >>> }
+        << CudaBuffer{dptr: dptr, byte_len: byte_len, ctx: d.ctx, closed: false}
+    }
+}
+
+pub fn (d &CudaDevice) alloc_f32(elements int) CudaBuffer {
+    << d.alloc_bytes(elements * 4) >>>
+}
+
+pub fn (b $&CudaBuffer) write_bytes(data &string) int {
+    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    if data.len != b.byte_len {
+        >>> errors.new("cuda_native: write_bytes length mismatch")
+    }
+    if data.len == 0 { << 0 }
+    unsafe {
+        _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
+        tmp := ffi.calloc(data.len)
+        if ffi.is_null(tmp) { _ := cu_err("write_bytes alloc", -7) >>> }
+        for i in 0:data.len { ffi.write_u8(tmp, i, u8(data[i])) }
+        rc := int(xc_cu_memcpy_htod(sym(SYM_CU_MEMCPY_HTOD), b.dptr, tmp, u64(data.len)))
+        ffi.free(tmp)
+        if rc != 0 { _ := cu_err("cuMemcpyHtoD_v2", rc) >>> }
+        << 0
+    }
+}
+
+pub fn (b $&CudaBuffer) write_f32_bits(bits &[]int) int {
+    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    n := bits.len
+    if n * 4 != b.byte_len {
+        >>> errors.new("cuda_native: write_f32_bits length mismatch")
+    }
+    if n == 0 { << 0 }
+    unsafe {
+        _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
+        tmp := ffi.calloc(n * 4)
+        if ffi.is_null(tmp) { >>> errors.new("cuda_native: host alloc failed") }
+        for i in 0:n {
+            ffi.write_u32(tmp, i * 4, u32(bits[i]))
+        }
+        rc := int(xc_cu_memcpy_htod(sym(SYM_CU_MEMCPY_HTOD), b.dptr, tmp, u64(n * 4)))
+        ffi.free(tmp)
+        if rc != 0 { _ := cu_err("cuMemcpyHtoD_v2", rc) >>> }
+        << 0
+    }
+}
+
+pub fn (b &CudaBuffer) copy_f32_bits(out $&[]int) int {
+    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    n := b.byte_len / 4
+    if out.len != n {
+        >>> errors.new("cuda_native: copy_f32_bits length mismatch")
+    }
+    if n == 0 { << 0 }
+    unsafe {
+        _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
+        tmp := ffi.calloc(b.byte_len)
+        if ffi.is_null(tmp) { >>> errors.new("cuda_native: host alloc failed") }
+        rc := int(xc_cu_memcpy_dtoh(sym(SYM_CU_MEMCPY_DTOH), tmp, b.dptr, u64(b.byte_len)))
+        if rc != 0 {
+            ffi.free(tmp)
+            _ := cu_err("cuMemcpyDtoH_v2", rc) >>>
+        }
+        for i in 0:n {
+            out[i] = int(ffi.read_u32(tmp, i * 4))
+        }
+        ffi.free(tmp)
+        << 0
+    }
+}
+
+pub fn (b &CudaBuffer) read_f32_bits() []int {
+    n := b.byte_len / 4
+    $out := []int{}
+    out.reserve(n)
+    for _ in 0:n { out.push(0) }
+    b.copy_f32_bits($&out) >>>
+    << out
+}
+
+pub fn (b $&CudaBuffer) copy_from(src &CudaBuffer) int {
+    if b.closed || src.closed { >>> errors.new("cuda_native: buffer closed") }
+    if b.byte_len != src.byte_len { >>> errors.new("cuda_native: copy_from size mismatch") }
+    if b.byte_len == 0 { << 0 }
+    unsafe {
+        _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
+        rc := int(xc_cu_memcpy_dtod(sym(SYM_CU_MEMCPY_DTOD), b.dptr, src.dptr, u64(b.byte_len)))
+        if rc != 0 { _ := cu_err("cuMemcpyDtoD_v2", rc) >>> }
+        << 0
+    }
+}
+
+pub fn (b $&CudaBuffer) zero() int {
+    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    if b.byte_len == 0 { << 0 }
+    unsafe {
+        _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
+        rc := int(xc_cu_memset_d8(sym(SYM_CU_MEMSET_D8), b.dptr, u8(0), u64(b.byte_len)))
+        if rc != 0 { _ := cu_err("cuMemsetD8_v2", rc) >>> }
+        << 0
+    }
+}
+
+pub fn (b $&CudaBuffer) close() int {
+    if b.closed { << 0 }
+    b.closed = true
+    unsafe {
+        if int(b.dptr) != 0 {
+            _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
+            _ := xc_cu_mem_free(sym(SYM_CU_MEM_FREE), b.dptr)
+            b.dptr = u64(0)
+        }
+    }
+    << 0
+}
+
+pub fn compile_ptx(src string, name string, arch_opt string) string {
+    if !has_nvrtc() { >>> errors.new("cuda_native: libnvrtc unavailable") }
+    unsafe {
+        prog_box := ffi.calloc(8)
+        sz_box := ffi.calloc(8)
+        if ffi.is_null(prog_box) || ffi.is_null(sz_box) {
+            if !ffi.is_null(prog_box) { ffi.free(prog_box) }
+            if !ffi.is_null(sz_box) { ffi.free(sz_box) }
+            >>> errors.new("cuda_native: host alloc failed")
+        }
+        c_src := ffi.cstring(&src)
+        c_name := ffi.cstring(&name)
+        rc1 := int(xc_nvrtc_create_program(sym(SYM_NVRTC_CREATE_PROGRAM), prog_box, c_src, c_name, i32(0), ffi.null(), ffi.null()))
+        ffi.free(c_src)
+        ffi.free(c_name)
+        if rc1 != 0 {
+            ffi.free(prog_box)
+            ffi.free(sz_box)
+            _ := cu_err("nvrtcCreateProgram", rc1) >>>
+        }
+        prog := ffi.read_ptr(prog_box, 0)
+
+        $opts_arr := ffi.null()
+        $opt_c := ffi.null()
+        $n_opts := 0
+        if arch_opt.len > 0 {
+            opt_c = ffi.cstring(&arch_opt)
+            opts_arr = ffi.calloc(8)
+            ffi.write_ptr(opts_arr, 0, opt_c)
+            n_opts = 1
+        }
+        rc2 := int(xc_nvrtc_compile_program(sym(SYM_NVRTC_COMPILE_PROGRAM), prog, i32(n_opts), opts_arr))
+        if !ffi.is_null(opt_c) { ffi.free(opt_c) }
+        if !ffi.is_null(opts_arr) { ffi.free(opts_arr) }
+        if rc2 != 0 {
+            $log_msg := ""
+            if int(xc_nvrtc_get_log_size(sym(SYM_NVRTC_GET_LOG_SIZE), prog, sz_box)) == 0 {
+                lsz := ffi.read_i64(sz_box, 0)
+                if lsz > 0 {
+                    lbuf := ffi.calloc(lsz + 1)
+                    if int(xc_nvrtc_get_log(sym(SYM_NVRTC_GET_LOG), prog, lbuf)) == 0 {
+                        log_msg = ffi.string_from(lbuf)
+                    }
+                    ffi.free(lbuf)
+                }
+            }
+            _ := xc_nvrtc_destroy_program(sym(SYM_NVRTC_DESTROY_PROGRAM), prog_box)
+            ffi.free(prog_box)
+            ffi.free(sz_box)
+            >>> errors.new("cuda_native: nvrtcCompileProgram failed: " + log_msg)
+        }
+
+        rc3 := int(xc_nvrtc_get_ptx_size(sym(SYM_NVRTC_GET_PTX_SIZE), prog, sz_box))
+        ptx_sz := ffi.read_i64(sz_box, 0)
+        if rc3 != 0 || ptx_sz <= 0 {
+            _ := xc_nvrtc_destroy_program(sym(SYM_NVRTC_DESTROY_PROGRAM), prog_box)
+            ffi.free(prog_box)
+            ffi.free(sz_box)
+            _ := cu_err("nvrtcGetPTXSize", rc3) >>>
+        }
+        ptx_buf := ffi.calloc(ptx_sz + 1)
+        rc4 := int(xc_nvrtc_get_ptx(sym(SYM_NVRTC_GET_PTX), prog, ptx_buf))
+        ptx := ffi.string_from(ptx_buf)
+        ffi.free(ptx_buf)
+        _ := xc_nvrtc_destroy_program(sym(SYM_NVRTC_DESTROY_PROGRAM), prog_box)
+        ffi.free(prog_box)
+        ffi.free(sz_box)
+        if rc4 != 0 { _ := cu_err("nvrtcGetPTX", rc4) >>> }
+        << ptx
+    }
+}
+
+pub fn (d &CudaDevice) load_module_ptx(ptx string) CudaModule {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    unsafe {
+        d.make_current() >>>
+        mod_box := ffi.calloc(8)
+        c_ptx := ffi.cstring(&ptx)
+        rc := int(xc_cu_module_load_data(sym(SYM_CU_MODULE_LOAD_DATA), mod_box, c_ptx))
+        ffi.free(c_ptx)
+        hm := ffi.read_ptr(mod_box, 0)
+        ffi.free(mod_box)
+        if rc != 0 || ffi.is_null(hm) { _ := cu_err("cuModuleLoadData", rc) >>> }
+        << CudaModule{handle: hm, closed: false}
+    }
+}
+
+pub fn (m &CudaModule) get_function(name string) CudaFunction {
+    if m.closed { >>> errors.new("cuda_native: module closed") }
+    unsafe {
+        fn_box := ffi.calloc(8)
+        c_name := ffi.cstring(&name)
+        rc := int(xc_cu_module_get_function(sym(SYM_CU_MODULE_GET_FUNCTION), fn_box, m.handle, c_name))
+        ffi.free(c_name)
+        hf := ffi.read_ptr(fn_box, 0)
+        ffi.free(fn_box)
+        if rc != 0 || ffi.is_null(hf) { _ := cu_err("cuModuleGetFunction(" + name + ")", rc) >>> }
+        << CudaFunction{handle: hf}
+    }
+}
+
+pub fn (m $&CudaModule) close() int {
+    if m.closed { << 0 }
+    m.closed = true
+    unsafe {
+        if !ffi.is_null(m.handle) {
+            _ := xc_cu_module_unload(sym(SYM_CU_MODULE_UNLOAD), m.handle)
+            m.handle = ffi.null()
+        }
+    }
+    << 0
+}
+
+fn load_fn_from_mod(hmod c_ptr, name string) c_ptr {
+    unsafe {
+        box := ffi.calloc(8)
+        c_name := ffi.cstring(&name)
+        rc := int(xc_cu_module_get_function(sym(SYM_CU_MODULE_GET_FUNCTION), box, hmod, c_name))
+        ffi.free(c_name)
+        hf := ffi.read_ptr(box, 0)
+        ffi.free(box)
+        if rc != 0 || ffi.is_null(hf) { _ := cu_err("cuModuleGetFunction(" + name + ")", rc) >>> }
+        << hf
+    }
+}
+
+pub fn (d $&CudaDevice) ensure_llm_kernels() int {
+    if d.closed { >>> errors.new("cuda_native: device closed") }
+    unsafe {
+        if !ffi.is_null(d.llm_mod) { << 0 }
+        ptx := compile_ptx(llm_kernels_source(), "xu_llm_kernels.cu", "") >>>
+        $m := d.load_module_ptx(ptx) >>>
+        d.llm_mod = m.handle
+        d.fn_add_f32 = load_fn_from_mod(d.llm_mod, "xu_add_f32") >>>
+        d.fn_mul_f32 = load_fn_from_mod(d.llm_mod, "xu_mul_f32") >>>
+        d.fn_scale_f32 = load_fn_from_mod(d.llm_mod, "xu_scale_f32") >>>
+        d.fn_rmsnorm_f32 = load_fn_from_mod(d.llm_mod, "xu_rmsnorm_f32") >>>
+        d.fn_softmax_f32 = load_fn_from_mod(d.llm_mod, "xu_softmax_f32") >>>
+        d.fn_swiglu_f32 = load_fn_from_mod(d.llm_mod, "xu_swiglu_f32") >>>
+        d.fn_rope_f32 = load_fn_from_mod(d.llm_mod, "xu_rope_f32") >>>
+        d.fn_gemm_f32 = load_fn_from_mod(d.llm_mod, "xu_gemm_f32") >>>
+        d.fn_gemm_f32_nt = load_fn_from_mod(d.llm_mod, "xu_gemm_f32_nt") >>>
+        d.fn_gemm_f32_tn = load_fn_from_mod(d.llm_mod, "xu_gemm_f32_tn") >>>
+        d.fn_gemv_q4_0_f32 = load_fn_from_mod(d.llm_mod, "xu_gemv_q4_0_f32") >>>
+        d.fn_gemv_q8_0_f32 = load_fn_from_mod(d.llm_mod, "xu_gemv_q8_0_f32") >>>
+        d.fn_gemv_q4_k_f32 = load_fn_from_mod(d.llm_mod, "xu_gemv_q4_k_f32") >>>
+        d.fn_gemv_q5_k_f32 = load_fn_from_mod(d.llm_mod, "xu_gemv_q5_k_f32") >>>
+        d.fn_gemv_q6_k_f32 = load_fn_from_mod(d.llm_mod, "xu_gemv_q6_k_f32") >>>
+        << 0
+    }
+}
+
+fn (d &CudaDevice) launch_raw(hf c_ptr, gx int, gy int, gz int, bx int, by int, bz int, kinds &[]int, vals &[]int) int {
+    unsafe {
+        d.make_current() >>>
+        n := vals.len
+        storage := ffi.calloc(n * 8)
+        ptrs := ffi.calloc(n * 8)
+        if ffi.is_null(storage) || ffi.is_null(ptrs) {
+            if !ffi.is_null(storage) { ffi.free(storage) }
+            if !ffi.is_null(ptrs) { ffi.free(ptrs) }
+            >>> errors.new("cuda_native: host alloc failed")
+        }
+        // kinds: 0 = u64 dptr, 1 = i32/u32 scalar bits
+        for i in 0:n {
+            if kinds[i] == 0 {
+                ffi.write_u64(storage, i * 8, u64(vals[i]))
+            } else {
+                ffi.write_u32(storage, i * 8, u32(vals[i]))
+            }
+            ffi.write_ptr(ptrs, i * 8, ffi.offset(storage, i * 8))
+        }
+        rc := int(xc_cu_launch_kernel(
+            sym(SYM_CU_LAUNCH_KERNEL),
+            hf,
+            u32(gx), u32(gy), u32(gz),
+            u32(bx), u32(by), u32(bz),
+            u32(0),
+            d.stream,
+            ptrs,
+            ffi.null()
+        ))
+        ffi.free(ptrs)
+        ffi.free(storage)
+        if rc != 0 { _ := cu_err("cuLaunchKernel", rc) >>> }
+        << d.sync() >>>
+    }
+}
+
+fn ceil_div(a int, b int) int {
+    if b <= 0 { << 0 }
+    << (a + b - 1) / b
+}
+
+pub fn (d $&CudaDevice) add_f32(dst $&CudaBuffer, a &CudaBuffer, b &CudaBuffer, n int) int {
+    d.ensure_llm_kernels() >>>
+    if n == 0 { << 0 }
+    kinds := [0, 0, 0, 1]
+    vals := [int(a.dptr), int(b.dptr), int(dst.dptr), n]
+    << d.launch_raw(d.fn_add_f32, ceil_div(n, 256), 1, 1, 256, 1, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) mul_f32(dst $&CudaBuffer, a &CudaBuffer, b &CudaBuffer, n int) int {
+    d.ensure_llm_kernels() >>>
+    if n == 0 { << 0 }
+    kinds := [0, 0, 0, 1]
+    vals := [int(a.dptr), int(b.dptr), int(dst.dptr), n]
+    << d.launch_raw(d.fn_mul_f32, ceil_div(n, 256), 1, 1, 256, 1, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) scale_f32(dst $&CudaBuffer, x &CudaBuffer, n int, alpha f64) int {
+    d.ensure_llm_kernels() >>>
+    if n == 0 { << 0 }
+    kinds := [0, 0, 1, 1]
+    vals := [int(x.dptr), int(dst.dptr), n, math.float32_bits(alpha)]
+    << d.launch_raw(d.fn_scale_f32, ceil_div(n, 256), 1, 1, 256, 1, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) rmsnorm_f32(dst $&CudaBuffer, x &CudaBuffer, weight &CudaBuffer, rows int, cols int, eps f64) int {
+    d.ensure_llm_kernels() >>>
+    if rows == 0 || cols == 0 { << 0 }
+    kinds := [0, 0, 0, 1, 1, 1]
+    vals := [int(x.dptr), int(weight.dptr), int(dst.dptr), rows, cols, math.float32_bits(eps)]
+    << d.launch_raw(d.fn_rmsnorm_f32, rows, 1, 1, 128, 1, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) softmax_f32(dst $&CudaBuffer, x &CudaBuffer, rows int, cols int) int {
+    d.ensure_llm_kernels() >>>
+    if rows == 0 || cols == 0 { << 0 }
+    kinds := [0, 0, 1, 1]
+    vals := [int(x.dptr), int(dst.dptr), rows, cols]
+    << d.launch_raw(d.fn_softmax_f32, rows, 1, 1, 1, 1, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) swiglu_f32(dst $&CudaBuffer, gate &CudaBuffer, up &CudaBuffer, n int) int {
+    d.ensure_llm_kernels() >>>
+    if n == 0 { << 0 }
+    kinds := [0, 0, 0, 1]
+    vals := [int(gate.dptr), int(up.dptr), int(dst.dptr), n]
+    << d.launch_raw(d.fn_swiglu_f32, ceil_div(n, 256), 1, 1, 256, 1, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) rope_f32(dst $&CudaBuffer, x &CudaBuffer, seq_len int, n_heads int, head_dim int, pos_off int, theta f64) int {
+    d.ensure_llm_kernels() >>>
+    half_d := head_dim / 2
+    if seq_len == 0 || n_heads == 0 || half_d == 0 { << 0 }
+    kinds := [0, 0, 1, 1, 1, 1, 1]
+    vals := [int(x.dptr), int(dst.dptr), seq_len, n_heads, head_dim, pos_off, math.float32_bits(math.log(theta))]
+    << d.launch_raw(d.fn_rope_f32, ceil_div(half_d, 64), n_heads, seq_len, 64, 1, 1, &kinds, &vals) >>>
+}
+
+fn (d $&CudaDevice) cublas_gemm_raw(op_b int, op_a int, m int, n int, k int, b_dptr u64, ldb int, a_dptr u64, lda int, c_dptr u64, ldc int) int {
+    unsafe {
+        d.make_current() >>>
+        alpha := ffi.calloc(4)
+        beta := ffi.calloc(4)
+        if ffi.is_null(alpha) || ffi.is_null(beta) {
+            if !ffi.is_null(alpha) { ffi.free(alpha) }
+            if !ffi.is_null(beta) { ffi.free(beta) }
+            >>> errors.new("cuda_native: host alloc failed")
+        }
+        ffi.write_u32(alpha, 0, u32(math.float32_bits(1.0)))
+        ffi.write_u32(beta, 0, u32(math.float32_bits(0.0)))
+        // Row-major C[m,n] = op(A) @ op(B) <=> Column-major C^T[n,m] = op(B)^T @ op(A)^T.
+        rc := int(xc_cublas_sgemm(
+            sym(SYM_CUBLAS_SGEMM),
+            d.cublas,
+            i32(op_b), i32(op_a),
+            i32(n), i32(m), i32(k),
+            alpha,
+            b_dptr, i32(ldb),
+            a_dptr, i32(lda),
+            beta,
+            c_dptr, i32(ldc)
+        ))
+        ffi.free(alpha)
+        ffi.free(beta)
+        if rc != 0 { _ := cu_err("cublasSgemm_v2", rc) >>> }
+        << d.sync() >>>
+    }
+}
+
+pub fn (d $&CudaDevice) gemm_f32(dst $&CudaBuffer, a &CudaBuffer, b &CudaBuffer, m int, n int, k int) int {
+    if m == 0 || n == 0 || k == 0 { << 0 }
+    unsafe {
+        if !ffi.is_null(d.cublas) {
+            << d.cublas_gemm_raw(CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, b.dptr, n, a.dptr, k, dst.dptr, n) >>>
+        }
+    }
+    d.ensure_llm_kernels() >>>
+    kinds := [0, 0, 0, 1, 1, 1]
+    vals := [int(a.dptr), int(b.dptr), int(dst.dptr), m, n, k]
+    << d.launch_raw(d.fn_gemm_f32, ceil_div(n, 16), ceil_div(m, 16), 1, 16, 16, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) gemm_f32_nt(dst $&CudaBuffer, a &CudaBuffer, b &CudaBuffer, m int, n int, k int) int {
+    if m == 0 || n == 0 || k == 0 { << 0 }
+    unsafe {
+        if !ffi.is_null(d.cublas) {
+            // B is [n, k] row-major -> B^T in col-major is [k, n], we need B[n, k] = op(B)^T so op_b = T with ldb = k.
+            << d.cublas_gemm_raw(CUBLAS_OP_T, CUBLAS_OP_N, m, n, k, b.dptr, k, a.dptr, k, dst.dptr, n) >>>
+        }
+    }
+    d.ensure_llm_kernels() >>>
+    kinds := [0, 0, 0, 1, 1, 1]
+    vals := [int(a.dptr), int(b.dptr), int(dst.dptr), m, n, k]
+    << d.launch_raw(d.fn_gemm_f32_nt, ceil_div(n, 16), ceil_div(m, 16), 1, 16, 16, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) gemm_f32_tn(dst $&CudaBuffer, a &CudaBuffer, b &CudaBuffer, m int, n int, k int) int {
+    if m == 0 || n == 0 || k == 0 { << 0 }
+    unsafe {
+        if !ffi.is_null(d.cublas) {
+            // A is [k, m] row-major -> col-major [m, k], so op_a = T with lda = m gives A^T^T = A_col[k, m]^T -> wait:
+            // Col-major A_cm is [m, k] representing A_rm^T; we want A_rm^T^T? No: row-major dst[m,n] = A^T @ B,
+            // where A is [k, m] rm -> A_cm is [m, k] col-major storing A^T! Wait: element A_rm[p, row] = A_cm[row, p] (lda=m).
+            // Thus (A^T @ B)^T = B^T @ A. In col-major, B_cm is [n, k] = B^T, and we need A_cm^T = [k, m], so op_a = OP_T with lda = m!
+            << d.cublas_gemm_raw(CUBLAS_OP_N, CUBLAS_OP_T, m, n, k, b.dptr, n, a.dptr, m, dst.dptr, n) >>>
+        }
+    }
+    d.ensure_llm_kernels() >>>
+    kinds := [0, 0, 0, 1, 1, 1]
+    vals := [int(a.dptr), int(b.dptr), int(dst.dptr), m, n, k]
+    << d.launch_raw(d.fn_gemm_f32_tn, ceil_div(n, 16), ceil_div(m, 16), 1, 16, 16, 1, &kinds, &vals) >>>
+}
+
+fn (d $&CudaDevice) gemv_quant(hf c_ptr, dst $&CudaBuffer, x &CudaBuffer, w &CudaBuffer, rows int, cols int, m_cnt int) int {
+    if rows == 0 || cols == 0 || m_cnt == 0 { << 0 }
+    kinds := [0, 0, 0, 1, 1, 1]
+    vals := [int(x.dptr), int(w.dptr), int(dst.dptr), rows, cols, m_cnt]
+    << d.launch_raw(hf, ceil_div(rows, 128), m_cnt, 1, 128, 1, 1, &kinds, &vals) >>>
+}
+
+pub fn (d $&CudaDevice) gemv_q4_0_f32(dst $&CudaBuffer, x &CudaBuffer, w &CudaBuffer, rows int, cols int, m_cnt int) int {
+    d.ensure_llm_kernels() >>>
+    << d.gemv_quant(d.fn_gemv_q4_0_f32, dst, x, w, rows, cols, m_cnt) >>>
+}
+
+pub fn (d $&CudaDevice) gemv_q8_0_f32(dst $&CudaBuffer, x &CudaBuffer, w &CudaBuffer, rows int, cols int, m_cnt int) int {
+    d.ensure_llm_kernels() >>>
+    << d.gemv_quant(d.fn_gemv_q8_0_f32, dst, x, w, rows, cols, m_cnt) >>>
+}
+
+pub fn (d $&CudaDevice) gemv_q4_k_f32(dst $&CudaBuffer, x &CudaBuffer, w &CudaBuffer, rows int, cols int, m_cnt int) int {
+    d.ensure_llm_kernels() >>>
+    << d.gemv_quant(d.fn_gemv_q4_k_f32, dst, x, w, rows, cols, m_cnt) >>>
+}
+
+pub fn (d $&CudaDevice) gemv_q5_k_f32(dst $&CudaBuffer, x &CudaBuffer, w &CudaBuffer, rows int, cols int, m_cnt int) int {
+    d.ensure_llm_kernels() >>>
+    << d.gemv_quant(d.fn_gemv_q5_k_f32, dst, x, w, rows, cols, m_cnt) >>>
+}
+
+pub fn (d $&CudaDevice) gemv_q6_k_f32(dst $&CudaBuffer, x &CudaBuffer, w &CudaBuffer, rows int, cols int, m_cnt int) int {
+    d.ensure_llm_kernels() >>>
+    << d.gemv_quant(d.fn_gemv_q6_k_f32, dst, x, w, rows, cols, m_cnt) >>>
+}

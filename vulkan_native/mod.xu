@@ -1,0 +1,961 @@
+@"github.com/xulang-org/packages/vulkan_native"
+
+// Pure-Xu dlopen backend for Vulkan 1.1 compute pipelines (Linux / Windows / MoltenVK).
+// Uses SPIR-V 1.0 compute binaries generated directly in pure Xu (spirv.xu) and allows
+// XU_VULKAN_LIBRARY override for custom ICD/loader paths or test harnesses.
+
+#ffi
+#os
+#errors
+#math
+
+const SLOT = 4 // process_ptr; 0=#internal/sdl, 1=sqlite_native, 2=metal_native, 3=cuda_native, 4=vulkan_native
+
+const OFF_LIB = 0
+const OFF_LOADED = 8
+const OFF_OK = 16
+const OFF_SYMS = 24
+const SYM_COUNT = 45
+const BLOB_SIZE = 384
+
+const SYM_VK_CREATE_INSTANCE = 0
+const SYM_VK_DESTROY_INSTANCE = 1
+const SYM_VK_ENUM_PHYS_DEVICES = 2
+const SYM_VK_GET_PHYS_PROPS = 3
+const SYM_VK_GET_PHYS_MEM_PROPS = 4
+const SYM_VK_GET_PHYS_QUEUE_PROPS = 5
+const SYM_VK_CREATE_DEVICE = 6
+const SYM_VK_DESTROY_DEVICE = 7
+const SYM_VK_GET_DEVICE_QUEUE = 8
+const SYM_VK_CREATE_BUFFER = 9
+const SYM_VK_DESTROY_BUFFER = 10
+const SYM_VK_GET_BUF_MEM_REQ = 11
+const SYM_VK_ALLOC_MEMORY = 12
+const SYM_VK_FREE_MEMORY = 13
+const SYM_VK_BIND_BUF_MEM = 14
+const SYM_VK_MAP_MEMORY = 15
+const SYM_VK_UNMAP_MEMORY = 16
+const SYM_VK_CREATE_SHADER_MODULE = 17
+const SYM_VK_DESTROY_SHADER_MODULE = 18
+const SYM_VK_CREATE_DESC_SET_LAYOUT = 19
+const SYM_VK_DESTROY_DESC_SET_LAYOUT = 20
+const SYM_VK_CREATE_PIPELINE_LAYOUT = 21
+const SYM_VK_DESTROY_PIPELINE_LAYOUT = 22
+const SYM_VK_CREATE_COMPUTE_PIPELINES = 23
+const SYM_VK_DESTROY_PIPELINE = 24
+const SYM_VK_CREATE_DESC_POOL = 25
+const SYM_VK_DESTROY_DESC_POOL = 26
+const SYM_VK_ALLOC_DESC_SETS = 27
+const SYM_VK_UPDATE_DESC_SETS = 28
+const SYM_VK_CREATE_CMD_POOL = 29
+const SYM_VK_DESTROY_CMD_POOL = 30
+const SYM_VK_ALLOC_CMD_BUFFERS = 31
+const SYM_VK_BEGIN_CMD_BUFFER = 32
+const SYM_VK_END_CMD_BUFFER = 33
+const SYM_VK_CMD_BIND_PIPELINE = 34
+const SYM_VK_CMD_BIND_DESC_SETS = 35
+const SYM_VK_CMD_PUSH_CONSTANTS = 36
+const SYM_VK_CMD_DISPATCH = 37
+const SYM_VK_CMD_PIPELINE_BARRIER = 38
+const SYM_VK_QUEUE_SUBMIT = 39
+const SYM_VK_QUEUE_WAIT_IDLE = 40
+const SYM_VK_CREATE_FENCE = 41
+const SYM_VK_DESTROY_FENCE = 42
+const SYM_VK_WAIT_FOR_FENCES = 43
+const SYM_VK_RESET_FENCES = 44
+
+const VK_QUEUE_COMPUTE_BIT = 2
+const VK_MEM_HOST_VISIBLE = 2
+const VK_MEM_HOST_COHERENT = 4
+const VK_BUF_USAGE_STORAGE = 0x20
+const VK_DESC_TYPE_STORAGE_BUFFER = 7
+const VK_SHADER_STAGE_COMPUTE = 0x20
+const VK_PIPELINE_BIND_COMPUTE = 1
+
+extern "C" fn xv_vk_create_instance(fn_ptr c_ptr, info c_ptr, alloc c_ptr, inst_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_instance(fn_ptr c_ptr, inst c_ptr, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_enum_phys_devices(fn_ptr c_ptr, inst c_ptr, cnt_out c_ptr, devs_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_get_phys_props(fn_ptr c_ptr, phys c_ptr, props_out c_ptr) = dynamic
+extern "C" fn xv_vk_get_phys_mem_props(fn_ptr c_ptr, phys c_ptr, mem_out c_ptr) = dynamic
+extern "C" fn xv_vk_get_phys_queue_props(fn_ptr c_ptr, phys c_ptr, cnt_out c_ptr, props_out c_ptr) = dynamic
+extern "C" fn xv_vk_create_device(fn_ptr c_ptr, phys c_ptr, info c_ptr, alloc c_ptr, dev_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_device(fn_ptr c_ptr, dev c_ptr, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_get_device_queue(fn_ptr c_ptr, dev c_ptr, qfam u32, qidx u32, q_out c_ptr) = dynamic
+extern "C" fn xv_vk_create_buffer(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, buf_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_buffer(fn_ptr c_ptr, dev c_ptr, buf u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_get_buf_mem_req(fn_ptr c_ptr, dev c_ptr, buf u64, req_out c_ptr) = dynamic
+extern "C" fn xv_vk_alloc_memory(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, mem_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_free_memory(fn_ptr c_ptr, dev c_ptr, mem u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_bind_buf_mem(fn_ptr c_ptr, dev c_ptr, buf u64, mem u64, off u64) c_int = dynamic
+extern "C" fn xv_vk_map_memory(fn_ptr c_ptr, dev c_ptr, mem u64, off u64, sz u64, flags u32, pp_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_unmap_memory(fn_ptr c_ptr, dev c_ptr, mem u64) = dynamic
+extern "C" fn xv_vk_create_shader_module(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, mod_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_shader_module(fn_ptr c_ptr, dev c_ptr, smod u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_create_desc_set_layout(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, layout_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_desc_set_layout(fn_ptr c_ptr, dev c_ptr, layout u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_create_pipeline_layout(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, layout_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_pipeline_layout(fn_ptr c_ptr, dev c_ptr, layout u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_create_compute_pipelines(fn_ptr c_ptr, dev c_ptr, cache u64, cnt u32, infos c_ptr, alloc c_ptr, pipes_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_pipeline(fn_ptr c_ptr, dev c_ptr, pipe u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_create_desc_pool(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, pool_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_desc_pool(fn_ptr c_ptr, dev c_ptr, pool u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_alloc_desc_sets(fn_ptr c_ptr, dev c_ptr, info c_ptr, sets_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_update_desc_sets(fn_ptr c_ptr, dev c_ptr, write_cnt u32, writes c_ptr, copy_cnt u32, copies c_ptr) = dynamic
+extern "C" fn xv_vk_create_cmd_pool(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, pool_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_cmd_pool(fn_ptr c_ptr, dev c_ptr, pool u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_alloc_cmd_buffers(fn_ptr c_ptr, dev c_ptr, info c_ptr, bufs_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_begin_cmd_buffer(fn_ptr c_ptr, cmd c_ptr, info c_ptr) c_int = dynamic
+extern "C" fn xv_vk_end_cmd_buffer(fn_ptr c_ptr, cmd c_ptr) c_int = dynamic
+extern "C" fn xv_vk_cmd_bind_pipeline(fn_ptr c_ptr, cmd c_ptr, bp c_int, pipe u64) = dynamic
+extern "C" fn xv_vk_cmd_bind_desc_sets(fn_ptr c_ptr, cmd c_ptr, bp c_int, layout u64, first u32, cnt u32, sets c_ptr, dyn_cnt u32, dyn_offs c_ptr) = dynamic
+extern "C" fn xv_vk_cmd_push_constants(fn_ptr c_ptr, cmd c_ptr, layout u64, stages u32, off u32, sz u32, vals c_ptr) = dynamic
+extern "C" fn xv_vk_cmd_dispatch(fn_ptr c_ptr, cmd c_ptr, gx u32, gy u32, gz u32) = dynamic
+extern "C" fn xv_vk_cmd_pipeline_barrier(fn_ptr c_ptr, cmd c_ptr, src_stage u32, dst_stage u32, dep u32, mem_cnt u32, mems c_ptr, buf_cnt u32, bufs c_ptr, img_cnt u32, imgs c_ptr) = dynamic
+extern "C" fn xv_vk_queue_submit(fn_ptr c_ptr, q c_ptr, cnt u32, submits c_ptr, fence u64) c_int = dynamic
+extern "C" fn xv_vk_queue_wait_idle(fn_ptr c_ptr, q c_ptr) c_int = dynamic
+extern "C" fn xv_vk_create_fence(fn_ptr c_ptr, dev c_ptr, info c_ptr, alloc c_ptr, fence_out c_ptr) c_int = dynamic
+extern "C" fn xv_vk_destroy_fence(fn_ptr c_ptr, dev c_ptr, fence u64, alloc c_ptr) = dynamic
+extern "C" fn xv_vk_wait_for_fences(fn_ptr c_ptr, dev c_ptr, cnt u32, fences c_ptr, wait_all u32, timeout u64) c_int = dynamic
+extern "C" fn xv_vk_reset_fences(fn_ptr c_ptr, dev c_ptr, cnt u32, fences c_ptr) c_int = dynamic
+
+pub struct VulkanPipeline {
+    pub shader_mod u64
+    pub desc_layout u64
+    pub pipe_layout u64
+    pub pipeline u64
+    pub num_bindings int
+    pub push_bytes int
+    pub closed bool
+}
+
+pub struct VulkanBuffer {
+    pub handle u64
+    pub memory u64
+    pub byte_len int
+    pub mapped c_ptr
+    pub dev c_ptr
+    pub closed bool
+}
+
+pub struct VulkanDevice {
+    pub ordinal int
+    pub instance c_ptr
+    pub phys c_ptr
+    pub device c_ptr
+    pub queue c_ptr
+    pub qfam int
+    pub host_mem_type int
+    pub desc_pool u64
+    pub cmd_pool u64
+    pub dev_name string
+    pub vendor int
+    pub pipe_add []VulkanPipeline
+    pub pipe_mul []VulkanPipeline
+    pub pipe_scale []VulkanPipeline
+    pub pipe_gemm []VulkanPipeline
+    pub pipe_gemm_nt []VulkanPipeline
+    pub pipe_gemm_tn []VulkanPipeline
+    pub closed bool
+}
+
+fn sym_name(i int) string {
+    if i == SYM_VK_CREATE_INSTANCE { << "vkCreateInstance" }
+    if i == SYM_VK_DESTROY_INSTANCE { << "vkDestroyInstance" }
+    if i == SYM_VK_ENUM_PHYS_DEVICES { << "vkEnumeratePhysicalDevices" }
+    if i == SYM_VK_GET_PHYS_PROPS { << "vkGetPhysicalDeviceProperties" }
+    if i == SYM_VK_GET_PHYS_MEM_PROPS { << "vkGetPhysicalDeviceMemoryProperties" }
+    if i == SYM_VK_GET_PHYS_QUEUE_PROPS { << "vkGetPhysicalDeviceQueueFamilyProperties" }
+    if i == SYM_VK_CREATE_DEVICE { << "vkCreateDevice" }
+    if i == SYM_VK_DESTROY_DEVICE { << "vkDestroyDevice" }
+    if i == SYM_VK_GET_DEVICE_QUEUE { << "vkGetDeviceQueue" }
+    if i == SYM_VK_CREATE_BUFFER { << "vkCreateBuffer" }
+    if i == SYM_VK_DESTROY_BUFFER { << "vkDestroyBuffer" }
+    if i == SYM_VK_GET_BUF_MEM_REQ { << "vkGetBufferMemoryRequirements" }
+    if i == SYM_VK_ALLOC_MEMORY { << "vkAllocateMemory" }
+    if i == SYM_VK_FREE_MEMORY { << "vkFreeMemory" }
+    if i == SYM_VK_BIND_BUF_MEM { << "vkBindBufferMemory" }
+    if i == SYM_VK_MAP_MEMORY { << "vkMapMemory" }
+    if i == SYM_VK_UNMAP_MEMORY { << "vkUnmapMemory" }
+    if i == SYM_VK_CREATE_SHADER_MODULE { << "vkCreateShaderModule" }
+    if i == SYM_VK_DESTROY_SHADER_MODULE { << "vkDestroyShaderModule" }
+    if i == SYM_VK_CREATE_DESC_SET_LAYOUT { << "vkCreateDescriptorSetLayout" }
+    if i == SYM_VK_DESTROY_DESC_SET_LAYOUT { << "vkDestroyDescriptorSetLayout" }
+    if i == SYM_VK_CREATE_PIPELINE_LAYOUT { << "vkCreatePipelineLayout" }
+    if i == SYM_VK_DESTROY_PIPELINE_LAYOUT { << "vkDestroyPipelineLayout" }
+    if i == SYM_VK_CREATE_COMPUTE_PIPELINES { << "vkCreateComputePipelines" }
+    if i == SYM_VK_DESTROY_PIPELINE { << "vkDestroyPipeline" }
+    if i == SYM_VK_CREATE_DESC_POOL { << "vkCreateDescriptorPool" }
+    if i == SYM_VK_DESTROY_DESC_POOL { << "vkDestroyDescriptorPool" }
+    if i == SYM_VK_ALLOC_DESC_SETS { << "vkAllocateDescriptorSets" }
+    if i == SYM_VK_UPDATE_DESC_SETS { << "vkUpdateDescriptorSets" }
+    if i == SYM_VK_CREATE_CMD_POOL { << "vkCreateCommandPool" }
+    if i == SYM_VK_DESTROY_CMD_POOL { << "vkDestroyCommandPool" }
+    if i == SYM_VK_ALLOC_CMD_BUFFERS { << "vkAllocateCommandBuffers" }
+    if i == SYM_VK_BEGIN_CMD_BUFFER { << "vkBeginCommandBuffer" }
+    if i == SYM_VK_END_CMD_BUFFER { << "vkEndCommandBuffer" }
+    if i == SYM_VK_CMD_BIND_PIPELINE { << "vkCmdBindPipeline" }
+    if i == SYM_VK_CMD_BIND_DESC_SETS { << "vkCmdBindDescriptorSets" }
+    if i == SYM_VK_CMD_PUSH_CONSTANTS { << "vkCmdPushConstants" }
+    if i == SYM_VK_CMD_DISPATCH { << "vkCmdDispatch" }
+    if i == SYM_VK_CMD_PIPELINE_BARRIER { << "vkCmdPipelineBarrier" }
+    if i == SYM_VK_QUEUE_SUBMIT { << "vkQueueSubmit" }
+    if i == SYM_VK_QUEUE_WAIT_IDLE { << "vkQueueWaitIdle" }
+    if i == SYM_VK_CREATE_FENCE { << "vkCreateFence" }
+    if i == SYM_VK_DESTROY_FENCE { << "vkDestroyFence" }
+    if i == SYM_VK_WAIT_FOR_FENCES { << "vkWaitForFences" }
+    if i == SYM_VK_RESET_FENCES { << "vkResetFences" }
+    << ""
+}
+
+fn blob() c_ptr {
+    unsafe {
+        $p := ffi.process_get(SLOT)
+        if !ffi.is_null(p) { << p }
+        p = ffi.calloc(BLOB_SIZE)
+        if ffi.is_null(p) { << ffi.null() }
+        ffi.process_set(SLOT, p)
+        << p
+    }
+}
+
+fn sym(i int) c_ptr {
+    unsafe {
+        p := blob()
+        if ffi.is_null(p) || i < 0 || i >= SYM_COUNT { << ffi.null() }
+        << ffi.read_ptr(p, OFF_SYMS + i * 8)
+    }
+}
+
+fn ensure() bool {
+    unsafe {
+        p := blob()
+        if ffi.is_null(p) { << false }
+        over := os.getenv("XU_VULKAN_LIBRARY")
+        if ffi.read_i64(p, OFF_LOADED) != 0 && over.len == 0 {
+            << ffi.read_i64(p, OFF_OK) == 1
+        }
+        cands := ["libvulkan.so.1", "libvulkan.so", "libvulkan.1.dylib", "libMoltenVK.dylib", "/opt/homebrew/lib/libvulkan.1.dylib", "/opt/homebrew/lib/libMoltenVK.dylib", "/usr/local/lib/libvulkan.1.dylib", "vulkan-1.dll"]
+        $lib := ffi.null()
+        if over.len > 0 {
+            lib = ffi.dlopen_local(&over)
+        } else {
+            for i in 0:cands.len {
+                c := cands[i]
+                h := ffi.dlopen_local(&c)
+                if !ffi.is_null(h) {
+                    lib = h
+                    <-
+                }
+            }
+        }
+        $ok := !ffi.is_null(lib)
+        if ok {
+            for i in 0:SYM_COUNT {
+                n := sym_name(i)
+                f := ffi.dlsym(lib, &n)
+                if ffi.is_null(f) {
+                    ok = false
+                    <-
+                }
+                ffi.write_ptr(p, OFF_SYMS + i * 8, f)
+            }
+        }
+        if !ok && !ffi.is_null(lib) {
+            ffi.dlclose(lib)
+            lib = ffi.null()
+        }
+        ffi.write_ptr(p, OFF_LIB, lib)
+        ffi.write_i64(p, OFF_LOADED, 1)
+        if ok { ffi.write_i64(p, OFF_OK, 1) } else { ffi.write_i64(p, OFF_OK, 0) }
+        << ok
+    }
+}
+
+fn vk_err(op string, rc int) int {
+    >>> errors.code(rc, "vulkan_native: " + op + " failed (code=" + str(rc) + ")")
+}
+
+fn create_vk_instance() c_ptr {
+    unsafe {
+        app := ffi.calloc(48)
+        ici := ffi.calloc(64)
+        inst_box := ffi.calloc(8)
+        name := ffi.cstring(&"xu_vulkan")
+        if ffi.is_null(app) || ffi.is_null(ici) || ffi.is_null(inst_box) || ffi.is_null(name) {
+            if !ffi.is_null(app) { ffi.free(app) }
+            if !ffi.is_null(ici) { ffi.free(ici) }
+            if !ffi.is_null(inst_box) { ffi.free(inst_box) }
+            if !ffi.is_null(name) { ffi.free(name) }
+            >>> errors.new("vulkan_native: host alloc failed")
+        }
+        ffi.write_u32(app, 0, u32(0)) // VK_STRUCTURE_TYPE_APPLICATION_INFO
+        ffi.write_ptr(app, 16, name)
+        ffi.write_u32(app, 24, u32(1))
+        ffi.write_ptr(app, 32, name)
+        ffi.write_u32(app, 40, u32(1))
+        ffi.write_u32(app, 44, u32((1 << 22) | (1 << 12))) // Vulkan 1.1
+
+        ffi.write_u32(ici, 0, u32(1)) // VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
+        ffi.write_ptr(ici, 24, app)
+
+        rc := int(xv_vk_create_instance(sym(SYM_VK_CREATE_INSTANCE), ici, ffi.null(), inst_box))
+        inst := ffi.read_ptr(inst_box, 0)
+        ffi.free(name)
+        ffi.free(inst_box)
+        ffi.free(ici)
+        ffi.free(app)
+        if rc != 0 || ffi.is_null(inst) { _ := vk_err("vkCreateInstance", rc) >>> }
+        << inst
+    }
+}
+
+pub fn available() bool {
+    if !ensure() { << false }
+    cnt := device_count()
+    << cnt > 0
+}
+
+pub fn device_count() int {
+    if !ensure() { << 0 }
+    unsafe {
+        $inst := create_vk_instance() >>> (_) { << 0 }
+        cnt_box := ffi.calloc(8)
+        if ffi.is_null(cnt_box) {
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            << 0
+        }
+        rc := int(xv_vk_enum_phys_devices(sym(SYM_VK_ENUM_PHYS_DEVICES), inst, cnt_box, ffi.null()))
+        cnt := int(ffi.read_u32(cnt_box, 0))
+        ffi.free(cnt_box)
+        xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+        if rc != 0 || cnt < 0 { << 0 }
+        << cnt
+    }
+}
+
+pub fn open(ordinal int) VulkanDevice {
+    if !ensure() { >>> errors.new("vulkan_native: Vulkan loader unavailable") }
+    unsafe {
+        inst := create_vk_instance() >>>
+        cnt_box := ffi.calloc(8)
+        rc1 := int(xv_vk_enum_phys_devices(sym(SYM_VK_ENUM_PHYS_DEVICES), inst, cnt_box, ffi.null()))
+        cnt := int(ffi.read_u32(cnt_box, 0))
+        if rc1 != 0 || cnt <= 0 || ordinal < 0 || ordinal >= cnt {
+            ffi.free(cnt_box)
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            >>> errors.new("vulkan_native: no matching physical device")
+        }
+        devs := ffi.calloc(cnt * 8)
+        rc2 := int(xv_vk_enum_phys_devices(sym(SYM_VK_ENUM_PHYS_DEVICES), inst, cnt_box, devs))
+        ffi.free(cnt_box)
+        if rc2 != 0 {
+            ffi.free(devs)
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            _ := vk_err("vkEnumeratePhysicalDevices", rc2) >>>
+        }
+        phys := ffi.read_ptr(devs, ordinal * 8)
+        ffi.free(devs)
+
+        props := ffi.calloc(1024)
+        xv_vk_get_phys_props(sym(SYM_VK_GET_PHYS_PROPS), phys, props)
+        vendor := int(ffi.read_u32(props, 8))
+        dname := ffi.string_from(ffi.offset(props, 20))
+        ffi.free(props)
+
+        mem_props := ffi.calloc(640)
+        xv_vk_get_phys_mem_props(sym(SYM_VK_GET_PHYS_MEM_PROPS), phys, mem_props)
+        mcnt := int(ffi.read_u32(mem_props, 0))
+        $host_mt := -1
+        for i in 0:mcnt {
+            pflags := int(ffi.read_u32(mem_props, 4 + i * 8))
+            if (pflags & (VK_MEM_HOST_VISIBLE | VK_MEM_HOST_COHERENT)) == (VK_MEM_HOST_VISIBLE | VK_MEM_HOST_COHERENT) {
+                host_mt = i
+                <-
+            }
+        }
+        if host_mt < 0 {
+            for i in 0:mcnt {
+                pflags := int(ffi.read_u32(mem_props, 4 + i * 8))
+                if (pflags & VK_MEM_HOST_VISIBLE) != 0 {
+                    host_mt = i
+                    <-
+                }
+            }
+        }
+        ffi.free(mem_props)
+        if host_mt < 0 {
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            >>> errors.new("vulkan_native: no host-visible memory type")
+        }
+
+        qcnt_box := ffi.calloc(8)
+        xv_vk_get_phys_queue_props(sym(SYM_VK_GET_PHYS_QUEUE_PROPS), phys, qcnt_box, ffi.null())
+        qcnt := int(ffi.read_u32(qcnt_box, 0))
+        $qfam := -1
+        if qcnt > 0 {
+            qprops := ffi.calloc(qcnt * 24)
+            xv_vk_get_phys_queue_props(sym(SYM_VK_GET_PHYS_QUEUE_PROPS), phys, qcnt_box, qprops)
+            for i in 0:qcnt {
+                qflags := int(ffi.read_u32(qprops, i * 24))
+                if (qflags & VK_QUEUE_COMPUTE_BIT) != 0 {
+                    qfam = i
+                    <-
+                }
+            }
+            ffi.free(qprops)
+        }
+        ffi.free(qcnt_box)
+        if qfam < 0 {
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            >>> errors.new("vulkan_native: no compute queue family")
+        }
+
+        prio := ffi.calloc(4)
+        ffi.write_u32(prio, 0, u32(math.float32_bits(1.0)))
+        dqci := ffi.calloc(40)
+        ffi.write_u32(dqci, 0, u32(2)) // VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
+        ffi.write_u32(dqci, 20, u32(qfam))
+        ffi.write_u32(dqci, 24, u32(1))
+        ffi.write_ptr(dqci, 32, prio)
+
+        dci := ffi.calloc(72)
+        ffi.write_u32(dci, 0, u32(3)) // VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
+        ffi.write_u32(dci, 20, u32(1))
+        ffi.write_ptr(dci, 24, dqci)
+
+        dev_box := ffi.calloc(8)
+        rc3 := int(xv_vk_create_device(sym(SYM_VK_CREATE_DEVICE), phys, dci, ffi.null(), dev_box))
+        dev := ffi.read_ptr(dev_box, 0)
+        ffi.free(dev_box)
+        ffi.free(dci)
+        ffi.free(dqci)
+        ffi.free(prio)
+        if rc3 != 0 || ffi.is_null(dev) {
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            _ := vk_err("vkCreateDevice", rc3) >>>
+        }
+
+        q_box := ffi.calloc(8)
+        xv_vk_get_device_queue(sym(SYM_VK_GET_DEVICE_QUEUE), dev, u32(qfam), u32(0), q_box)
+        queue := ffi.read_ptr(q_box, 0)
+        ffi.free(q_box)
+
+        // Descriptor pool (storage buffers) & command pool
+        dp_size := ffi.calloc(8)
+        ffi.write_u32(dp_size, 0, u32(VK_DESC_TYPE_STORAGE_BUFFER))
+        ffi.write_u32(dp_size, 4, u32(256))
+        dpci := ffi.calloc(40)
+        ffi.write_u32(dpci, 0, u32(33)) // VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+        ffi.write_u32(dpci, 16, u32(1)) // FREE_DESCRIPTOR_SET_BIT
+        ffi.write_u32(dpci, 20, u32(128))
+        ffi.write_u32(dpci, 24, u32(1))
+        ffi.write_ptr(dpci, 32, dp_size)
+        dp_box := ffi.calloc(8)
+        rc4 := int(xv_vk_create_desc_pool(sym(SYM_VK_CREATE_DESC_POOL), dev, dpci, ffi.null(), dp_box))
+        desc_pool := ffi.read_u64(dp_box, 0)
+        ffi.free(dp_box)
+        ffi.free(dpci)
+        ffi.free(dp_size)
+        if rc4 != 0 {
+            xv_vk_destroy_device(sym(SYM_VK_DESTROY_DEVICE), dev, ffi.null())
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            _ := vk_err("vkCreateDescriptorPool", rc4) >>>
+        }
+
+        cpci := ffi.calloc(24)
+        ffi.write_u32(cpci, 0, u32(39)) // VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+        ffi.write_u32(cpci, 16, u32(2)) // RESET_COMMAND_BUFFER_BIT
+        ffi.write_u32(cpci, 20, u32(qfam))
+        cp_box := ffi.calloc(8)
+        rc5 := int(xv_vk_create_cmd_pool(sym(SYM_VK_CREATE_CMD_POOL), dev, cpci, ffi.null(), cp_box))
+        cmd_pool := ffi.read_u64(cp_box, 0)
+        ffi.free(cp_box)
+        ffi.free(cpci)
+        if rc5 != 0 {
+            xv_vk_destroy_desc_pool(sym(SYM_VK_DESTROY_DESC_POOL), dev, desc_pool, ffi.null())
+            xv_vk_destroy_device(sym(SYM_VK_DESTROY_DEVICE), dev, ffi.null())
+            xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
+            _ := vk_err("vkCreateCommandPool", rc5) >>>
+        }
+
+        << VulkanDevice{
+            ordinal: ordinal,
+            instance: inst,
+            phys: phys,
+            device: dev,
+            queue: queue,
+            qfam: qfam,
+            host_mem_type: host_mt,
+            desc_pool: desc_pool,
+            cmd_pool: cmd_pool,
+            dev_name: dname,
+            vendor: vendor,
+            pipe_add: []VulkanPipeline{},
+            pipe_mul: []VulkanPipeline{},
+            pipe_scale: []VulkanPipeline{},
+            pipe_gemm: []VulkanPipeline{},
+            pipe_gemm_nt: []VulkanPipeline{},
+            pipe_gemm_tn: []VulkanPipeline{},
+            closed: false
+        }
+    }
+}
+
+pub fn (d &VulkanDevice) name() string { << d.dev_name }
+pub fn (d &VulkanDevice) vendor_id() int { << d.vendor }
+pub fn (d &VulkanDevice) queue_family() int { << d.qfam }
+
+fn (d &VulkanDevice) destroy_pipeline(p $&VulkanPipeline) {
+    if p.closed { << }
+    p.closed = true
+    unsafe {
+        if int(p.pipeline) != 0 { xv_vk_destroy_pipeline(sym(SYM_VK_DESTROY_PIPELINE), d.device, p.pipeline, ffi.null()) }
+        if int(p.pipe_layout) != 0 { xv_vk_destroy_pipeline_layout(sym(SYM_VK_DESTROY_PIPELINE_LAYOUT), d.device, p.pipe_layout, ffi.null()) }
+        if int(p.desc_layout) != 0 { xv_vk_destroy_desc_set_layout(sym(SYM_VK_DESTROY_DESC_SET_LAYOUT), d.device, p.desc_layout, ffi.null()) }
+        if int(p.shader_mod) != 0 { xv_vk_destroy_shader_module(sym(SYM_VK_DESTROY_SHADER_MODULE), d.device, p.shader_mod, ffi.null()) }
+    }
+}
+
+pub fn (d $&VulkanDevice) close() int {
+    if d.closed { << 0 }
+    d.closed = true
+    for i in 0:d.pipe_add.len { el := $&d.pipe_add[i] d.destroy_pipeline(el) }
+    for i in 0:d.pipe_mul.len { el := $&d.pipe_mul[i] d.destroy_pipeline(el) }
+    for i in 0:d.pipe_scale.len { el := $&d.pipe_scale[i] d.destroy_pipeline(el) }
+    for i in 0:d.pipe_gemm.len { el := $&d.pipe_gemm[i] d.destroy_pipeline(el) }
+    for i in 0:d.pipe_gemm_nt.len { el := $&d.pipe_gemm_nt[i] d.destroy_pipeline(el) }
+    for i in 0:d.pipe_gemm_tn.len { el := $&d.pipe_gemm_tn[i] d.destroy_pipeline(el) }
+    unsafe {
+        if int(d.cmd_pool) != 0 { xv_vk_destroy_cmd_pool(sym(SYM_VK_DESTROY_CMD_POOL), d.device, d.cmd_pool, ffi.null()) }
+        if int(d.desc_pool) != 0 { xv_vk_destroy_desc_pool(sym(SYM_VK_DESTROY_DESC_POOL), d.device, d.desc_pool, ffi.null()) }
+        if !ffi.is_null(d.device) { xv_vk_destroy_device(sym(SYM_VK_DESTROY_DEVICE), d.device, ffi.null()) }
+        if !ffi.is_null(d.instance) { xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), d.instance, ffi.null()) }
+    }
+    << 0
+}
+
+pub fn (d &VulkanDevice) create_buffer(byte_len int) VulkanBuffer {
+    if d.closed { >>> errors.new("vulkan_native: device closed") }
+    if byte_len < 0 { >>> errors.new("vulkan_native: negative allocation size") }
+    $sz := byte_len
+    if sz == 0 { sz = 16 }
+    unsafe {
+        bci := ffi.calloc(56)
+        ffi.write_u32(bci, 0, u32(12)) // VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+        ffi.write_u64(bci, 24, u64(sz))
+        ffi.write_u32(bci, 32, u32(VK_BUF_USAGE_STORAGE))
+        buf_box := ffi.calloc(8)
+        rc1 := int(xv_vk_create_buffer(sym(SYM_VK_CREATE_BUFFER), d.device, bci, ffi.null(), buf_box))
+        buf := ffi.read_u64(buf_box, 0)
+        ffi.free(buf_box)
+        ffi.free(bci)
+        if rc1 != 0 { _ := vk_err("vkCreateBuffer", rc1) >>> }
+
+        req := ffi.calloc(24)
+        xv_vk_get_buf_mem_req(sym(SYM_VK_GET_BUF_MEM_REQ), d.device, buf, req)
+        alloc_sz := int(ffi.read_u64(req, 0))
+        ffi.free(req)
+        $msz := sz
+        if alloc_sz > msz { msz = alloc_sz }
+
+        mai := ffi.calloc(32)
+        ffi.write_u32(mai, 0, u32(5)) // VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        ffi.write_u64(mai, 16, u64(msz))
+        ffi.write_u32(mai, 24, u32(d.host_mem_type))
+        mem_box := ffi.calloc(8)
+        rc2 := int(xv_vk_alloc_memory(sym(SYM_VK_ALLOC_MEMORY), d.device, mai, ffi.null(), mem_box))
+        mem := ffi.read_u64(mem_box, 0)
+        ffi.free(mem_box)
+        ffi.free(mai)
+        if rc2 != 0 {
+            xv_vk_destroy_buffer(sym(SYM_VK_DESTROY_BUFFER), d.device, buf, ffi.null())
+            _ := vk_err("vkAllocateMemory", rc2) >>>
+        }
+
+        rc3 := int(xv_vk_bind_buf_mem(sym(SYM_VK_BIND_BUF_MEM), d.device, buf, mem, u64(0)))
+        if rc3 != 0 {
+            xv_vk_free_memory(sym(SYM_VK_FREE_MEMORY), d.device, mem, ffi.null())
+            xv_vk_destroy_buffer(sym(SYM_VK_DESTROY_BUFFER), d.device, buf, ffi.null())
+            _ := vk_err("vkBindBufferMemory", rc3) >>>
+        }
+
+        pp := ffi.calloc(8)
+        rc4 := int(xv_vk_map_memory(sym(SYM_VK_MAP_MEMORY), d.device, mem, u64(0), u64(msz), u32(0), pp))
+        mapped := ffi.read_ptr(pp, 0)
+        ffi.free(pp)
+        if rc4 != 0 || ffi.is_null(mapped) {
+            xv_vk_free_memory(sym(SYM_VK_FREE_MEMORY), d.device, mem, ffi.null())
+            xv_vk_destroy_buffer(sym(SYM_VK_DESTROY_BUFFER), d.device, buf, ffi.null())
+            _ := vk_err("vkMapMemory", rc4) >>>
+        }
+
+        << VulkanBuffer{
+            handle: buf,
+            memory: mem,
+            byte_len: byte_len,
+            mapped: mapped,
+            dev: d.device,
+            closed: false
+        }
+    }
+}
+
+pub fn (d &VulkanDevice) create_f32_buffer(elements int) VulkanBuffer {
+    << d.create_buffer(elements * 4) >>>
+}
+
+pub fn (b $&VulkanBuffer) write_bytes(data &string) int {
+    if b.closed { >>> errors.new("vulkan_native: buffer closed") }
+    if data.len != b.byte_len { >>> errors.new("vulkan_native: write_bytes length mismatch") }
+    if data.len == 0 { << 0 }
+    unsafe {
+        for i in 0:data.len {
+            ffi.write_u8(b.mapped, i, u8(data[i]))
+        }
+    }
+    << 0
+}
+
+pub fn (b $&VulkanBuffer) write_f32_bits(bits &[]int) int {
+    if b.closed { >>> errors.new("vulkan_native: buffer closed") }
+    if bits.len * 4 != b.byte_len { >>> errors.new("vulkan_native: write_f32_bits length mismatch") }
+    unsafe {
+        for i in 0:bits.len {
+            ffi.write_u32(b.mapped, i * 4, u32(bits[i]))
+        }
+    }
+    << 0
+}
+
+pub fn (b &VulkanBuffer) copy_f32_bits(out $&[]int) int {
+    if b.closed { >>> errors.new("vulkan_native: buffer closed") }
+    n := b.byte_len / 4
+    if out.len != n { >>> errors.new("vulkan_native: copy_f32_bits length mismatch") }
+    unsafe {
+        for i in 0:n {
+            out[i] = int(ffi.read_u32(b.mapped, i * 4))
+        }
+    }
+    << 0
+}
+
+pub fn (b &VulkanBuffer) read_f32_bits() []int {
+    n := b.byte_len / 4
+    $out := []int{}
+    out.reserve(n)
+    for _ in 0:n { out.push(0) }
+    b.copy_f32_bits($&out) >>>
+    << out
+}
+
+pub fn (b $&VulkanBuffer) close() int {
+    if b.closed { << 0 }
+    b.closed = true
+    unsafe {
+        if !ffi.is_null(b.mapped) && int(b.memory) != 0 {
+            xv_vk_unmap_memory(sym(SYM_VK_UNMAP_MEMORY), b.dev, b.memory)
+            b.mapped = ffi.null()
+        }
+        if int(b.handle) != 0 {
+            xv_vk_destroy_buffer(sym(SYM_VK_DESTROY_BUFFER), b.dev, b.handle, ffi.null())
+            b.handle = u64(0)
+        }
+        if int(b.memory) != 0 {
+            xv_vk_free_memory(sym(SYM_VK_FREE_MEMORY), b.dev, b.memory, ffi.null())
+            b.memory = u64(0)
+        }
+    }
+    << 0
+}
+
+pub fn (d &VulkanDevice) create_pipeline(spirv_words &[]int, num_bindings int, push_bytes int) VulkanPipeline {
+    if d.closed { >>> errors.new("vulkan_native: device closed") }
+    if !validate_spirv(spirv_words) { >>> errors.new("vulkan_native: invalid SPIR-V module") }
+    unsafe {
+        code := ffi.calloc(spirv_words.len * 4)
+        for i in 0:spirv_words.len {
+            ffi.write_u32(code, i * 4, u32(spirv_words[i]))
+        }
+        smci := ffi.calloc(40)
+        ffi.write_u32(smci, 0, u32(16)) // VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+        ffi.write_u64(smci, 24, u64(spirv_words.len * 4))
+        ffi.write_ptr(smci, 32, code)
+        sm_box := ffi.calloc(8)
+        rc1 := int(xv_vk_create_shader_module(sym(SYM_VK_CREATE_SHADER_MODULE), d.device, smci, ffi.null(), sm_box))
+        smod := ffi.read_u64(sm_box, 0)
+        ffi.free(sm_box)
+        ffi.free(smci)
+        ffi.free(code)
+        if rc1 != 0 { _ := vk_err("vkCreateShaderModule", rc1) >>> }
+
+        binds := ffi.calloc(num_bindings * 24)
+        for i in 0:num_bindings {
+            off := i * 24
+            ffi.write_u32(binds, off, u32(i))
+            ffi.write_u32(binds, off + 4, u32(VK_DESC_TYPE_STORAGE_BUFFER))
+            ffi.write_u32(binds, off + 8, u32(1))
+            ffi.write_u32(binds, off + 12, u32(VK_SHADER_STAGE_COMPUTE))
+        }
+        dslci := ffi.calloc(32)
+        ffi.write_u32(dslci, 0, u32(32)) // VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+        ffi.write_u32(dslci, 20, u32(num_bindings))
+        ffi.write_ptr(dslci, 24, binds)
+        dl_box := ffi.calloc(8)
+        rc2 := int(xv_vk_create_desc_set_layout(sym(SYM_VK_CREATE_DESC_SET_LAYOUT), d.device, dslci, ffi.null(), dl_box))
+        dlayout := ffi.read_u64(dl_box, 0)
+        ffi.free(dl_box)
+        ffi.free(dslci)
+        ffi.free(binds)
+        if rc2 != 0 {
+            xv_vk_destroy_shader_module(sym(SYM_VK_DESTROY_SHADER_MODULE), d.device, smod, ffi.null())
+            _ := vk_err("vkCreateDescriptorSetLayout", rc2) >>>
+        }
+
+        dl_arr := ffi.calloc(8)
+        ffi.write_u64(dl_arr, 0, dlayout)
+        $pcr := ffi.null()
+        $pcr_cnt := 0
+        if push_bytes > 0 {
+            pcr = ffi.calloc(12)
+            ffi.write_u32(pcr, 0, u32(VK_SHADER_STAGE_COMPUTE))
+            ffi.write_u32(pcr, 4, u32(0))
+            ffi.write_u32(pcr, 8, u32(push_bytes))
+            pcr_cnt = 1
+        }
+        plci := ffi.calloc(48)
+        ffi.write_u32(plci, 0, u32(30)) // VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+        ffi.write_u32(plci, 20, u32(1))
+        ffi.write_ptr(plci, 24, dl_arr)
+        ffi.write_u32(plci, 32, u32(pcr_cnt))
+        ffi.write_ptr(plci, 40, pcr)
+        pl_box := ffi.calloc(8)
+        rc3 := int(xv_vk_create_pipeline_layout(sym(SYM_VK_CREATE_PIPELINE_LAYOUT), d.device, plci, ffi.null(), pl_box))
+        playout := ffi.read_u64(pl_box, 0)
+        ffi.free(pl_box)
+        ffi.free(plci)
+        if !ffi.is_null(pcr) { ffi.free(pcr) }
+        ffi.free(dl_arr)
+        if rc3 != 0 {
+            xv_vk_destroy_desc_set_layout(sym(SYM_VK_DESTROY_DESC_SET_LAYOUT), d.device, dlayout, ffi.null())
+            xv_vk_destroy_shader_module(sym(SYM_VK_DESTROY_SHADER_MODULE), d.device, smod, ffi.null())
+            _ := vk_err("vkCreatePipelineLayout", rc3) >>>
+        }
+
+        entry := ffi.cstring(&"main")
+        cpci := ffi.calloc(96)
+        ffi.write_u32(cpci, 0, u32(29)) // VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO
+        // Embedded VkPipelineShaderStageCreateInfo at offset 24
+        ffi.write_u32(cpci, 24, u32(18)) // VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+        ffi.write_u32(cpci, 44, u32(VK_SHADER_STAGE_COMPUTE))
+        ffi.write_u64(cpci, 48, smod)
+        ffi.write_ptr(cpci, 56, entry)
+        ffi.write_u64(cpci, 72, playout)
+        ffi.write_i32(cpci, 88, i32(-1))
+
+        pipe_box := ffi.calloc(8)
+        rc4 := int(xv_vk_create_compute_pipelines(sym(SYM_VK_CREATE_COMPUTE_PIPELINES), d.device, u64(0), u32(1), cpci, ffi.null(), pipe_box))
+        pipe := ffi.read_u64(pipe_box, 0)
+        ffi.free(pipe_box)
+        ffi.free(cpci)
+        ffi.free(entry)
+        if rc4 != 0 {
+            xv_vk_destroy_pipeline_layout(sym(SYM_VK_DESTROY_PIPELINE_LAYOUT), d.device, playout, ffi.null())
+            xv_vk_destroy_desc_set_layout(sym(SYM_VK_DESTROY_DESC_SET_LAYOUT), d.device, dlayout, ffi.null())
+            xv_vk_destroy_shader_module(sym(SYM_VK_DESTROY_SHADER_MODULE), d.device, smod, ffi.null())
+            _ := vk_err("vkCreateComputePipelines", rc4) >>>
+        }
+
+        << VulkanPipeline{
+            shader_mod: smod,
+            desc_layout: dlayout,
+            pipe_layout: playout,
+            pipeline: pipe,
+            num_bindings: num_bindings,
+            push_bytes: push_bytes,
+            closed: false
+        }
+    }
+}
+
+pub fn (d &VulkanDevice) dispatch(p &VulkanPipeline, bufs &[]int, sizes &[]int, push_words &[]int, gx int, gy int, gz int) int {
+    if d.closed || p.closed { >>> errors.new("vulkan_native: closed handle") }
+    unsafe {
+        dl_arr := ffi.calloc(8)
+        ffi.write_u64(dl_arr, 0, p.desc_layout)
+        dsai := ffi.calloc(40)
+        ffi.write_u32(dsai, 0, u32(34)) // VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+        ffi.write_u64(dsai, 16, d.desc_pool)
+        ffi.write_u32(dsai, 24, u32(1))
+        ffi.write_ptr(dsai, 32, dl_arr)
+        dset_box := ffi.calloc(8)
+        rc1 := int(xv_vk_alloc_desc_sets(sym(SYM_VK_ALLOC_DESC_SETS), d.device, dsai, dset_box))
+        dset := ffi.read_u64(dset_box, 0)
+        ffi.free(dsai)
+        ffi.free(dl_arr)
+        if rc1 != 0 {
+            ffi.free(dset_box)
+            _ := vk_err("vkAllocateDescriptorSets", rc1) >>>
+        }
+
+        nb := bufs.len
+        binfos := ffi.calloc(nb * 24)
+        writes := ffi.calloc(nb * 64)
+        for i in 0:nb {
+            bi_off := i * 24
+            ffi.write_u64(binfos, bi_off, u64(bufs[i]))
+            ffi.write_u64(binfos, bi_off + 8, u64(0))
+            $rng := sizes[i]
+            if rng <= 0 { rng = 16 }
+            ffi.write_u64(binfos, bi_off + 16, u64(rng))
+
+            w_off := i * 64
+            ffi.write_u32(writes, w_off, u32(35)) // VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+            ffi.write_u64(writes, w_off + 16, dset)
+            ffi.write_u32(writes, w_off + 24, u32(i))
+            ffi.write_u32(writes, w_off + 32, u32(1))
+            ffi.write_u32(writes, w_off + 36, u32(VK_DESC_TYPE_STORAGE_BUFFER))
+            ffi.write_ptr(writes, w_off + 48, ffi.offset(binfos, bi_off))
+        }
+        xv_vk_update_desc_sets(sym(SYM_VK_UPDATE_DESC_SETS), d.device, u32(nb), writes, u32(0), ffi.null())
+        ffi.free(writes)
+        ffi.free(binfos)
+
+        cbai := ffi.calloc(32)
+        ffi.write_u32(cbai, 0, u32(40)) // VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        ffi.write_u64(cbai, 16, d.cmd_pool)
+        ffi.write_u32(cbai, 24, u32(0))
+        ffi.write_u32(cbai, 28, u32(1))
+        cmd_box := ffi.calloc(8)
+        rc2 := int(xv_vk_alloc_cmd_buffers(sym(SYM_VK_ALLOC_CMD_BUFFERS), d.device, cbai, cmd_box))
+        cmd := ffi.read_ptr(cmd_box, 0)
+        ffi.free(cbai)
+        if rc2 != 0 || ffi.is_null(cmd) {
+            ffi.free(cmd_box)
+            ffi.free(dset_box)
+            _ := vk_err("vkAllocateCommandBuffers", rc2) >>>
+        }
+
+        cbbi := ffi.calloc(32)
+        ffi.write_u32(cbbi, 0, u32(42)) // VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        ffi.write_u32(cbbi, 16, u32(1)) // ONE_TIME_SUBMIT
+        rc3 := int(xv_vk_begin_cmd_buffer(sym(SYM_VK_BEGIN_CMD_BUFFER), cmd, cbbi))
+        ffi.free(cbbi)
+        if rc3 != 0 {
+            ffi.free(cmd_box)
+            ffi.free(dset_box)
+            _ := vk_err("vkBeginCommandBuffer", rc3) >>>
+        }
+
+        xv_vk_cmd_bind_pipeline(sym(SYM_VK_CMD_BIND_PIPELINE), cmd, i32(VK_PIPELINE_BIND_COMPUTE), p.pipeline)
+        xv_vk_cmd_bind_desc_sets(sym(SYM_VK_CMD_BIND_DESC_SETS), cmd, i32(VK_PIPELINE_BIND_COMPUTE), p.pipe_layout, u32(0), u32(1), dset_box, u32(0), ffi.null())
+        if push_words.len > 0 {
+            pc_buf := ffi.calloc(push_words.len * 4)
+            for i in 0:push_words.len { ffi.write_u32(pc_buf, i * 4, u32(push_words[i])) }
+            xv_vk_cmd_push_constants(sym(SYM_VK_CMD_PUSH_CONSTANTS), cmd, p.pipe_layout, u32(VK_SHADER_STAGE_COMPUTE), u32(0), u32(push_words.len * 4), pc_buf)
+            ffi.free(pc_buf)
+        }
+        xv_vk_cmd_dispatch(sym(SYM_VK_CMD_DISPATCH), cmd, u32(gx), u32(gy), u32(gz))
+        rc4 := int(xv_vk_end_cmd_buffer(sym(SYM_VK_END_CMD_BUFFER), cmd))
+        if rc4 != 0 {
+            ffi.free(cmd_box)
+            ffi.free(dset_box)
+            _ := vk_err("vkEndCommandBuffer", rc4) >>>
+        }
+
+        si := ffi.calloc(72)
+        ffi.write_u32(si, 0, u32(4)) // VK_STRUCTURE_TYPE_SUBMIT_INFO
+        ffi.write_u32(si, 40, u32(1))
+        ffi.write_ptr(si, 48, cmd_box)
+        rc5 := int(xv_vk_queue_submit(sym(SYM_VK_QUEUE_SUBMIT), d.queue, u32(1), si, u64(0)))
+        ffi.free(si)
+        ffi.free(cmd_box)
+        ffi.free(dset_box)
+        if rc5 != 0 { _ := vk_err("vkQueueSubmit", rc5) >>> }
+        rc6 := int(xv_vk_queue_wait_idle(sym(SYM_VK_QUEUE_WAIT_IDLE), d.queue))
+        if rc6 != 0 { _ := vk_err("vkQueueWaitIdle", rc6) >>> }
+        << 0
+    }
+}
+
+fn ceil_div(a int, b int) int {
+    if b <= 0 { << 0 }
+    << (a + b - 1) / b
+}
+
+pub fn (d $&VulkanDevice) add_f32(dst $&VulkanBuffer, a &VulkanBuffer, b &VulkanBuffer, n int) int {
+    if n == 0 { << 0 }
+    if d.pipe_add.len == 0 {
+        spv := spv_add_f32()
+        d.pipe_add.push(d.create_pipeline(&spv, 3, 16) >>>)
+    }
+    p := &d.pipe_add[0]
+    bufs := [int(dst.handle), int(a.handle), int(b.handle)]
+    sizes := [dst.byte_len, a.byte_len, b.byte_len]
+    push := [n, 0, 0, 0]
+    << d.dispatch(p, &bufs, &sizes, &push, ceil_div(n, 64), 1, 1) >>>
+}
+
+pub fn (d $&VulkanDevice) mul_f32(dst $&VulkanBuffer, a &VulkanBuffer, b &VulkanBuffer, n int) int {
+    if n == 0 { << 0 }
+    if d.pipe_mul.len == 0 {
+        spv := spv_mul_f32()
+        d.pipe_mul.push(d.create_pipeline(&spv, 3, 16) >>>)
+    }
+    p := &d.pipe_mul[0]
+    bufs := [int(dst.handle), int(a.handle), int(b.handle)]
+    sizes := [dst.byte_len, a.byte_len, b.byte_len]
+    push := [n, 0, 0, 0]
+    << d.dispatch(p, &bufs, &sizes, &push, ceil_div(n, 64), 1, 1) >>>
+}
+
+pub fn (d $&VulkanDevice) scale_f32(dst $&VulkanBuffer, x &VulkanBuffer, n int, alpha f64) int {
+    if n == 0 { << 0 }
+    if d.pipe_scale.len == 0 {
+        spv := spv_scale_f32()
+        d.pipe_scale.push(d.create_pipeline(&spv, 2, 16) >>>)
+    }
+    p := &d.pipe_scale[0]
+    bufs := [int(dst.handle), int(x.handle)]
+    sizes := [dst.byte_len, x.byte_len]
+    push := [n, math.float32_bits(alpha), 0, 0]
+    << d.dispatch(p, &bufs, &sizes, &push, ceil_div(n, 64), 1, 1) >>>
+}
+
+pub fn (d $&VulkanDevice) gemm_f32(dst $&VulkanBuffer, a &VulkanBuffer, b &VulkanBuffer, m int, n int, k int) int {
+    if m == 0 || n == 0 || k == 0 { << 0 }
+    if d.pipe_gemm.len == 0 {
+        spv := spv_gemm_f32(0)
+        d.pipe_gemm.push(d.create_pipeline(&spv, 3, 16) >>>)
+    }
+    p := &d.pipe_gemm[0]
+    bufs := [int(dst.handle), int(a.handle), int(b.handle)]
+    sizes := [dst.byte_len, a.byte_len, b.byte_len]
+    push := [m, n, k, 0]
+    << d.dispatch(p, &bufs, &sizes, &push, ceil_div(n, 16), ceil_div(m, 16), 1) >>>
+}
+
+pub fn (d $&VulkanDevice) gemm_f32_nt(dst $&VulkanBuffer, a &VulkanBuffer, b &VulkanBuffer, m int, n int, k int) int {
+    if m == 0 || n == 0 || k == 0 { << 0 }
+    if d.pipe_gemm_nt.len == 0 {
+        spv := spv_gemm_f32(1)
+        d.pipe_gemm_nt.push(d.create_pipeline(&spv, 3, 16) >>>)
+    }
+    p := &d.pipe_gemm_nt[0]
+    bufs := [int(dst.handle), int(a.handle), int(b.handle)]
+    sizes := [dst.byte_len, a.byte_len, b.byte_len]
+    push := [m, n, k, 1]
+    << d.dispatch(p, &bufs, &sizes, &push, ceil_div(n, 16), ceil_div(m, 16), 1) >>>
+}
+
+pub fn (d $&VulkanDevice) gemm_f32_tn(dst $&VulkanBuffer, a &VulkanBuffer, b &VulkanBuffer, m int, n int, k int) int {
+    if m == 0 || n == 0 || k == 0 { << 0 }
+    if d.pipe_gemm_tn.len == 0 {
+        spv := spv_gemm_f32(2)
+        d.pipe_gemm_tn.push(d.create_pipeline(&spv, 3, 16) >>>)
+    }
+    p := &d.pipe_gemm_tn[0]
+    bufs := [int(dst.handle), int(a.handle), int(b.handle)]
+    sizes := [dst.byte_len, a.byte_len, b.byte_len]
+    push := [m, n, k, 2]
+    << d.dispatch(p, &bufs, &sizes, &push, ceil_div(n, 16), ceil_div(m, 16), 1) >>>
+}

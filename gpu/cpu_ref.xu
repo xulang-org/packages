@@ -1,0 +1,355 @@
+@"github.com/xulang-org/packages/gpu"
+
+#math
+
+pub fn f16_bits_to_f64(bits int) f64 {
+    h := bits & 0xFFFF
+    sign := (h & 0x8000) << 16
+    exp := (h >> 10) & 0x1F
+    mant := h & 0x03FF
+    $f32b := 0
+    if exp == 0 {
+        if mant == 0 {
+            f32b = sign
+        } else {
+            $e := -14
+            $m := mant
+            while (m & 0x0400) == 0 {
+                m = m << 1
+                e -= 1
+            }
+            m = m & 0x03FF
+            f32b = sign | ((e + 127) << 23) | (m << 13)
+        }
+    } else if exp == 0x1F {
+        f32b = sign | 0x7F800000 | (mant << 13)
+    } else {
+        f32b = sign | ((exp + 112) << 23) | (mant << 13)
+    }
+    << math.float32_from_bits(f32b)
+}
+
+fn sbyte_at(s &string, i int) int {
+    v := s[i] & 255
+    if v >= 128 { << v - 256 }
+    << v
+}
+
+pub fn cpu_gemm_f32(dst $&[]int, a &[]int, b &[]int, m int, n int, k int) {
+    for r in 0:m {
+        for c in 0:n {
+            $acc := 0.0
+            for p in 0:k {
+                acc += math.float32_from_bits(a[r * k + p]) * math.float32_from_bits(b[p * n + c])
+            }
+            dst[r * n + c] = math.float32_bits(acc)
+        }
+    }
+}
+
+pub fn cpu_gemm_f32_nt(dst $&[]int, a &[]int, b &[]int, m int, n int, k int) {
+    for r in 0:m {
+        for c in 0:n {
+            $acc := 0.0
+            for p in 0:k {
+                acc += math.float32_from_bits(a[r * k + p]) * math.float32_from_bits(b[c * k + p])
+            }
+            dst[r * n + c] = math.float32_bits(acc)
+        }
+    }
+}
+
+pub fn cpu_gemm_f32_tn(dst $&[]int, a &[]int, b &[]int, m int, n int, k int) {
+    for r in 0:m {
+        for c in 0:n {
+            $acc := 0.0
+            for p in 0:k {
+                acc += math.float32_from_bits(a[p * m + r]) * math.float32_from_bits(b[p * n + c])
+            }
+            dst[r * n + c] = math.float32_bits(acc)
+        }
+    }
+}
+
+pub fn cpu_add_f32(dst $&[]int, a &[]int, b &[]int) {
+    for i in 0:dst.len {
+        dst[i] = math.float32_bits(math.float32_from_bits(a[i]) + math.float32_from_bits(b[i]))
+    }
+}
+
+pub fn cpu_mul_f32(dst $&[]int, a &[]int, b &[]int) {
+    for i in 0:dst.len {
+        dst[i] = math.float32_bits(math.float32_from_bits(a[i]) * math.float32_from_bits(b[i]))
+    }
+}
+
+pub fn cpu_scale_f32(dst $&[]int, x &[]int, alpha f64) {
+    for i in 0:dst.len {
+        dst[i] = math.float32_bits(math.float32_from_bits(x[i]) * alpha)
+    }
+}
+
+pub fn cpu_rmsnorm_f32(dst $&[]int, x &[]int, w &[]int, rows int, cols int, eps f64) {
+    for r in 0:rows {
+        $ss := 0.0
+        base := r * cols
+        for c in 0:cols {
+            v := math.float32_from_bits(x[base + c])
+            ss += v * v
+        }
+        inv := 1.0 / math.sqrt(ss / f64(cols) + eps)
+        for c in 0:cols {
+            v := math.float32_from_bits(x[base + c])
+            wt := math.float32_from_bits(w[c])
+            dst[base + c] = math.float32_bits(v * inv * wt)
+        }
+    }
+}
+
+pub fn cpu_softmax_f32(dst $&[]int, x &[]int, rows int, cols int) {
+    for r in 0:rows {
+        base := r * cols
+        $mx := math.float32_from_bits(x[base])
+        for c in 1:cols {
+            v := math.float32_from_bits(x[base + c])
+            if v > mx { mx = v }
+        }
+        $sum := 0.0
+        for c in 0:cols {
+            e := math.exp(math.float32_from_bits(x[base + c]) - mx)
+            dst[base + c] = math.float32_bits(e)
+            sum += e
+        }
+        inv := 1.0 / sum
+        for c in 0:cols {
+            e := math.float32_from_bits(dst[base + c])
+            dst[base + c] = math.float32_bits(e * inv)
+        }
+    }
+}
+
+pub fn cpu_swiglu_f32(dst $&[]int, gate &[]int, up &[]int) {
+    for i in 0:dst.len {
+        g := math.float32_from_bits(gate[i])
+        u := math.float32_from_bits(up[i])
+        silu := g / (1.0 + math.exp(0.0 - g))
+        dst[i] = math.float32_bits(silu * u)
+    }
+}
+
+pub fn cpu_rope_f32(dst $&[]int, x &[]int, seq_len int, n_heads int, head_dim int, pos_off int, theta f64) {
+    half_d := head_dim / 2
+    log_theta := math.log(theta)
+    for r in 0:seq_len {
+        for h in 0:n_heads {
+            base := (r * n_heads + h) * head_dim
+            for j in 0:half_d {
+                freq := math.exp(0.0 - log_theta * (f64(2 * j) / f64(head_dim)))
+                angle := f64(pos_off + r) * freq
+                c := math.cos(angle)
+                s := math.sin(angle)
+                v0 := math.float32_from_bits(x[base + j])
+                v1 := math.float32_from_bits(x[base + half_d + j])
+                dst[base + j] = math.float32_bits(v0 * c - v1 * s)
+                dst[base + half_d + j] = math.float32_bits(v0 * s + v1 * c)
+            }
+        }
+    }
+}
+
+pub fn cpu_gemv_q4_0_f32(dst $&[]int, x &[]int, w &string, rows int, cols int, m_cnt int) {
+    n_blocks := cols / 32
+    for m in 0:m_cnt {
+        x_base := m * cols
+        for n in 0:rows {
+            w_base := n * n_blocks * 18
+            $acc := 0.0
+            for b in 0:n_blocks {
+                off := w_base + b * 18
+                d := f16_bits_to_f64((w[off] & 255) | ((w[off + 1] & 255) << 8))
+                xp := x_base + b * 32
+                $bsum := 0.0
+                for j in 0:16 {
+                    bv := w[off + 2 + j] & 255
+                    q0 := f64((bv & 15) - 8)
+                    q1 := f64((bv >> 4) - 8)
+                    bsum += q0 * math.float32_from_bits(x[xp + j]) + q1 * math.float32_from_bits(x[xp + 16 + j])
+                }
+                acc += bsum * d
+            }
+            dst[m * rows + n] = math.float32_bits(acc)
+        }
+    }
+}
+
+pub fn cpu_gemv_q8_0_f32(dst $&[]int, x &[]int, w &string, rows int, cols int, m_cnt int) {
+    n_blocks := cols / 32
+    for m in 0:m_cnt {
+        x_base := m * cols
+        for n in 0:rows {
+            w_base := n * n_blocks * 34
+            $acc := 0.0
+            for b in 0:n_blocks {
+                off := w_base + b * 34
+                d := f16_bits_to_f64((w[off] & 255) | ((w[off + 1] & 255) << 8))
+                xp := x_base + b * 32
+                $bsum := 0.0
+                for j in 0:32 {
+                    bsum += f64(sbyte_at(w, off + 2 + j)) * math.float32_from_bits(x[xp + j])
+                }
+                acc += bsum * d
+            }
+            dst[m * rows + n] = math.float32_bits(acc)
+        }
+    }
+}
+
+pub fn cpu_gemv_q4_k_f32(dst $&[]int, x &[]int, w &string, rows int, cols int, m_cnt int) {
+    n_blocks := cols / 256
+    for m in 0:m_cnt {
+        x_base := m * cols
+        for n in 0:rows {
+            w_base := n * n_blocks * 144
+            $acc := 0.0
+            for b in 0:n_blocks {
+                off := w_base + b * 144
+                d := f16_bits_to_f64((w[off] & 255) | ((w[off + 1] & 255) << 8))
+                dmin := f16_bits_to_f64((w[off + 2] & 255) | ((w[off + 3] & 255) << 8))
+                sc_off := off + 4
+                qs_off := off + 16
+                xp_base := x_base + b * 256
+                for c in 0:4 {
+                    is0 := c * 2
+                    is1 := is0 + 1
+                    $sc1 := 0
+                    $m1 := 0
+                    $sc2 := 0
+                    $m2 := 0
+                    if c < 2 {
+                        sc1 = w[sc_off + is0] & 63
+                        m1 = w[sc_off + is0 + 4] & 63
+                        sc2 = w[sc_off + is1] & 63
+                        m2 = w[sc_off + is1 + 4] & 63
+                    } else {
+                        sc1 = (w[sc_off + is0 + 4] & 15) | (((w[sc_off + is0 - 4] & 255) >> 6) << 4)
+                        m1 = ((w[sc_off + is0 + 4] & 255) >> 4) | (((w[sc_off + is0] & 255) >> 6) << 4)
+                        sc2 = (w[sc_off + is1 + 4] & 15) | (((w[sc_off + is1 - 4] & 255) >> 6) << 4)
+                        m2 = ((w[sc_off + is1 + 4] & 255) >> 4) | (((w[sc_off + is1] & 255) >> 6) << 4)
+                    }
+                    d1 := d * f64(sc1)
+                    min1 := dmin * f64(m1)
+                    d2 := d * f64(sc2)
+                    min2 := dmin * f64(m2)
+                    xp := xp_base + c * 64
+                    for l in 0:32 {
+                        qv := w[qs_off + c * 32 + l] & 255
+                        acc += (d1 * f64(qv & 15) - min1) * math.float32_from_bits(x[xp + l])
+                        acc += (d2 * f64(qv >> 4) - min2) * math.float32_from_bits(x[xp + 32 + l])
+                    }
+                }
+            }
+            dst[m * rows + n] = math.float32_bits(acc)
+        }
+    }
+}
+
+pub fn cpu_gemv_q5_k_f32(dst $&[]int, x &[]int, w &string, rows int, cols int, m_cnt int) {
+    n_blocks := cols / 256
+    for m in 0:m_cnt {
+        x_base := m * cols
+        for n in 0:rows {
+            w_base := n * n_blocks * 176
+            $acc := 0.0
+            for b in 0:n_blocks {
+                off := w_base + b * 176
+                d := f16_bits_to_f64((w[off] & 255) | ((w[off + 1] & 255) << 8))
+                dmin := f16_bits_to_f64((w[off + 2] & 255) | ((w[off + 3] & 255) << 8))
+                sc_off := off + 4
+                qh_off := off + 16
+                qs_off := off + 48
+                xp_base := x_base + b * 256
+                for c in 0:4 {
+                    is0 := c * 2
+                    is1 := is0 + 1
+                    $sc1 := 0
+                    $m1 := 0
+                    $sc2 := 0
+                    $m2 := 0
+                    if c < 2 {
+                        sc1 = w[sc_off + is0] & 63
+                        m1 = w[sc_off + is0 + 4] & 63
+                        sc2 = w[sc_off + is1] & 63
+                        m2 = w[sc_off + is1 + 4] & 63
+                    } else {
+                        sc1 = (w[sc_off + is0 + 4] & 15) | (((w[sc_off + is0 - 4] & 255) >> 6) << 4)
+                        m1 = ((w[sc_off + is0 + 4] & 255) >> 4) | (((w[sc_off + is0] & 255) >> 6) << 4)
+                        sc2 = (w[sc_off + is1 + 4] & 15) | (((w[sc_off + is1 - 4] & 255) >> 6) << 4)
+                        m2 = ((w[sc_off + is1 + 4] & 255) >> 4) | (((w[sc_off + is1] & 255) >> 6) << 4)
+                    }
+                    d1 := d * f64(sc1)
+                    min1 := dmin * f64(m1)
+                    d2 := d * f64(sc2)
+                    min2 := dmin * f64(m2)
+                    hm0 := 1 << is0
+                    hm1 := 1 << is1
+                    xp := xp_base + c * 64
+                    for l in 0:32 {
+                        qhb := w[qh_off + l] & 255
+                        qv := w[qs_off + c * 32 + l] & 255
+                        $b0 := 0
+                        if (qhb & hm0) != 0 { b0 = 16 }
+                        $b1 := 0
+                        if (qhb & hm1) != 0 { b1 = 16 }
+                        q0 := (qv & 15) | b0
+                        q1 := (qv >> 4) | b1
+                        acc += (d1 * f64(q0) - min1) * math.float32_from_bits(x[xp + l])
+                        acc += (d2 * f64(q1) - min2) * math.float32_from_bits(x[xp + 32 + l])
+                    }
+                }
+            }
+            dst[m * rows + n] = math.float32_bits(acc)
+        }
+    }
+}
+
+pub fn cpu_gemv_q6_k_f32(dst $&[]int, x &[]int, w &string, rows int, cols int, m_cnt int) {
+    n_blocks := cols / 256
+    for m in 0:m_cnt {
+        x_base := m * cols
+        for n in 0:rows {
+            w_base := n * n_blocks * 210
+            $acc := 0.0
+            for b in 0:n_blocks {
+                off := w_base + b * 210
+                d := f16_bits_to_f64((w[off + 208] & 255) | ((w[off + 209] & 255) << 8))
+                ql_off := off
+                qh_off := off + 128
+                sc_off := off + 192
+                xp_base := x_base + b * 256
+                $bsum := 0.0
+                for h in 0:2 {
+                    qlp := ql_off + h * 64
+                    qhp := qh_off + h * 32
+                    scp := sc_off + h * 8
+                    yp := xp_base + h * 128
+                    for l in 0:32 {
+                        is_idx := l / 16
+                        ql0 := w[qlp + l] & 255
+                        ql1 := w[qlp + 32 + l] & 255
+                        qhv := w[qhp + l] & 255
+                        q1 := ((ql0 & 15) | ((qhv & 3) << 4)) - 32
+                        q2 := ((ql1 & 15) | (((qhv >> 2) & 3) << 4)) - 32
+                        q3 := (((ql0 >> 4) & 15) | (((qhv >> 4) & 3) << 4)) - 32
+                        q4 := (((ql1 >> 4) & 15) | (((qhv >> 6) & 3) << 4)) - 32
+                        bsum += f64(sbyte_at(w, scp + is_idx) * q1) * math.float32_from_bits(x[yp + l])
+                        bsum += f64(sbyte_at(w, scp + is_idx + 2) * q2) * math.float32_from_bits(x[yp + l + 32])
+                        bsum += f64(sbyte_at(w, scp + is_idx + 4) * q3) * math.float32_from_bits(x[yp + l + 64])
+                        bsum += f64(sbyte_at(w, scp + is_idx + 6) * q4) * math.float32_from_bits(x[yp + l + 96])
+                    }
+                }
+                acc += d * bsum
+            }
+            dst[m * rows + n] = math.float32_bits(acc)
+        }
+    }
+}

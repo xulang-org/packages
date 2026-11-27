@@ -1,0 +1,865 @@
+@"github.com/xulang-org/packages/llm_metal"
+
+#errors
+#math
+metal #"github.com/xulang-org/packages/metal"
+
+pub struct MetalKVCache {
+    pub max_seq int
+    pub pos int
+    k_caches []metal.F16Matrix
+    v_caches []metal.F16Matrix
+    x metal.F32Matrix
+    x_next metal.F32Matrix
+    norm1 metal.F32Matrix
+    q_raw metal.F32Matrix
+    k_raw metal.F32Matrix
+    q_tmp metal.F32Matrix
+    k_tmp metal.F32Matrix
+    q metal.F32Matrix
+    k metal.F32Matrix
+    v_tmp metal.F32Matrix
+    v metal.F32Matrix
+    att metal.F32Matrix
+    oproj metal.F32Matrix
+    norm2 metal.F32Matrix
+    gate metal.F32Matrix
+    up metal.F32Matrix
+    act metal.F32Matrix
+    ffn metal.F32Matrix
+    logits metal.F32Matrix
+    idx_mat metal.F32Matrix
+    closed bool
+}
+
+pub struct MetalPagedKVCache {
+    pub max_seq int
+    pub block_size int
+    pub max_blocks int
+    pub pos int
+    k_pages []metal.F16Matrix
+    v_pages []metal.F16Matrix
+    block_table metal.F32Matrix
+    x metal.F32Matrix
+    x_next metal.F32Matrix
+    norm1 metal.F32Matrix
+    q_raw metal.F32Matrix
+    k_raw metal.F32Matrix
+    q_tmp metal.F32Matrix
+    k_tmp metal.F32Matrix
+    q metal.F32Matrix
+    k metal.F32Matrix
+    v_tmp metal.F32Matrix
+    v metal.F32Matrix
+    att metal.F32Matrix
+    oproj metal.F32Matrix
+    norm2 metal.F32Matrix
+    gate metal.F32Matrix
+    up metal.F32Matrix
+    act metal.F32Matrix
+    ffn metal.F32Matrix
+    logits metal.F32Matrix
+    idx_mat metal.F32Matrix
+    closed bool
+}
+
+pub struct MetalLoRA {
+    pub rank int
+    pub alpha f64
+    pub scale f64
+    pub step int
+    pub a_mat metal.F32Matrix
+    pub b_mat metal.F32Matrix
+    m_a metal.F32Matrix
+    v_a metal.F32Matrix
+    m_b metal.F32Matrix
+    v_b metal.F32Matrix
+    closed bool
+}
+
+fn mqclose_f32(x $&metal.F32Matrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn mqclose_f16(x $&metal.F16Matrix) {
+    _ := x.close() >>> (_) { << }
+}
+fn mqclose_fence(f $&metal.Fence) {
+    _ := f.close() >>> (_) { << }
+}
+fn mqclose_batch(b $&metal.Batch) {
+    _ := b.close() >>> (_) { << }
+}
+fn mqclose_kv(kv $&MetalKVCache) {
+    _ := kv.close()
+}
+fn mqclose_pkv(kv $&MetalPagedKVCache) {
+    _ := kv.close()
+}
+fn mqclose_lora(l $&MetalLoRA) {
+    _ := l.close()
+}
+
+fn batch_linear(b $&metal.Batch, dst $&metal.F32Matrix, x &metal.F32Matrix, w &GpuWeightRef, m &MetalModel) int {
+    wi := w.idx
+    if w.kind == WT_F32 {
+        << b.gemm_f32_nt(dst, x, &m.f32_mats[wi]) >>>
+    }
+    if w.kind == WT_Q4_0 {
+        << b.gemv_q4_0_f32(dst, x, &m.q4_mats[wi]) >>>
+    }
+    if w.kind == WT_Q5_0 {
+        << b.gemv_q5_0_f32(dst, x, &m.q5_mats[wi]) >>>
+    }
+    if w.kind == WT_Q8_0 {
+        << b.gemv_q8_0_f32(dst, x, &m.q8_mats[wi]) >>>
+    }
+    if w.kind == WT_Q4_K {
+        << b.gemv_q4_k_f32(dst, x, &m.q4k_mats[wi]) >>>
+    }
+    if w.kind == WT_Q5_K {
+        << b.gemv_q5_k_f32(dst, x, &m.q5k_mats[wi]) >>>
+    }
+    if w.kind == WT_Q6_K {
+        << b.gemv_q6_k_f32(dst, x, &m.q6k_mats[wi]) >>>
+    }
+    >>> errors.new("llm_metal: unsupported weight kind " + str(w.kind))
+}
+
+fn close_f32_list(mats $&[]metal.F32Matrix) {
+    for i in 0:mats.len {
+        el := $&mats[i]
+        mqclose_f32(el)
+    }
+}
+
+fn close_f16_list(mats $&[]metal.F16Matrix) {
+    for i in 0:mats.len {
+        el := $&mats[i]
+        mqclose_f16(el)
+    }
+}
+
+pub fn new_kv_cache(m &MetalModel, max_seq_req int) MetalKVCache {
+    $ms := max_seq_req
+    if ms <= 0 { ms = m.cfg.max_seq_len }
+    if ms <= 0 { ms = 512 }
+    dim := m.cfg.dim
+    kv_dim := m.cfg.kv_dim
+    hid := m.cfg.hidden_dim
+    voc := m.cfg.vocab_size
+    $kv := MetalKVCache{
+        max_seq: ms, pos: 0, k_caches: []metal.F16Matrix{}, v_caches: []metal.F16Matrix{},
+        x: m.dev.matrix_f32(1, dim) >>>,
+        x_next: m.dev.matrix_f32(1, dim) >>>,
+        norm1: m.dev.matrix_f32(1, dim) >>>,
+        q_raw: m.dev.matrix_f32(1, dim) >>>,
+        k_raw: m.dev.matrix_f32(1, kv_dim) >>>,
+        q_tmp: m.dev.matrix_f32(1, dim) >>>,
+        k_tmp: m.dev.matrix_f32(1, kv_dim) >>>,
+        q: m.dev.matrix_f32(1, dim) >>>,
+        k: m.dev.matrix_f32(1, kv_dim) >>>,
+        v_tmp: m.dev.matrix_f32(1, kv_dim) >>>,
+        v: m.dev.matrix_f32(1, kv_dim) >>>,
+        att: m.dev.matrix_f32(1, dim) >>>,
+        oproj: m.dev.matrix_f32(1, dim) >>>,
+        norm2: m.dev.matrix_f32(1, dim) >>>,
+        gate: m.dev.matrix_f32(1, hid) >>>,
+        up: m.dev.matrix_f32(1, hid) >>>,
+        act: m.dev.matrix_f32(1, hid) >>>,
+        ffn: m.dev.matrix_f32(1, dim) >>>,
+        logits: m.dev.matrix_f32(1, voc) >>>,
+        idx_mat: m.dev.matrix_f32(1, 1) >>>,
+        closed: false
+    }
+    kv.k_caches.reserve(m.cfg.n_layers)
+    kv.v_caches.reserve(m.cfg.n_layers)
+    for _ in 0:m.cfg.n_layers {
+        $km := m.dev.matrix_f16(ms, kv_dim) >>> (err) {
+            mqclose_kv($&kv)
+            >>> err
+        }
+        $vm := m.dev.matrix_f16(ms, kv_dim) >>> (err) {
+            mqclose_f16($&km)
+            mqclose_kv($&kv)
+            >>> err
+        }
+        kv.k_caches.push(km)
+        kv.v_caches.push(vm)
+    }
+    << kv
+}
+
+pub fn (kv $&MetalKVCache) reset() {
+    kv.pos = 0
+}
+
+pub fn (kv $&MetalKVCache) close() int {
+    if kv.closed { << 0 }
+    kv.closed = true
+    close_f16_list($&kv.k_caches)
+    close_f16_list($&kv.v_caches)
+    mqclose_f32($&kv.x)
+    mqclose_f32($&kv.x_next)
+    mqclose_f32($&kv.norm1)
+    mqclose_f32($&kv.q_raw)
+    mqclose_f32($&kv.k_raw)
+    mqclose_f32($&kv.q_tmp)
+    mqclose_f32($&kv.k_tmp)
+    mqclose_f32($&kv.q)
+    mqclose_f32($&kv.k)
+    mqclose_f32($&kv.v_tmp)
+    mqclose_f32($&kv.v)
+    mqclose_f32($&kv.att)
+    mqclose_f32($&kv.oproj)
+    mqclose_f32($&kv.norm2)
+    mqclose_f32($&kv.gate)
+    mqclose_f32($&kv.up)
+    mqclose_f32($&kv.act)
+    mqclose_f32($&kv.ffn)
+    mqclose_f32($&kv.logits)
+    mqclose_f32($&kv.idx_mat)
+    << 0
+}
+
+fn encode_rope(b $&metal.Batch, dst $&metal.F32Matrix, src &metal.F32Matrix, pos int, m &MetalModel) int {
+    if m.cfg.rope_interleaved {
+        << b.rope_interleaved_f32(dst, src, pos, m.cfg.head_dim, m.cfg.rope_theta) >>>
+    }
+    << b.rope_f32(dst, src, pos, m.cfg.head_dim, m.cfg.rope_theta) >>>
+}
+
+fn encode_decode_layers(b $&metal.Batch, m &MetalModel, kv $&MetalKVCache, token int) int {
+    if kv.pos >= kv.max_seq { >>> errors.new("llm_metal: KV cache full") }
+    ids := [token]
+    scale := 1.0 / math.sqrt(f64(m.cfg.head_dim))
+    _ := b.embedding_f32($&kv.x, &m.embed_table, &ids) >>>
+    for l in 0:m.cfg.n_layers {
+        lw := &m.layers[l]
+        an_i := lw.attn_norm_idx
+        bv_i := lw.bv_idx
+        bq_i := lw.bq_idx
+        qn_i := lw.q_norm_idx
+        bk_i := lw.bk_idx
+        kn_i := lw.k_norm_idx
+        fn_i := lw.ffn_norm_idx
+        _ := b.rmsnorm_f32($&kv.norm1, &kv.x, &m.f32_mats[an_i], m.cfg.eps) >>>
+        _ := batch_linear(b, $&kv.q_raw, &kv.norm1, &lw.wq, m) >>>
+        _ := batch_linear(b, $&kv.k_raw, &kv.norm1, &lw.wk, m) >>>
+        if bv_i >= 0 {
+            _ := batch_linear(b, $&kv.v_tmp, &kv.norm1, &lw.wv, m) >>>
+            _ := b.add_f32($&kv.v, &kv.v_tmp, &m.f32_mats[bv_i]) >>>
+        } else {
+            _ := batch_linear(b, $&kv.v, &kv.norm1, &lw.wv, m) >>>
+        }
+
+        if bq_i >= 0 {
+            _ := b.add_f32($&kv.q_tmp, &kv.q_raw, &m.f32_mats[bq_i]) >>>
+            if qn_i >= 0 {
+                _ := b.qk_norm_f32($&kv.q_raw, &kv.q_tmp, &m.f32_mats[qn_i], m.cfg.n_heads, m.cfg.eps) >>>
+                _ := encode_rope(b, $&kv.q, &kv.q_raw, kv.pos, m) >>>
+            } else {
+                _ := encode_rope(b, $&kv.q, &kv.q_tmp, kv.pos, m) >>>
+            }
+        } else if qn_i >= 0 {
+            _ := b.qk_norm_f32($&kv.q_tmp, &kv.q_raw, &m.f32_mats[qn_i], m.cfg.n_heads, m.cfg.eps) >>>
+            _ := encode_rope(b, $&kv.q, &kv.q_tmp, kv.pos, m) >>>
+        } else {
+            _ := encode_rope(b, $&kv.q, &kv.q_raw, kv.pos, m) >>>
+        }
+
+        if bk_i >= 0 {
+            _ := b.add_f32($&kv.k_tmp, &kv.k_raw, &m.f32_mats[bk_i]) >>>
+            if kn_i >= 0 {
+                _ := b.qk_norm_f32($&kv.k_raw, &kv.k_tmp, &m.f32_mats[kn_i], m.cfg.n_kv_heads, m.cfg.eps) >>>
+                _ := encode_rope(b, $&kv.k, &kv.k_raw, kv.pos, m) >>>
+            } else {
+                _ := encode_rope(b, $&kv.k, &kv.k_tmp, kv.pos, m) >>>
+            }
+        } else if kn_i >= 0 {
+            _ := b.qk_norm_f32($&kv.k_tmp, &kv.k_raw, &m.f32_mats[kn_i], m.cfg.n_kv_heads, m.cfg.eps) >>>
+            _ := encode_rope(b, $&kv.k, &kv.k_tmp, kv.pos, m) >>>
+        } else {
+            _ := encode_rope(b, $&kv.k, &kv.k_raw, kv.pos, m) >>>
+        }
+
+        _ := b.kv_cache_append_f16($&kv.k_caches[l], &kv.k, kv.pos) >>>
+        _ := b.kv_cache_append_f16($&kv.v_caches[l], &kv.v, kv.pos) >>>
+        _ := b.attention_decode_f16($&kv.att, &kv.q, &kv.k_caches[l], &kv.v_caches[l], kv.pos + 1, m.cfg.n_heads, m.cfg.n_kv_heads, scale) >>>
+        _ := batch_linear(b, $&kv.oproj, &kv.att, &lw.wo, m) >>>
+        _ := b.add_rmsnorm_f32($&kv.norm2, $&kv.x_next, &kv.x, &kv.oproj, &m.f32_mats[fn_i], m.cfg.eps) >>>
+        _ := batch_linear(b, $&kv.gate, &kv.norm2, &lw.wg, m) >>>
+        _ := batch_linear(b, $&kv.up, &kv.norm2, &lw.wu, m) >>>
+        _ := b.swiglu_f32($&kv.act, &kv.gate, &kv.up) >>>
+        _ := batch_linear(b, $&kv.ffn, &kv.act, &lw.wd, m) >>>
+        _ := b.add_f32($&kv.x, &kv.x_next, &kv.ffn) >>>
+    }
+    nm_i := m.norm_idx
+    _ := b.rmsnorm_f32($&kv.norm1, &kv.x, &m.f32_mats[nm_i], m.cfg.eps) >>>
+    _ := batch_linear(b, $&kv.logits, &kv.norm1, &m.lm_head, m) >>>
+    << 0
+}
+
+pub fn forward_token_argmax(m &MetalModel, kv $&MetalKVCache, token int) int {
+    $b := m.dev.begin_batch() >>>
+    _ := encode_decode_layers($&b, m, kv, token) >>> (err) {
+        mqclose_batch($&b)
+        >>> err
+    }
+    _ := b.argmax_f32($&kv.idx_mat, &kv.logits) >>> (err) {
+        mqclose_batch($&b)
+        >>> err
+    }
+    $f := b.commit() >>>
+    _ := f.wait() >>> (err) {
+        mqclose_fence($&f)
+        >>> err
+    }
+    mqclose_fence($&f)
+    kv.pos += 1
+    bits := kv.idx_mat.bits() >>>
+    << int(math.float32_from_bits(bits[0]) + 0.5)
+}
+
+pub fn forward_token_logits(m &MetalModel, kv $&MetalKVCache, token int) []f32 {
+    $b := m.dev.begin_batch() >>>
+    _ := encode_decode_layers($&b, m, kv, token) >>> (err) {
+        mqclose_batch($&b)
+        >>> err
+    }
+    $f := b.commit() >>>
+    _ := f.wait() >>> (err) {
+        mqclose_fence($&f)
+        >>> err
+    }
+    mqclose_fence($&f)
+    kv.pos += 1
+    bits := kv.logits.bits() >>>
+    $out := []f32{}
+    out.reserve(bits.len)
+    for i in 0:bits.len {
+        out.push(f32(math.float32_from_bits(bits[i])))
+    }
+    << out
+}
+
+pub fn prefill_tokens(m &MetalModel, kv $&MetalKVCache, tokens &[]int) int {
+    if tokens.len == 0 { >>> errors.new("llm_metal: empty prompt") }
+    if tokens.len == 1 {
+        << forward_token_argmax(m, kv, tokens[0]) >>>
+    }
+    if kv.pos != 0 || tokens.len > kv.max_seq {
+        $last := 0
+        for i in 0:tokens.len {
+            last = forward_token_argmax(m, kv, tokens[i]) >>>
+        }
+        << last
+    }
+    p := tokens.len
+    dim := m.cfg.dim
+    kv_dim := m.cfg.kv_dim
+    hid := m.cfg.hidden_dim
+    voc := m.cfg.vocab_size
+    scale := 1.0 / math.sqrt(f64(m.cfg.head_dim))
+
+    $px := m.dev.matrix_f32(p, dim) >>>
+    $pxn := m.dev.matrix_f32(p, dim) >>>
+    $pn1 := m.dev.matrix_f32(p, dim) >>>
+    $pqr := m.dev.matrix_f32(p, dim) >>>
+    $pkr := m.dev.matrix_f32(p, kv_dim) >>>
+    $pq := m.dev.matrix_f32(p, dim) >>>
+    $pk := m.dev.matrix_f32(p, kv_dim) >>>
+    $pv := m.dev.matrix_f32(p, kv_dim) >>>
+    $pk16 := m.dev.matrix_f16(p, kv_dim) >>>
+    $pv16 := m.dev.matrix_f16(p, kv_dim) >>>
+    $patt := m.dev.matrix_f32(p, dim) >>>
+    $pop := m.dev.matrix_f32(p, dim) >>>
+    $pn2 := m.dev.matrix_f32(p, dim) >>>
+    $pg := m.dev.matrix_f32(p, hid) >>>
+    $pu := m.dev.matrix_f32(p, hid) >>>
+    $pa := m.dev.matrix_f32(p, hid) >>>
+    $pf := m.dev.matrix_f32(p, dim) >>>
+    $plog := m.dev.matrix_f32(p, voc) >>>
+    $pidx := m.dev.matrix_f32(p, 1) >>>
+
+    $b := m.dev.begin_batch() >>>
+    _ := b.embedding_f32($&px, &m.embed_table, tokens) >>>
+    for l in 0:m.cfg.n_layers {
+        lw := &m.layers[l]
+        if lw.bq_idx >= 0 || lw.bk_idx >= 0 || lw.bv_idx >= 0 || lw.q_norm_idx >= 0 || lw.k_norm_idx >= 0 {
+            mqclose_batch($&b)
+            mqclose_f32($&px)
+            mqclose_f32($&pxn)
+            mqclose_f32($&pn1)
+            mqclose_f32($&pqr)
+            mqclose_f32($&pkr)
+            mqclose_f32($&pq)
+            mqclose_f32($&pk)
+            mqclose_f32($&pv)
+            mqclose_f16($&pk16)
+            mqclose_f16($&pv16)
+            mqclose_f32($&patt)
+            mqclose_f32($&pop)
+            mqclose_f32($&pn2)
+            mqclose_f32($&pg)
+            mqclose_f32($&pu)
+            mqclose_f32($&pa)
+            mqclose_f32($&pf)
+            mqclose_f32($&plog)
+            mqclose_f32($&pidx)
+            $last := 0
+            for i in 0:tokens.len { last = forward_token_argmax(m, kv, tokens[i]) >>> }
+            << last
+        }
+        an_i := lw.attn_norm_idx
+        fn_i := lw.ffn_norm_idx
+        _ := b.rmsnorm_f32($&pn1, &px, &m.f32_mats[an_i], m.cfg.eps) >>>
+        _ := batch_linear($&b, $&pqr, &pn1, &lw.wq, m) >>>
+        _ := batch_linear($&b, $&pkr, &pn1, &lw.wk, m) >>>
+        _ := batch_linear($&b, $&pv, &pn1, &lw.wv, m) >>>
+        _ := encode_rope($&b, $&pq, &pqr, 0, m) >>>
+        _ := encode_rope($&b, $&pk, &pkr, 0, m) >>>
+        _ := b.kv_cache_append_f16($&kv.k_caches[l], &pk, 0) >>>
+        _ := b.kv_cache_append_f16($&kv.v_caches[l], &pv, 0) >>>
+        _ := b.f32_to_f16($&pk16, &pk) >>>
+        _ := b.f32_to_f16($&pv16, &pv) >>>
+        _ := b.causal_attention_f16($&patt, &pq, &pk16, &pv16, m.cfg.n_heads, m.cfg.n_kv_heads, scale) >>>
+        _ := batch_linear($&b, $&pop, &patt, &lw.wo, m) >>>
+        _ := b.add_rmsnorm_f32($&pn2, $&pxn, &px, &pop, &m.f32_mats[fn_i], m.cfg.eps) >>>
+        _ := batch_linear($&b, $&pg, &pn2, &lw.wg, m) >>>
+        _ := batch_linear($&b, $&pu, &pn2, &lw.wu, m) >>>
+        _ := b.swiglu_f32($&pa, &pg, &pu) >>>
+        _ := batch_linear($&b, $&pf, &pa, &lw.wd, m) >>>
+        _ := b.add_f32($&px, &pxn, &pf) >>>
+    }
+    nm_i := m.norm_idx
+    _ := b.rmsnorm_f32($&pn1, &px, &m.f32_mats[nm_i], m.cfg.eps) >>>
+    _ := batch_linear($&b, $&plog, &pn1, &m.lm_head, m) >>>
+    _ := b.argmax_f32($&pidx, &plog) >>>
+    $f := b.commit() >>>
+    _ := f.wait() >>> (err) { _ := f.close()
+    >>> err }
+    _ := f.close() >>>
+    kv.pos = p
+    bits := pidx.bits() >>>
+    next_tok := int(math.float32_from_bits(bits[p - 1]) + 0.5)
+    mqclose_f32($&px)
+    mqclose_f32($&pxn)
+    mqclose_f32($&pn1)
+    mqclose_f32($&pqr)
+    mqclose_f32($&pkr)
+    mqclose_f32($&pq)
+    mqclose_f32($&pk)
+    mqclose_f32($&pv)
+    mqclose_f16($&pk16)
+    mqclose_f16($&pv16)
+    mqclose_f32($&patt)
+    mqclose_f32($&pop)
+    mqclose_f32($&pn2)
+    mqclose_f32($&pg)
+    mqclose_f32($&pu)
+    mqclose_f32($&pa)
+    mqclose_f32($&pf)
+    mqclose_f32($&plog)
+    mqclose_f32($&pidx)
+    << next_tok
+}
+
+pub fn generate(m &MetalModel, prompt_ids &[]int, max_gen int) []int {
+    if max_gen <= 0 { << []int{} }
+    $kv := new_kv_cache(m, prompt_ids.len + max_gen + 2) >>>
+    $out := []int{}
+    $tok := prefill_tokens(m, $&kv, prompt_ids) >>> (err) { _ := kv.close()
+    >>> err }
+    out.push(tok)
+    for _ in 1:max_gen {
+        tok = forward_token_argmax(m, $&kv, tok) >>> (err) { _ := kv.close()
+        >>> err }
+        out.push(tok)
+    }
+    mqclose_kv($&kv)
+    << out
+}
+
+pub fn decode_tokens(m &MetalModel, ids &[]int) string {
+    $s := ""
+    for i in 0:ids.len {
+        tid := ids[i]
+        if tid >= 0 && tid < m.vocab.len {
+            s = s + m.vocab[tid]
+        } else {
+            s = s + "<tok_" + str(tid) + ">"
+        }
+    }
+    << s
+}
+
+pub fn new_paged_kv_cache(m &MetalModel, max_seq_req int, block_size_req int) MetalPagedKVCache {
+    $ms := max_seq_req
+    if ms <= 0 { ms = m.cfg.max_seq_len }
+    if ms <= 0 { ms = 512 }
+    $bs := block_size_req
+    if bs <= 0 { bs = 16 }
+    max_blocks := (ms + bs - 1) / bs
+    dim := m.cfg.dim
+    kv_dim := m.cfg.kv_dim
+    hid := m.cfg.hidden_dim
+    voc := m.cfg.vocab_size
+    $bt := m.dev.matrix_f32(1, max_blocks) >>>
+    $bt_bits := []int{}
+    bt_bits.reserve(max_blocks)
+    // Assign non-trivial physical permutation when >= 2 blocks to stress block mapping cleanly
+    for i in 0:max_blocks {
+        pid := max_blocks - 1 - i
+        bt_bits.push(math.float32_bits(f64(pid)))
+    }
+    _ := bt.write_bits(&bt_bits) >>> (err) {
+        mqclose_f32($&bt)
+        >>> err
+    }
+    $pkv := MetalPagedKVCache{
+        max_seq: ms, block_size: bs, max_blocks: max_blocks, pos: 0,
+        k_pages: []metal.F16Matrix{}, v_pages: []metal.F16Matrix{}, block_table: bt,
+        x: m.dev.matrix_f32(1, dim) >>>,
+        x_next: m.dev.matrix_f32(1, dim) >>>,
+        norm1: m.dev.matrix_f32(1, dim) >>>,
+        q_raw: m.dev.matrix_f32(1, dim) >>>,
+        k_raw: m.dev.matrix_f32(1, kv_dim) >>>,
+        q_tmp: m.dev.matrix_f32(1, dim) >>>,
+        k_tmp: m.dev.matrix_f32(1, kv_dim) >>>,
+        q: m.dev.matrix_f32(1, dim) >>>,
+        k: m.dev.matrix_f32(1, kv_dim) >>>,
+        v_tmp: m.dev.matrix_f32(1, kv_dim) >>>,
+        v: m.dev.matrix_f32(1, kv_dim) >>>,
+        att: m.dev.matrix_f32(1, dim) >>>,
+        oproj: m.dev.matrix_f32(1, dim) >>>,
+        norm2: m.dev.matrix_f32(1, dim) >>>,
+        gate: m.dev.matrix_f32(1, hid) >>>,
+        up: m.dev.matrix_f32(1, hid) >>>,
+        act: m.dev.matrix_f32(1, hid) >>>,
+        ffn: m.dev.matrix_f32(1, dim) >>>,
+        logits: m.dev.matrix_f32(1, voc) >>>,
+        idx_mat: m.dev.matrix_f32(1, 1) >>>,
+        closed: false
+    }
+    for _ in 0:m.cfg.n_layers {
+        $km := m.dev.matrix_f16(max_blocks * bs, kv_dim) >>> (err) {
+            mqclose_pkv($&pkv)
+            >>> err
+        }
+        $vm := m.dev.matrix_f16(max_blocks * bs, kv_dim) >>> (err) {
+            mqclose_f16($&km)
+            mqclose_pkv($&pkv)
+            >>> err
+        }
+        pkv.k_pages.push(km)
+        pkv.v_pages.push(vm)
+    }
+    << pkv
+}
+
+pub fn (kv $&MetalPagedKVCache) close() int {
+    if kv.closed { << 0 }
+    kv.closed = true
+    close_f16_list($&kv.k_pages)
+    close_f16_list($&kv.v_pages)
+    mqclose_f32($&kv.block_table)
+    mqclose_f32($&kv.x)
+    mqclose_f32($&kv.x_next)
+    mqclose_f32($&kv.norm1)
+    mqclose_f32($&kv.q_raw)
+    mqclose_f32($&kv.k_raw)
+    mqclose_f32($&kv.q_tmp)
+    mqclose_f32($&kv.k_tmp)
+    mqclose_f32($&kv.q)
+    mqclose_f32($&kv.k)
+    mqclose_f32($&kv.v_tmp)
+    mqclose_f32($&kv.v)
+    mqclose_f32($&kv.att)
+    mqclose_f32($&kv.oproj)
+    mqclose_f32($&kv.norm2)
+    mqclose_f32($&kv.gate)
+    mqclose_f32($&kv.up)
+    mqclose_f32($&kv.act)
+    mqclose_f32($&kv.ffn)
+    mqclose_f32($&kv.logits)
+    mqclose_f32($&kv.idx_mat)
+    << 0
+}
+
+pub fn forward_token_paged_argmax(m &MetalModel, kv $&MetalPagedKVCache, token int) int {
+    if kv.pos >= kv.max_seq { >>> errors.new("llm_metal: paged KV cache full") }
+    ids := [token]
+    scale := 1.0 / math.sqrt(f64(m.cfg.head_dim))
+    $b := m.dev.begin_batch() >>>
+    _ := b.embedding_f32($&kv.x, &m.embed_table, &ids) >>>
+    for l in 0:m.cfg.n_layers {
+        lw := &m.layers[l]
+        an_i := lw.attn_norm_idx
+        fn_i := lw.ffn_norm_idx
+        _ := b.rmsnorm_f32($&kv.norm1, &kv.x, &m.f32_mats[an_i], m.cfg.eps) >>>
+        _ := batch_linear($&b, $&kv.q_raw, &kv.norm1, &lw.wq, m) >>>
+        _ := batch_linear($&b, $&kv.k_raw, &kv.norm1, &lw.wk, m) >>>
+        _ := batch_linear($&b, $&kv.v, &kv.norm1, &lw.wv, m) >>>
+        _ := encode_rope($&b, $&kv.q, &kv.q_raw, kv.pos, m) >>>
+        _ := encode_rope($&b, $&kv.k, &kv.k_raw, kv.pos, m) >>>
+        _ := b.paged_kv_cache_append_f16($&kv.k_pages[l], &kv.k, &kv.block_table, kv.pos, kv.block_size) >>>
+        _ := b.paged_kv_cache_append_f16($&kv.v_pages[l], &kv.v, &kv.block_table, kv.pos, kv.block_size) >>>
+        _ := b.paged_attention_decode_f16($&kv.att, &kv.q, &kv.k_pages[l], &kv.v_pages[l], &kv.block_table, kv.pos + 1, kv.block_size, m.cfg.n_heads, m.cfg.n_kv_heads, scale) >>>
+        _ := batch_linear($&b, $&kv.oproj, &kv.att, &lw.wo, m) >>>
+        _ := b.add_rmsnorm_f32($&kv.norm2, $&kv.x_next, &kv.x, &kv.oproj, &m.f32_mats[fn_i], m.cfg.eps) >>>
+        _ := batch_linear($&b, $&kv.gate, &kv.norm2, &lw.wg, m) >>>
+        _ := batch_linear($&b, $&kv.up, &kv.norm2, &lw.wu, m) >>>
+        _ := b.swiglu_f32($&kv.act, &kv.gate, &kv.up) >>>
+        _ := batch_linear($&b, $&kv.ffn, &kv.act, &lw.wd, m) >>>
+        _ := b.add_f32($&kv.x, &kv.x_next, &kv.ffn) >>>
+    }
+    nm_i := m.norm_idx
+    _ := b.rmsnorm_f32($&kv.norm1, &kv.x, &m.f32_mats[nm_i], m.cfg.eps) >>>
+    _ := batch_linear($&b, $&kv.logits, &kv.norm1, &m.lm_head, m) >>>
+    _ := b.argmax_f32($&kv.idx_mat, &kv.logits) >>>
+    $f := b.commit() >>>
+    _ := f.wait() >>> (err) { _ := f.close()
+    >>> err }
+    _ := f.close() >>>
+    kv.pos += 1
+    bits := kv.idx_mat.bits() >>>
+    << int(math.float32_from_bits(bits[0]) + 0.5)
+}
+
+pub fn generate_paged(m &MetalModel, prompt_ids &[]int, max_gen int, block_size int) []int {
+    if prompt_ids.len == 0 || max_gen <= 0 { << []int{} }
+    $kv := new_paged_kv_cache(m, prompt_ids.len + max_gen + 2, block_size) >>>
+    $tok := 0
+    for i in 0:prompt_ids.len {
+        tok = forward_token_paged_argmax(m, $&kv, prompt_ids[i]) >>> (err) {
+            mqclose_pkv($&kv)
+            >>> err
+        }
+    }
+    $out := []int{}
+    out.push(tok)
+    for _ in 1:max_gen {
+        tok = forward_token_paged_argmax(m, $&kv, tok) >>> (err) {
+            mqclose_pkv($&kv)
+            >>> err
+        }
+        out.push(tok)
+    }
+    mqclose_pkv($&kv)
+    << out
+}
+
+pub fn new_lora(m &MetalModel, rank_req int, alpha_req f64) MetalLoRA {
+    $rk := rank_req
+    if rk <= 0 { rk = 4 }
+    $al := alpha_req
+    if al <= 0.0 { al = f64(rk) * 2.0 }
+    dim := m.cfg.dim
+    voc := m.cfg.vocab_size
+    $a_mat := m.dev.matrix_f32(rk, dim) >>>
+    $b_mat := m.dev.matrix_f32(voc, rk) >>>
+    $a_bits := []int{}
+    a_bits.reserve(rk * dim)
+    for r in 0:rk {
+        for c in 0:dim {
+            v := (f64(((r * 131 + c * 17) % 19) - 9)) * 0.005
+            a_bits.push(math.float32_bits(v))
+        }
+    }
+    _ := a_mat.write_bits(&a_bits) >>> (err) {
+        mqclose_f32($&a_mat)
+        mqclose_f32($&b_mat)
+        >>> err
+    }
+    $m_a := m.dev.matrix_f32(rk, dim) >>> (err) {
+        mqclose_f32($&a_mat)
+        mqclose_f32($&b_mat)
+        >>> err
+    }
+    $v_a := m.dev.matrix_f32(rk, dim) >>> (err) {
+        mqclose_f32($&a_mat)
+        mqclose_f32($&b_mat)
+        mqclose_f32($&m_a)
+        >>> err
+    }
+    $m_b := m.dev.matrix_f32(voc, rk) >>> (err) {
+        mqclose_f32($&a_mat)
+        mqclose_f32($&b_mat)
+        mqclose_f32($&m_a)
+        mqclose_f32($&v_a)
+        >>> err
+    }
+    $v_b := m.dev.matrix_f32(voc, rk) >>> (err) {
+        mqclose_f32($&a_mat)
+        mqclose_f32($&b_mat)
+        mqclose_f32($&m_a)
+        mqclose_f32($&v_a)
+        mqclose_f32($&m_b)
+        >>> err
+    }
+    << MetalLoRA{
+        rank: rk, alpha: al, scale: al / f64(rk), step: 0,
+        a_mat: a_mat, b_mat: b_mat,
+        m_a: m_a, v_a: v_a, m_b: m_b, v_b: v_b,
+        closed: false
+    }
+}
+
+pub fn (l $&MetalLoRA) close() int {
+    if l.closed { << 0 }
+    l.closed = true
+    mqclose_f32($&l.a_mat)
+    mqclose_f32($&l.b_mat)
+    mqclose_f32($&l.m_a)
+    mqclose_f32($&l.v_a)
+    mqclose_f32($&l.m_b)
+    mqclose_f32($&l.v_b)
+    << 0
+}
+
+pub fn forward_token_lora_argmax(m &MetalModel, kv $&MetalKVCache, lora &MetalLoRA, token int) int {
+    $b := m.dev.begin_batch() >>>
+    _ := encode_decode_layers($&b, m, kv, token) >>> (err) {
+        mqclose_batch($&b)
+        >>> err
+    }
+    _ := b.lora_add_f32($&kv.logits, &kv.norm1, &lora.a_mat, &lora.b_mat, lora.scale) >>> (err) {
+        mqclose_batch($&b)
+        >>> err
+    }
+    _ := b.argmax_f32($&kv.idx_mat, &kv.logits) >>> (err) {
+        mqclose_batch($&b)
+        >>> err
+    }
+    $f := b.commit() >>>
+    _ := f.wait() >>> (err) {
+        mqclose_fence($&f)
+        >>> err
+    }
+    mqclose_fence($&f)
+    kv.pos += 1
+    bits := kv.idx_mat.bits() >>>
+    << int(math.float32_from_bits(bits[0]) + 0.5)
+}
+
+pub fn train_lora_step(m &MetalModel, lora $&MetalLoRA, input_ids &[]int, target_ids &[]int,
+                       lr f64, weight_decay f64) f64 {
+    t := input_ids.len
+    if t <= 0 || target_ids.len != t { >>> errors.new("llm_metal.lora: input/target length mismatch") }
+    dim := m.cfg.dim
+    kv_dim := m.cfg.kv_dim
+    hid := m.cfg.hidden_dim
+    voc := m.cfg.vocab_size
+    rk := lora.rank
+    scale := 1.0 / math.sqrt(f64(m.cfg.head_dim))
+
+    $px := m.dev.matrix_f32(t, dim) >>>
+    $pxn := m.dev.matrix_f32(t, dim) >>>
+    $pn1 := m.dev.matrix_f32(t, dim) >>>
+    $pqr := m.dev.matrix_f32(t, dim) >>>
+    $pkr := m.dev.matrix_f32(t, kv_dim) >>>
+    $pq := m.dev.matrix_f32(t, dim) >>>
+    $pk := m.dev.matrix_f32(t, kv_dim) >>>
+    $pv := m.dev.matrix_f32(t, kv_dim) >>>
+    $pk16 := m.dev.matrix_f16(t, kv_dim) >>>
+    $pv16 := m.dev.matrix_f16(t, kv_dim) >>>
+    $patt := m.dev.matrix_f32(t, dim) >>>
+    $pop := m.dev.matrix_f32(t, dim) >>>
+    $pn2 := m.dev.matrix_f32(t, dim) >>>
+    $pg := m.dev.matrix_f32(t, hid) >>>
+    $pu := m.dev.matrix_f32(t, hid) >>>
+    $pa := m.dev.matrix_f32(t, hid) >>>
+    $pf := m.dev.matrix_f32(t, dim) >>>
+    $h_fin := m.dev.matrix_f32(t, dim) >>>
+    $logits := m.dev.matrix_f32(t, voc) >>>
+    $targets := m.dev.matrix_f32(t, 1) >>>
+    $tbits := []int{}
+    for i in 0:t { tbits.push(math.float32_bits(f64(target_ids[i]))) }
+    _ := targets.write_bits(&tbits) >>>
+    $dlogits := m.dev.matrix_f32(t, voc) >>>
+    $losses := m.dev.matrix_f32(t, 1) >>>
+    $h_a := m.dev.matrix_f32(t, rk) >>>
+    $db_raw := m.dev.matrix_f32(voc, rk) >>>
+    $db := m.dev.matrix_f32(voc, rk) >>>
+    $d_ha := m.dev.matrix_f32(t, rk) >>>
+    $da_raw := m.dev.matrix_f32(rk, dim) >>>
+    $da := m.dev.matrix_f32(rk, dim) >>>
+
+    lora.step += 1
+    inv_t_scale := lora.scale / f64(t)
+
+    $b := m.dev.begin_batch() >>>
+    _ := b.embedding_f32($&px, &m.embed_table, input_ids) >>>
+    for l in 0:m.cfg.n_layers {
+        lw := &m.layers[l]
+        an_i := lw.attn_norm_idx
+        fn_i := lw.ffn_norm_idx
+        _ := b.rmsnorm_f32($&pn1, &px, &m.f32_mats[an_i], m.cfg.eps) >>>
+        _ := batch_linear($&b, $&pqr, &pn1, &lw.wq, m) >>>
+        _ := batch_linear($&b, $&pkr, &pn1, &lw.wk, m) >>>
+        _ := batch_linear($&b, $&pv, &pn1, &lw.wv, m) >>>
+        _ := encode_rope($&b, $&pq, &pqr, 0, m) >>>
+        _ := encode_rope($&b, $&pk, &pkr, 0, m) >>>
+        _ := b.f32_to_f16($&pk16, &pk) >>>
+        _ := b.f32_to_f16($&pv16, &pv) >>>
+        _ := b.causal_attention_f16($&patt, &pq, &pk16, &pv16, m.cfg.n_heads, m.cfg.n_kv_heads, scale) >>>
+        _ := batch_linear($&b, $&pop, &patt, &lw.wo, m) >>>
+        _ := b.add_rmsnorm_f32($&pn2, $&pxn, &px, &pop, &m.f32_mats[fn_i], m.cfg.eps) >>>
+        _ := batch_linear($&b, $&pg, &pn2, &lw.wg, m) >>>
+        _ := batch_linear($&b, $&pu, &pn2, &lw.wu, m) >>>
+        _ := b.swiglu_f32($&pa, &pg, &pu) >>>
+        _ := batch_linear($&b, $&pf, &pa, &lw.wd, m) >>>
+        _ := b.add_f32($&px, &pxn, &pf) >>>
+    }
+    nm_i := m.norm_idx
+    _ := b.rmsnorm_f32($&h_fin, &px, &m.f32_mats[nm_i], m.cfg.eps) >>>
+    _ := batch_linear($&b, $&logits, &h_fin, &m.lm_head, m) >>>
+    _ := b.lora_add_f32($&logits, &h_fin, &lora.a_mat, &lora.b_mat, lora.scale) >>>
+    _ := b.cross_entropy_grad_f32($&dlogits, $&losses, &logits, &targets) >>>
+    _ := b.gemm_f32_nt($&h_a, &h_fin, &lora.a_mat) >>>
+    _ := b.gemm_f32_tn($&db_raw, &dlogits, &h_a) >>>
+    _ := b.scale_f32($&db, &db_raw, inv_t_scale) >>>
+    _ := b.gemm_f32($&d_ha, &dlogits, &lora.b_mat) >>>
+    _ := b.gemm_f32_tn($&da_raw, &d_ha, &h_fin) >>>
+    _ := b.scale_f32($&da, &da_raw, inv_t_scale) >>>
+    _ := b.adamw_step_f32($&lora.b_mat, &db, $&lora.m_b, $&lora.v_b, lr, 0.9, 0.999, 1e-8, weight_decay, lora.step) >>>
+    _ := b.adamw_step_f32($&lora.a_mat, &da, $&lora.m_a, $&lora.v_a, lr, 0.9, 0.999, 1e-8, weight_decay, lora.step) >>>
+    $f := b.commit() >>>
+    _ := f.wait() >>> (err) { _ := f.close()
+    >>> err }
+    _ := f.close() >>>
+
+    lbits := losses.bits() >>>
+    $lsum := 0.0
+    for i in 0:lbits.len { lsum += math.float32_from_bits(lbits[i]) }
+
+    mqclose_f32($&px)
+    mqclose_f32($&pxn)
+    mqclose_f32($&pn1)
+    mqclose_f32($&pqr)
+    mqclose_f32($&pkr)
+    mqclose_f32($&pq)
+    mqclose_f32($&pk)
+    mqclose_f32($&pv)
+    mqclose_f16($&pk16)
+    mqclose_f16($&pv16)
+    mqclose_f32($&patt)
+    mqclose_f32($&pop)
+    mqclose_f32($&pn2)
+    mqclose_f32($&pg)
+    mqclose_f32($&pu)
+    mqclose_f32($&pa)
+    mqclose_f32($&pf)
+    mqclose_f32($&h_fin)
+    mqclose_f32($&logits)
+    mqclose_f32($&targets)
+    mqclose_f32($&dlogits)
+    mqclose_f32($&losses)
+    mqclose_f32($&h_a)
+    mqclose_f32($&db_raw)
+    mqclose_f32($&db)
+    mqclose_f32($&d_ha)
+    mqclose_f32($&da_raw)
+    mqclose_f32($&da)
+    << lsum / f64(t)
+}
