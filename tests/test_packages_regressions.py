@@ -913,6 +913,8 @@ fn main() int {{
             built = subprocess.run([str(XU), "build", str(work), *build_flags, "-o", str(work / "probe")],
                 cwd=REPO, env=compiler_env(work), capture_output=True, text=True, timeout=90)
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            if os.uname().sysname == "Darwin":
+                subprocess.run(["codesign", "--force", "--sign", "-", str(work / "probe")], check=True, capture_output=True)
             env = dict(os.environ, AUDIT_ENDPOINT=endpoint)
             env.update(runtime_env or {})
             process = subprocess.Popen([str(work / "probe")], cwd=work,
@@ -1065,6 +1067,72 @@ fn main() int {
             '"postgres://test@" + os.getenv("AUDIT_ENDPOINT") + "/test?sslmode=disable"')
         with server(peer) as endpoint:
             self.assertIn("preserved", self.run_xu(source, ["postgres"], endpoint))
+
+    def test_postgres_binds_more_than_five_parameters(self):
+        def packet(kind, body):
+            return kind + struct.pack(">I", len(body) + 4) + body
+
+        captured_params = []
+
+        def peer(conn):
+            length = struct.unpack(">I", exact(conn, 4))[0]
+            exact(conn, length - 4)
+            conn.sendall(packet(b"R", struct.pack(">I", 0)) + packet(b"Z", b"I"))
+            bind_body = None
+            while True:
+                kind = exact(conn, 1)
+                plen = struct.unpack(">I", exact(conn, 4))[0]
+                body = exact(conn, plen - 4)
+                if kind == b"B":
+                    bind_body = body
+                elif kind == b"S":
+                    break
+            self.assertIsNotNone(bind_body)
+            # Parse Bind: portal\0 stmt\0 fmt_count(H) param_count(H) [len(i) data]... res_fmt_count(H)
+            self.assertTrue(bind_body.startswith(b"\0\0"))
+            off = 2
+            fmt_count = struct.unpack(">H", bind_body[off:off + 2])[0]
+            off += 2 + fmt_count * 2
+            param_count = struct.unpack(">H", bind_body[off:off + 2])[0]
+            off += 2
+            self.assertEqual(param_count, 8)
+            for _ in range(param_count):
+                vlen = struct.unpack(">i", bind_body[off:off + 4])[0]
+                off += 4
+                if vlen == -1:
+                    captured_params.append(None)
+                else:
+                    captured_params.append(bind_body[off:off + vlen].decode("utf-8"))
+                    off += vlen
+            columns = b"ok\0" + struct.pack(">IhIhih", 0, 0, 25, -1, -1, 0)
+            row = struct.pack(">Hi", 1, 2) + b"ok"
+            conn.sendall(
+                packet(b"1", b"")
+                + packet(b"2", b"")
+                + packet(b"T", struct.pack(">H", 1) + columns)
+                + packet(b"D", row)
+                + packet(b"C", b"SELECT 1\0")
+                + packet(b"Z", b"I")
+            )
+
+        source = '''@main
+#postgres
+#os
+#database/sql/driver
+fn main() int {
+    c := postgres.open("postgres://test@" + os.getenv("AUDIT_ENDPOINT") + "/test?sslmode=disable")
+    r := c.query("SELECT $$1, $$2, $$3, $$4, $$5, $$6, $$7, $$8", [driver.NamedValue{name: "", ordinal: 1, value: 42}, driver.NamedValue{name: "", ordinal: 2, value: "p2"}, driver.NamedValue{name: "", ordinal: 3, value: true}, driver.NamedValue{name: "", ordinal: 4, value: -1.25}, driver.NamedValue{name: "", ordinal: 5, value: [u8(0), u8(255)]}, driver.NamedValue{name: "", ordinal: 6, value: 600}, driver.NamedValue{name: "", ordinal: 7, value: "param7"}, driver.NamedValue{name: "", ordinal: 8, value: 888}])
+    c.close()
+    if r.err.len > 0 { println(r.err)
+        << 1 }
+    if r.cells.len != 1 || r.cells[0] != "s:ok" { << 2 }
+    println("postgres 8 params preserved")
+    << 0
+}
+'''
+        with server(peer) as endpoint:
+            self.assertIn("preserved", self.run_xu(source, ["postgres"], endpoint))
+        self.assertEqual(captured_params, ["42", "p2", "true", "-1.25", "\\x00ff", "600", "param7", "888"])
 
     def test_mongodb_write_errors_are_not_success(self):
         def doc(fields):
@@ -1573,6 +1641,379 @@ fn main() int {
 }
 '''
         self.assertIn("preserved", self.run_xu(source, ["sqlite"]))
+
+    def _mysql_mock_peer(self, captured_sql):
+        def mysql_pkt(seq, payload):
+            n = len(payload)
+            return bytes((n & 255, (n >> 8) & 255, (n >> 16) & 255, seq & 255)) + payload
+
+        def recv_pkt(conn):
+            hdr = exact(conn, 4)
+            plen = hdr[0] | (hdr[1] << 8) | (hdr[2] << 16)
+            return hdr[3], exact(conn, plen)
+
+        def peer(conn):
+            greeting = (
+                b"\x0a8.0.0-test\x00"
+                + struct.pack("<I", 1)
+                + b"12345678\x00"
+                + struct.pack("<H", 0x8201)
+                + b"\x2d\x00\x00"
+                + struct.pack("<H", 0x0008)
+                + b"\x15"
+                + b"\x00" * 10
+                + b"abcdefghijkl\x00mysql_native_password\x00"
+            )
+            conn.sendall(mysql_pkt(0, greeting))
+            recv_pkt(conn)
+            conn.sendall(mysql_pkt(2, b"\x00\x00\x00"))
+            while True:
+                try:
+                    _, body = recv_pkt(conn)
+                except EOFError:
+                    break
+                if not body or body[0] == 1:
+                    break
+                if body[0] == 14:  # COM_PING
+                    conn.sendall(mysql_pkt(1, b"\x00\x00\x00"))
+                    continue
+                if body[0] != 3:
+                    conn.sendall(mysql_pkt(1, b"\x00\x00\x00"))
+                    continue
+                sql_text = body[1:].decode("utf-8")
+                captured_sql.append(sql_text)
+                if sql_text.upper().startswith("SELECT"):
+                    coldef = (
+                        b"\x03def\x00\x00\x00\x02ok\x00"
+                        + b"\x0c" + b"\x00" * 6 + bytes((253,)) + b"\x00" * 5
+                    )
+                    eof = b"\xfe\x00\x00\x02\x00"
+                    conn.sendall(
+                        mysql_pkt(1, b"\x01")
+                        + mysql_pkt(2, coldef)
+                        + mysql_pkt(3, eof)
+                        + mysql_pkt(4, b"\x02ok")
+                        + mysql_pkt(5, eof)
+                    )
+                else:
+                    conn.sendall(mysql_pkt(1, b"\x00\x00\x00"))
+
+        return peer
+
+    def test_mysql_binds_more_than_five_parameters(self):
+        captured_sql = []
+        source = '''@main
+#mysql
+#os
+#database/sql/driver
+fn main() int {
+    c := mysql.open("mysql://test:secret@" + os.getenv("AUDIT_ENDPOINT") + "/test?tls=false")
+    r := c.query("SELECT ?, ?, ?, ?, ?, ?, ?, ?", [driver.NamedValue{name: "", ordinal: 1, value: 42}, driver.NamedValue{name: "", ordinal: 2, value: "o'b"}, driver.NamedValue{name: "", ordinal: 3, value: true}, driver.NamedValue{name: "", ordinal: 4, value: false}, driver.NamedValue{name: "", ordinal: 5, value: -1.25}, driver.NamedValue{name: "", ordinal: 6, value: [u8(0), u8(255)]}, driver.NamedValue{name: "", ordinal: 7, value: 600}, driver.NamedValue{name: "", ordinal: 8, value: "param8"}])
+    _ := c.close()
+    if r.err.len > 0 { println(r.err)
+        << 1 }
+    if r.cells.len != 1 || r.cells[0] != "s:ok" { << 2 }
+    println("mysql 8 params preserved")
+    << 0
+}
+'''
+        with server(self._mysql_mock_peer(captured_sql)) as endpoint:
+            self.assertIn("preserved", self.run_xu(source, ["mysql"], endpoint))
+        self.assertEqual(
+            captured_sql,
+            ["SELECT 42, 'o''b', 1, 0, -1.25, X'00ff', 600, 'param8'"],
+        )
+
+    def test_database_sql_binds_more_than_three_parameters_and_retries(self):
+        source = '''@main
+#database/sql
+#database/sql/driver
+#context
+#time
+
+struct LogState {
+    pub fail_once int
+    pub last string
+    pub calls int
+}
+
+struct MockDrv {
+    pub st chan LogState
+}
+
+struct MockConn {
+    pub st chan LogState
+}
+
+struct MockTx {
+    pub st chan LogState
+}
+
+struct MockStmt {
+    pub st chan LogState
+    pub q string
+}
+
+fn format_nv_list(args []driver.NamedValue) string {
+    $out := ""
+    for i in 0:args.len {
+        if i > 0 { out = out + "|" }
+        ord := args[i].ordinal
+        nm := args[i].name + ""
+        $vstr := "n:"
+        if args[i].value is int {
+            x := args[i].value as int
+            vstr = driver.encode_value(x)
+        } else if args[i].value is string {
+            s := args[i].value as string
+            vstr = driver.encode_value(s)
+        } else if args[i].value is bool {
+            b := args[i].value as bool
+            vstr = driver.encode_value(b)
+        } else if args[i].value is f64 {
+            f := args[i].value as f64
+            vstr = driver.encode_value(f)
+        } else if args[i].value is time.Time {
+            tm := args[i].value as time.Time
+            vstr = driver.encode_value(tm)
+        } else if args[i].value is []u8 {
+            bs := args[i].value as []u8
+            vstr = driver.encode_value(bs)
+        }
+        out = out + str(ord) + ":" + nm + "=" + vstr
+    }
+    << out
+}
+
+fn encode_temp_list(vals []temp) []string {
+    $out := []string{}
+    for i in 0:vals.len {
+        if vals[i] is int {
+            x := vals[i] as int
+            out.push(driver.encode_value(x))
+        } else if vals[i] is string {
+            s := vals[i] as string
+            out.push(driver.encode_value(s))
+        } else if vals[i] is bool {
+            b := vals[i] as bool
+            out.push(driver.encode_value(b))
+        } else if vals[i] is f64 {
+            f := vals[i] as f64
+            out.push(driver.encode_value(f))
+        } else if vals[i] is time.Time {
+            tm := vals[i] as time.Time
+            out.push(driver.encode_value(tm))
+        } else if vals[i] is []u8 {
+            bs := vals[i] as []u8
+            out.push(driver.encode_value(bs))
+        } else {
+            out.push("n:")
+        }
+    }
+    << out
+}
+
+fn (d MockDrv) open(name string) driver.Conn {
+    _ := name
+    << driver.Conn(MockConn{st: d.st})
+}
+fn (d MockDrv) dup() driver.Driver { << driver.Driver(MockDrv{st: d.st}) }
+
+fn (c MockConn) ping() string { << "" }
+fn (c MockConn) exec(q string, args []driver.NamedValue) driver.ExecResult {
+    _ := q
+    encoded := format_nv_list(args)
+    $s := <-c.st
+    s.calls += 1
+    if s.fail_once == 0 {
+        s.fail_once = 1
+        c.st <- s
+        << driver.exec_err(driver.err_bad_conn())
+    }
+    s.last = encoded
+    c.st <- s
+    << driver.exec_ok(1, 1)
+}
+fn (c MockConn) query(q string, args []driver.NamedValue) driver.RowsResult {
+    _ := q
+    encoded := format_nv_list(args)
+    $s := <-c.st
+    s.calls += 1
+    s.last = encoded + ""
+    c.st <- s
+    << driver.RowsResult{columns: ["args"], cells: ["s:" + encoded], ncols: 1, err: ""}
+}
+fn (c MockConn) close() string { << "" }
+fn (c MockConn) dup() driver.Conn { << driver.Conn(MockConn{st: c.st}) }
+fn (c MockConn) prepare(q string) driver.Stmt { << driver.Stmt(MockStmt{st: c.st, q: q + ""}) }
+fn (c MockConn) prepare_context(ctx &context.Context, q string) driver.Stmt {
+    _ := ctx
+    << c.prepare(q)
+}
+fn (c MockConn) begin() driver.Tx { << driver.Tx(MockTx{st: c.st}) }
+fn (c MockConn) begin_tx(iso int, ro bool) driver.Tx {
+    _ := iso
+    _ := ro
+    << driver.Tx(MockTx{st: c.st})
+}
+fn (c MockConn) reset_session(ctx &context.Context) string {
+    _ := ctx
+    << ""
+}
+fn (c MockConn) is_valid() bool { << true }
+
+fn (t MockTx) commit() string { << "" }
+fn (t MockTx) rollback() string { << "" }
+
+fn (s MockStmt) num_input() int { << -1 }
+fn (s MockStmt) exec(args []driver.NamedValue) driver.ExecResult {
+    c := MockConn{st: s.st}
+    << c.exec(s.q, args)
+}
+fn (s MockStmt) query(args []driver.NamedValue) driver.RowsResult {
+    c := MockConn{st: s.st}
+    << c.query(s.q, args)
+}
+fn (s MockStmt) close() string { << "" }
+
+fn main() int {
+    ch := chan LogState{cap: 1}
+    ch <- LogState{fail_once: 0, last: "", calls: 0}
+    $db := sql.open(driver.Driver(MockDrv{st: ch}), "mock://")
+    tm := time.unix(1700000000, 123)
+    want := "1:=i:42|2:=s:hello|3:=b:1|4:=f:-1.5|5:=t:1700000000000000123|6:=y:0a0b|7:k7=i:700|8:k8=s:eight"
+
+    _ := db.exec("INSERT", 42, "hello", true, -1.5, tm, [u8(10), u8(11)], sql.named("k7", 700), sql.named("k8", "eight")) >>> (err) {
+        println("exec err: " + err.msg())
+        << 1
+    }
+    st1 := <-ch
+    if st1.calls != 2 || st1.last != want {
+        println("retry mismatch: " + st1.last)
+        ch <- st1
+        << 2
+    }
+    ch <- st1
+
+    $rows := db.query("SELECT", 42, "hello", true, -1.5, tm, [u8(10), u8(11)], sql.named("k7", 700), sql.named("k8", "eight")) >>> (err) {
+        println("query err: " + err.msg())
+        << 3
+    }
+    if !rows.next() { << 4 }
+    got_q := encode_temp_list(rows.take() >>> (err) { << 5 })
+    rows.close()
+    if got_q.len != 1 || got_q[0] != "s:" + want {
+        println("query mismatch")
+        << 6
+    }
+
+    row := db.query_row("SELECT ROW", 42, "hello", true, -1.5, tm, [u8(10), u8(11)], sql.named("k7", 700), sql.named("k8", "eight"))
+    got_r := encode_temp_list(row.take() >>> (err) {
+        println("row err: " + err.msg())
+        << 7
+    })
+    if got_r.len != 1 || got_r[0] != "s:" + want {
+        println("query_row mismatch")
+        << 8
+    }
+
+    $tx := db.begin() >>> (err) { << 9 }
+    _ := tx.exec("TX INSERT", 42, "hello", true, -1.5, tm, [u8(10), u8(11)], sql.named("k7", 700), sql.named("k8", "eight")) >>> (err) { << 10 }
+    _ := tx.commit() >>> (err) { << 11 }
+    st2 := <-ch
+    if st2.last != want {
+        println("tx mismatch: " + st2.last)
+        ch <- st2
+        << 12
+    }
+    ch <- st2
+
+    $stmt := db.prepare("STMT SELECT")
+    $srows := stmt.query(42, "hello", true, -1.5, tm, [u8(10), u8(11)], sql.named("k7", 700), sql.named("k8", "eight")) >>> (err) { << 13 }
+    if !srows.next() { << 14 }
+    got_s := encode_temp_list(srows.take() >>> (err) { << 15 })
+    srows.close()
+    stmt.close()
+    _ := db.close() >>> (err) { << 16 }
+    if got_s.len != 1 || got_s[0] != "s:" + want {
+        println("stmt mismatch")
+        << 17
+    }
+    println("database/sql 8 params + retry preserved")
+    << 0
+}
+'''
+        self.assertIn("preserved", self.run_xu(source, []))
+
+    def test_database_sql_binds_more_than_three_parameters_with_sqlite_and_mysql(self):
+        captured_sql = []
+        source = '''@main
+#database/sql
+#database/sql/driver
+#sqlite
+#mysql
+#os
+fn encode_vals(vals []temp) []string {
+    $out := []string{}
+    for i in 0:vals.len {
+        if vals[i] is int {
+            x := vals[i] as int
+            out.push(driver.encode_value(x))
+        } else if vals[i] is string {
+            s := vals[i] as string
+            out.push(driver.encode_value(s))
+        } else if vals[i] is bool {
+            b := vals[i] as bool
+            out.push(driver.encode_value(b))
+        } else if vals[i] is f64 {
+            f := vals[i] as f64
+            out.push(driver.encode_value(f))
+        } else if vals[i] is []u8 {
+            bs := vals[i] as []u8
+            out.push(driver.encode_value(bs))
+        } else {
+            out.push("n:")
+        }
+    }
+    << out
+}
+
+fn main() int {
+    $sdb := sql.open(sqlite.driver(), ":memory:")
+    _ := sdb.exec("CREATE TABLE wide (a INT, b TEXT, c INT, d REAL, e BLOB, f INT, g TEXT, h INT)") >>> (err) {
+        println(err.msg())
+        << 1
+    }
+    _ := sdb.exec("INSERT INTO wide VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 11, "s2", true, -2.5, [u8(1), u8(2)], 60, "s7", 88) >>> (err) {
+        println(err.msg())
+        << 2
+    }
+    srow := sdb.query_row("SELECT a, b, c, d, e, f, g, h FROM wide WHERE a=? AND b=? AND f=? AND g=? AND h=?", 11, "s2", 60, "s7", 88)
+    svals := encode_vals(srow.take() >>> (err) {
+        println(err.msg())
+        << 3
+    })
+    _ := sdb.close() >>> (err) { << 4 }
+    if svals.len != 8 { << 5 }
+    if svals[0] != "i:11" || svals[1] != "s:s2" || svals[2] != "i:1" || svals[3] != "f:-2.5" || svals[4] != "y:0102" || svals[5] != "i:60" || svals[6] != "s:s7" || svals[7] != "i:88" {
+        << 6
+    }
+
+    $mdb := sql.open(mysql.driver(), "mysql://test:secret@" + os.getenv("AUDIT_ENDPOINT") + "/test?tls=false")
+    mrow := mdb.query_row("SELECT ?, ?, ?, ?, ?, ?", 1, "two", true, -3.5, 500, sql.named("six", "s6"))
+    mvals := encode_vals(mrow.take() >>> (err) {
+        println(err.msg())
+        << 7
+    })
+    _ := mdb.close() >>> (err) { << 8 }
+    if mvals.len != 1 || mvals[0] != "s:ok" { << 9 }
+    println("database/sql sqlite+mysql >3 params preserved")
+    << 0
+}
+'''
+        with server(self._mysql_mock_peer(captured_sql)) as endpoint:
+            self.assertIn("preserved", self.run_xu(source, ["sqlite", "mysql"], endpoint))
+        self.assertEqual(captured_sql, ["SELECT 1, 'two', 1, -3.5, 500, 's6'"])
 
 
 if __name__ == "__main__":

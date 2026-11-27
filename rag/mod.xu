@@ -1,5 +1,6 @@
 @"github.com/xulang-org/packages/rag"
 
+#database/sql/driver
 #encoding/json
 #errors
 #math
@@ -10,6 +11,8 @@
 cohere #github.com/xulang-org/packages/cohere
 openai #github.com/xulang-org/packages/openai
 postgres #github.com/xulang-org/packages/postgres
+qdrant #github.com/xulang-org/packages/qdrant
+sqlite #github.com/xulang-org/packages/sqlite
 
 pub struct Chunk {
     pub id string
@@ -1375,3 +1378,542 @@ pub fn load_knowledge_graph_json(path string) KnowledgeGraph {
     }
     << kg
 }
+
+pub fn contextualize_chunks_openai(client &openai.Client, model string, doc_title string,
+                                     full_doc_summary string, chunks &[]string) []string {
+    $out := []string{}
+    sys := "You situate a document chunk within its broader document for search retrieval. Reply ONLY with 1 concise contextual sentence."
+    for i in 0:chunks.len {
+        usr := "Document: " + doc_title + "\nSummary: " + full_doc_summary + "\nChunk:\n" + chunks[i]
+        req := openai.chat_request(model + "", [openai.message("system", sys), openai.message("user", usr)])
+        resp := client.chat(&req) >>>
+        ctx := strings.trim_space(&resp.content)
+        if ctx.len > 0 {
+            out.push("[Context: " + ctx + "]\n" + chunks[i])
+        } else {
+            out.push(chunks[i] + "")
+        }
+    }
+    << out
+}
+
+pub struct HybridGraphResult {
+    pub hits []SearchHit
+    pub graph_triples []Triple
+    pub formatted_context string
+}
+
+pub fn hybrid_graph_vector_search(store &MemoryStore, kg &KnowledgeGraph,
+                                    query string, query_emb &[]f64,
+                                    seed_entities &[]string,
+                                    top_k int, graph_hops int) HybridGraphResult {
+    hits := store.search_hybrid(query + "", query_emb, top_k, 60)
+    $triples := []Triple{}
+    for si in 0:seed_entities.len {
+        nb := kg.query_neighbors(seed_entities[si] + "", graph_hops)
+        for ni in 0:nb.len {
+            cand := &nb[ni]
+            $seen := false
+            for ti in 0:triples.len {
+                if triples[ti].subject == cand.subject && triples[ti].predicate == cand.predicate && triples[ti].object == cand.object {
+                    seen = true
+                    <-
+                }
+            }
+            if !seen {
+                triples.push(Triple{
+                    subject: cand.subject + "",
+                    predicate: cand.predicate + "",
+                    object: cand.object + "",
+                    source: cand.source + ""
+                })
+            }
+        }
+    }
+    $ctx := format_context_cited(&hits)
+    if triples.len > 0 {
+        sg := format_subgraph(&triples)
+        if ctx.len > 0 {
+            ctx = ctx + "\n\nKnowledge Graph Context:\n" + sg
+        } else {
+            ctx = "Knowledge Graph Context:\n" + sg
+        }
+    }
+    << HybridGraphResult{
+        hits: ~hits,
+        graph_triples: ~triples,
+        formatted_context: ctx
+    }
+}
+
+fn strip_driver_cell(cell &string) string {
+    if cell.len < 2 { << (*cell) + "" }
+    if (*cell)[0] == 110 && (*cell)[1] == 58 { << "" }
+    if (*cell)[1] == 58 { << (*cell)[2:cell.len] }
+    << (*cell) + ""
+}
+
+fn parse_driver_f64(cell &string) f64 {
+    s := strip_driver_cell(cell)
+    trimmed := strings.trim_space(&s)
+    if trimmed.len == 0 { << 0.0 }
+    << strconv.parse_float(&trimmed) >>> (_) { << 0.0 }
+}
+
+fn f32_to_f64_vec(src &[]f32) []f64 {
+    $out := []f64{}
+    out.reserve(src.len)
+    for i in 0:src.len { out.push(f64(src[i])) }
+    << out
+}
+
+pub struct PgVectorClient {
+    pub store PgVectorStore
+    conn driver.Conn
+}
+
+pub fn new_pgvector_client(conn driver.Conn, table string, dim int, metric string) PgVectorClient {
+    st := new_pgvector_store(table, dim, metric) >>>
+    << PgVectorClient{store: st, conn: conn}
+}
+
+pub fn open_pgvector_client(dsn string, table string, dim int, metric string) PgVectorClient {
+    conn := postgres.open(dsn + "")
+    << new_pgvector_client(conn, table, dim, metric) >>>
+}
+
+pub fn (c $&PgVectorClient) ensure_table() int {
+    r1 := c.conn.exec(postgres.pgvector_create_extension_sql(), []driver.NamedValue{})
+    if r1.err.len > 0 { >>> errors.new("rag pgvector ensure extension failed: " + r1.err) }
+    ddl := "CREATE TABLE IF NOT EXISTS " + c.store.table +
+           " (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}'::jsonb, embedding vector(" +
+           str(c.store.dim) + ") NOT NULL)"
+    r2 := c.conn.exec(ddl, []driver.NamedValue{})
+    if r2.err.len > 0 { >>> errors.new("rag pgvector ensure table failed: " + r2.err) }
+    << 0
+}
+
+pub fn (c $&PgVectorClient) ensure_index(index_name string, method string) int {
+    sql_txt := c.store.create_index_sql(index_name, method) >>>
+    res := c.conn.exec(sql_txt, []driver.NamedValue{})
+    if res.err.len > 0 { >>> errors.new("rag pgvector ensure index failed: " + res.err) }
+    << 0
+}
+
+pub fn (c $&PgVectorClient) upsert_chunk(ch &Chunk) int {
+    sql_txt := c.store.upsert_chunk_sql(ch) >>>
+    res := c.conn.exec(sql_txt, []driver.NamedValue{})
+    if res.err.len > 0 { >>> errors.new("rag pgvector upsert failed: " + res.err) }
+    << res.rows_affected
+}
+
+pub fn (c $&PgVectorClient) delete_doc(doc_id string) int {
+    sql_txt := "DELETE FROM " + c.store.table + " WHERE doc_id = " + sql_quote_lit(&doc_id)
+    res := c.conn.exec(sql_txt, []driver.NamedValue{})
+    if res.err.len > 0 { >>> errors.new("rag pgvector delete failed: " + res.err) }
+    << res.rows_affected
+}
+
+pub fn (c $&PgVectorClient) search(query_emb &[]f64, top_k int, filter_doc_id string) []SearchHit {
+    sql_txt := c.store.search_sql(query_emb, top_k, filter_doc_id) >>>
+    rows := c.conn.query(sql_txt, []driver.NamedValue{})
+    if rows.err.len > 0 { >>> errors.new("rag pgvector search failed: " + rows.err) }
+    if rows.ncols < 6 { << []SearchHit{} }
+    n_rows := rows.cells.len / rows.ncols
+    $hits := []SearchHit{}
+    for ri in 0:n_rows {
+        base := ri * rows.ncols
+        i1 := base + 1
+        i2 := base + 2
+        i3 := base + 3
+        i4 := base + 4
+        i5 := base + 5
+        cid := strip_driver_cell(&rows.cells[base])
+        did := strip_driver_cell(&rows.cells[i1])
+        txt := strip_driver_cell(&rows.cells[i2])
+        src := strip_driver_cell(&rows.cells[i3])
+        $meta := strip_driver_cell(&rows.cells[i4])
+        if meta.len == 0 { meta = "{}" }
+        dist := parse_driver_f64(&rows.cells[i5])
+        $score := -dist
+        if c.store.metric == "cosine" { score = 1.0 - dist }
+        hits.push(SearchHit{
+            chunk: Chunk{
+                id: cid,
+                doc_id: did,
+                text: txt,
+                source: src,
+                metadata_json: meta,
+                embedding: []f32{}
+            },
+            score: score
+        })
+    }
+    << hits
+}
+
+pub fn (c $&PgVectorClient) close() int {
+    e := c.conn.close()
+    if e.len > 0 { >>> errors.new("rag pgvector close failed: " + e) }
+    << 0
+}
+
+pub struct SqliteVectorStore {
+    pub table string
+    pub dim int
+    conn driver.Conn
+}
+
+pub fn new_sqlite_store(conn driver.Conn, table string, dim int) SqliteVectorStore {
+    if !rag_valid_pg_ident(&table) {
+        >>> errors.new("rag: invalid SQLite table identifier: " + table)
+    }
+    if dim <= 0 {
+        >>> errors.new("rag: sqlite store dimension must be positive")
+    }
+    ddl := "CREATE TABLE IF NOT EXISTS " + table +
+           " (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL, metadata TEXT NOT NULL, embedding TEXT NOT NULL)"
+    res := conn.exec(ddl, []driver.NamedValue{})
+    if res.err.len > 0 {
+        >>> errors.new("rag sqlite init failed: " + res.err)
+    }
+    << SqliteVectorStore{table: table, dim: dim, conn: conn}
+}
+
+pub fn open_sqlite_store(path string, table string, dim int) SqliteVectorStore {
+    conn := sqlite.open(path + "")
+    << new_sqlite_store(conn, table, dim) >>>
+}
+
+pub fn (s $&SqliteVectorStore) upsert_chunk(c &Chunk) int {
+    if c.embedding.len != s.dim {
+        >>> errors.new("rag: sqlite chunk embedding dimension mismatch")
+    }
+    vec_lit := postgres.vector_encode(&c.embedding)
+    $meta := c.metadata_json + ""
+    if meta.len == 0 { meta = "{}" }
+    sql_txt := "INSERT OR REPLACE INTO " + s.table + " (id, doc_id, text, source, metadata, embedding) VALUES (" +
+               sql_quote_lit(&c.id) + ", " + sql_quote_lit(&c.doc_id) + ", " + sql_quote_lit(&c.text) + ", " +
+               sql_quote_lit(&c.source) + ", " + sql_quote_lit(&meta) + ", " + sql_quote_lit(&vec_lit) + ")"
+    res := s.conn.exec(sql_txt, []driver.NamedValue{})
+    if res.err.len > 0 { >>> errors.new("rag sqlite upsert failed: " + res.err) }
+    << res.rows_affected
+}
+
+pub fn (s $&SqliteVectorStore) add_chunk(id string, doc_id string, text string, source string,
+                                         metadata_json string, embedding &[]f64) int {
+    if embedding.len != s.dim {
+        >>> errors.new("rag: sqlite embedding dimension mismatch")
+    }
+    $vec := []f32{}
+    vec.reserve(s.dim)
+    for i in 0:s.dim { vec.push(f32(embedding[i])) }
+    ch := Chunk{
+        id: id + "",
+        doc_id: doc_id + "",
+        text: text + "",
+        source: source + "",
+        metadata_json: metadata_json + "",
+        embedding: ~vec
+    }
+    << s.upsert_chunk(&ch) >>>
+}
+
+pub fn (s $&SqliteVectorStore) delete_doc(doc_id string) int {
+    sql_txt := "DELETE FROM " + s.table + " WHERE doc_id = " + sql_quote_lit(&doc_id)
+    res := s.conn.exec(sql_txt, []driver.NamedValue{})
+    if res.err.len > 0 { >>> errors.new("rag sqlite delete failed: " + res.err) }
+    << res.rows_affected
+}
+
+pub fn (s &SqliteVectorStore) count() int {
+    sql_txt := "SELECT COUNT(*) FROM " + s.table
+    rows := s.conn.query(sql_txt, []driver.NamedValue{})
+    if rows.err.len > 0 { >>> errors.new("rag sqlite count failed: " + rows.err) }
+    if rows.cells.len == 0 { << 0 }
+    raw := strip_driver_cell(&rows.cells[0])
+    << strconv.atoi(&raw) >>> (_) { << 0 }
+}
+
+pub fn (s &SqliteVectorStore) load_memory_store(filter_doc_id string) MemoryStore {
+    $sql_txt := "SELECT id, doc_id, text, source, metadata, embedding FROM " + s.table
+    if filter_doc_id.len > 0 {
+        sql_txt = sql_txt + " WHERE doc_id = " + sql_quote_lit(&filter_doc_id)
+    }
+    rows := s.conn.query(sql_txt, []driver.NamedValue{})
+    if rows.err.len > 0 { >>> errors.new("rag sqlite load failed: " + rows.err) }
+    $ms := new_store(s.dim)
+    if rows.ncols < 6 { << ms }
+    n_rows := rows.cells.len / rows.ncols
+    for ri in 0:n_rows {
+        base := ri * rows.ncols
+        i1 := base + 1
+        i2 := base + 2
+        i3 := base + 3
+        i4 := base + 4
+        i5 := base + 5
+        cid := strip_driver_cell(&rows.cells[base])
+        did := strip_driver_cell(&rows.cells[i1])
+        txt := strip_driver_cell(&rows.cells[i2])
+        src := strip_driver_cell(&rows.cells[i3])
+        $meta := strip_driver_cell(&rows.cells[i4])
+        if meta.len == 0 { meta = "{}" }
+        vec_lit := strip_driver_cell(&rows.cells[i5])
+        vec_f32 := postgres.vector_decode(&vec_lit) >>>
+        vec_f64 := f32_to_f64_vec(&vec_f32)
+        _ := ms.add_chunk(cid, did, txt, src, meta, &vec_f64) >>>
+    }
+    << ms
+}
+
+pub fn (s &SqliteVectorStore) search(query_emb &[]f64, top_k int, filter_doc_id string) []SearchHit {
+    ms := s.load_memory_store(filter_doc_id) >>>
+    << ms.search(query_emb, top_k, "") >>>
+}
+
+pub fn (s &SqliteVectorStore) search_hybrid(query string, query_emb &[]f64, top_k int, rrf_k int,
+                                            filter_doc_id string) []SearchHit {
+    ms := s.load_memory_store(filter_doc_id) >>>
+    << ms.search_hybrid(query, query_emb, top_k, rrf_k)
+}
+
+pub fn (s $&SqliteVectorStore) close() int {
+    e := s.conn.close()
+    if e.len > 0 { >>> errors.new("rag sqlite close failed: " + e) }
+    << 0
+}
+
+pub struct QdrantVectorStore {
+    pub client qdrant.Client
+    pub collection string
+    pub dim int
+}
+
+pub fn new_qdrant_store(endpoint string, api_key string, collection string, dim int) QdrantVectorStore {
+    if collection.len == 0 {
+        >>> errors.new("rag: qdrant collection must not be empty")
+    }
+    if dim <= 0 {
+        >>> errors.new("rag: qdrant store dimension must be positive")
+    }
+    << QdrantVectorStore{
+        client: qdrant.new_client(endpoint, api_key),
+        collection: collection,
+        dim: dim
+    }
+}
+
+pub fn (s $&QdrantVectorStore) ensure_collection(distance string) bool {
+    cli := $&s.client
+    << cli.create_collection(s.collection + "", s.dim, distance + "")
+}
+
+pub fn (s $&QdrantVectorStore) upsert_chunk(point_id int, c &Chunk) bool {
+    if c.embedding.len != s.dim {
+        >>> errors.new("rag: qdrant chunk embedding dimension mismatch")
+    }
+    $vec_s := []string{}
+    vec_s.reserve(s.dim)
+    for i in 0:s.dim {
+        vec_s.push(fmt_f32_or(c.embedding[i]))
+    }
+    $meta := c.metadata_json + ""
+    if meta.len == 0 { meta = "{}" }
+    payload := "{\"chunk_id\":" + json.quote(&c.id) +
+               ",\"doc_id\":" + json.quote(&c.doc_id) +
+               ",\"text\":" + json.quote(&c.text) +
+               ",\"source\":" + json.quote(&c.source) +
+               ",\"metadata\":" + meta + "}"
+    cli := $&s.client
+    << cli.upsert_point(s.collection + "", point_id, vec_s, payload)
+}
+
+fn rag_doc_get_or(doc &json.Doc, obj int, key string) int {
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn rag_doc_at_or(doc &json.Doc, arr int, idx int) int {
+    << doc.at(arr, idx) >>> (_) { << -1 }
+}
+
+fn fmt_f64_7_or(v f64, def string) string {
+    << strconv.format_float(v, 103, 7) >>> (_) { << def }
+}
+
+fn rag_parse_f64_or(s &string, def f64) f64 {
+    << strconv.parse_float(s) >>> (_) { << def }
+}
+
+pub fn (s $&QdrantVectorStore) search(query_emb &[]f64, top_k int) []SearchHit {
+    if top_k <= 0 { << []SearchHit{} }
+    if query_emb.len != s.dim {
+        >>> errors.new("rag: qdrant query embedding dimension mismatch")
+    }
+    $vec_s := []string{}
+    vec_s.reserve(s.dim)
+    for i in 0:s.dim {
+        vec_s.push(fmt_f64_7_or(query_emb[i], "0.0"))
+    }
+    cli := $&s.client
+    pts := cli.search(s.collection + "", vec_s, top_k) >>>
+    $out := []SearchHit{}
+    for i in 0:pts.len {
+        pt := &pts[i]
+        sc := rag_parse_f64_or(&pt.score, 0.0)
+        $cid := str(pt.id)
+        $did := ""
+        $txt := pt.payload_json + ""
+        $src := ""
+        $meta := "{}"
+        if pt.payload_json.len > 0 {
+            doc := json.parse(&pt.payload_json)
+            if doc.ok() && doc.is_dict(doc.root()) {
+                root := doc.root()
+                $pcid := json_str_or(&doc, root, "chunk_id", "")
+                if pcid.len > 0 { cid = pcid }
+                did = json_str_or(&doc, root, "doc_id", "")
+                ptxt := json_str_or(&doc, root, "text", "")
+                if ptxt.len > 0 { txt = ptxt }
+                src = json_str_or(&doc, root, "source", "")
+                if doc.has(root, "metadata") {
+                    mn := rag_doc_get_or(&doc, root, "metadata")
+                    if mn >= 0 { meta = json_encode_or(&doc, mn, "{}") }
+                }
+            }
+        }
+        out.push(SearchHit{
+            chunk: Chunk{
+                id: cid,
+                doc_id: did,
+                text: txt,
+                source: src,
+                metadata_json: meta,
+                embedding: []f32{}
+            },
+            score: sc
+        })
+    }
+    << out
+}
+
+fn extract_json_array_or_raw(raw &string) string {
+    trimmed := strings.trim_space(raw)
+    $lbr := -1
+    $rbr := -1
+    for i in 0:trimmed.len {
+        if (trimmed[i] & 255) == 91 {
+            lbr = i
+            <-
+        }
+    }
+    $j := trimmed.len - 1
+    while j >= 0 {
+        if (trimmed[j] & 255) == 93 {
+            rbr = j
+            <-
+        }
+        j -= 1
+    }
+    if lbr >= 0 && rbr > lbr {
+        << trimmed[lbr:(rbr + 1)]
+    }
+    << trimmed
+}
+
+pub fn extract_triples_openai(client &openai.Client, model string, text string, source string) []Triple {
+    sys := "Extract factual knowledge-graph triples from the text. Return ONLY a JSON array of objects with keys subject, predicate, object."
+    req := openai.chat_request(model + "", [openai.message("system", sys), openai.message("user", text + "")])
+    resp := client.chat(&req) >>>
+    $out := []Triple{}
+    $arr_node := -1
+    $doc := json.parse(&resp.content)
+    if doc.ok() {
+        root := doc.root()
+        if doc.is_list(root) {
+            arr_node = root
+        } else if doc.is_dict(root) && doc.has(root, "triples") {
+            tn := rag_doc_get_or(&doc, root, "triples")
+            if tn >= 0 && doc.is_list(tn) { arr_node = tn }
+        }
+    }
+    if arr_node < 0 {
+        sliced := extract_json_array_or_raw(&resp.content)
+        doc = json.parse(&sliced)
+        if doc.ok() && doc.is_list(doc.root()) {
+            arr_node = doc.root()
+        }
+    }
+    if arr_node < 0 { << out }
+    cnt := doc.count(arr_node)
+    for i in 0:cnt {
+        item := rag_doc_at_or(&doc, arr_node, i)
+        if item >= 0 && doc.is_dict(item) {
+            subj := json_str_or(&doc, item, "subject", "")
+            pred := json_str_or(&doc, item, "predicate", "")
+            obj := json_str_or(&doc, item, "object", "")
+            if subj.len > 0 && pred.len > 0 && obj.len > 0 {
+                out.push(Triple{
+                    subject: subj,
+                    predicate: pred,
+                    object: obj,
+                    source: source + ""
+                })
+            }
+        }
+    }
+    << out
+}
+
+pub fn (kg $&KnowledgeGraph) ingest_text_openai(client &openai.Client, model string,
+                                                 text string, source string) int {
+    extracted := extract_triples_openai(client, model, text, source) >>>
+    $added := 0
+    for i in 0:extracted.len {
+        cand := &extracted[i]
+        ls := rag_ascii_lower(&cand.subject)
+        lp := rag_ascii_lower(&cand.predicate)
+        lo := rag_ascii_lower(&cand.object)
+        $dup := false
+        for ti in 0:kg.triples.len {
+            ex := &kg.triples[ti]
+            if rag_ascii_lower(&ex.subject) == ls && rag_ascii_lower(&ex.predicate) == lp && rag_ascii_lower(&ex.object) == lo {
+                dup = true
+                <-
+            }
+        }
+        if !dup {
+            kg.add_triple(cand.subject + "", cand.predicate + "", cand.object + "", cand.source + "")
+            added += 1
+        }
+    }
+    << added
+}
+
+pub fn (kg &KnowledgeGraph) match_entities(text &string) []string {
+    $seeds := []string{}
+    if text.len == 0 || kg.triples.len == 0 { << seeds }
+    lt := rag_ascii_lower(text)
+    $seen_low := []string{}
+    for i in 0:kg.triples.len {
+        tr := &kg.triples[i]
+        ls := rag_ascii_lower(&tr.subject)
+        if ls.len >= 2 && strings.contains(&lt, ls + "") && !rag_str_in_list(&seen_low, &ls) {
+            seen_low.push(ls)
+            seeds.push(tr.subject + "")
+        }
+        lo := rag_ascii_lower(&tr.object)
+        if lo.len >= 2 && strings.contains(&lt, lo + "") && !rag_str_in_list(&seen_low, &lo) {
+            seen_low.push(lo)
+            seeds.push(tr.object + "")
+        }
+    }
+    << seeds
+}
+
+pub fn hybrid_graph_vector_search_auto(store &MemoryStore, kg &KnowledgeGraph,
+                                          query string, query_emb &[]f64,
+                                          top_k int, graph_hops int) HybridGraphResult {
+    seeds := kg.match_entities(&query)
+    << hybrid_graph_vector_search(store, kg, query, query_emb, &seeds, top_k, graph_hops)
+}
+

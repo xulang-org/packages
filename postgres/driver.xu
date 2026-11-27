@@ -297,127 +297,32 @@ fn pg_text_bytes(bs []u8) string {
     << pg_text("\\x" + hex.encode_to_string(raw))
 }
 
-// Const-index up to 8 NamedValue slots so dynamic-box consumption passes MS6.
+// Runtime-index each NamedValue slot so MS6 B2 consumes args[i].value in place
+// while supporting arbitrary parameter counts without whole-root moves.
 fn pg_args(args []driver.NamedValue) string {
     $out := ""
-    n := args.len
-    if n > 0 {
-        if args[0].value is int {
-            x := args[0].value as int
+    for i in 0:args.len {
+        if args[i].value is int {
+            x := args[i].value as int
             out = out + pg_text(str(x))
-        } else if args[0].value is string {
-            x := args[0].value as string
+        } else if args[i].value is string {
+            x := args[i].value as string
             out = out + pg_text(x)
-        } else if args[0].value is bool {
-            x := args[0].value as bool
+        } else if args[i].value is bool {
+            x := args[i].value as bool
             out = out + pg_text_bool(x)
-        } else if args[0].value is f64 {
-            x := args[0].value as f64
+        } else if args[i].value is f64 {
+            x := args[i].value as f64
             out = out + pg_text_f64(x)
-        } else if args[0].value is time.Time {
-            x := args[0].value as time.Time
+        } else if args[i].value is time.Time {
+            x := args[i].value as time.Time
             out = out + pg_text(x.format_rfc3339())
-        } else if args[0].value is []u8 {
-            bs := args[0].value as []u8
+        } else if args[i].value is []u8 {
+            bs := args[i].value as []u8
             out = out + pg_text_bytes(bs)
         } else {
             out = out + be32(-1)
         }
-    }
-    if n > 1 {
-        if args[1].value is int {
-            x := args[1].value as int
-            out = out + pg_text(str(x))
-        } else if args[1].value is string {
-            x := args[1].value as string
-            out = out + pg_text(x)
-        } else if args[1].value is bool {
-            x := args[1].value as bool
-            out = out + pg_text_bool(x)
-        } else if args[1].value is f64 {
-            x := args[1].value as f64
-            out = out + pg_text_f64(x)
-        } else if args[1].value is time.Time {
-            x := args[1].value as time.Time
-            out = out + pg_text(x.format_rfc3339())
-        } else if args[1].value is []u8 {
-            bs := args[1].value as []u8
-            out = out + pg_text_bytes(bs)
-        } else {
-            out = out + be32(-1)
-        }
-    }
-    if n > 2 {
-        if args[2].value is int {
-            x := args[2].value as int
-            out = out + pg_text(str(x))
-        } else if args[2].value is string {
-            x := args[2].value as string
-            out = out + pg_text(x)
-        } else if args[2].value is bool {
-            x := args[2].value as bool
-            out = out + pg_text_bool(x)
-        } else if args[2].value is f64 {
-            x := args[2].value as f64
-            out = out + pg_text_f64(x)
-        } else if args[2].value is time.Time {
-            x := args[2].value as time.Time
-            out = out + pg_text(x.format_rfc3339())
-        } else if args[2].value is []u8 {
-            bs := args[2].value as []u8
-            out = out + pg_text_bytes(bs)
-        } else {
-            out = out + be32(-1)
-        }
-    }
-    if n > 3 {
-        if args[3].value is int {
-            x := args[3].value as int
-            out = out + pg_text(str(x))
-        } else if args[3].value is string {
-            x := args[3].value as string
-            out = out + pg_text(x)
-        } else if args[3].value is bool {
-            x := args[3].value as bool
-            out = out + pg_text_bool(x)
-        } else if args[3].value is f64 {
-            x := args[3].value as f64
-            out = out + pg_text_f64(x)
-        } else if args[3].value is time.Time {
-            x := args[3].value as time.Time
-            out = out + pg_text(x.format_rfc3339())
-        } else if args[3].value is []u8 {
-            bs := args[3].value as []u8
-            out = out + pg_text_bytes(bs)
-        } else {
-            out = out + be32(-1)
-        }
-    }
-    if n > 4 {
-        if args[4].value is int {
-            x := args[4].value as int
-            out = out + pg_text(str(x))
-        } else if args[4].value is string {
-            x := args[4].value as string
-            out = out + pg_text(x)
-        } else if args[4].value is bool {
-            x := args[4].value as bool
-            out = out + pg_text_bool(x)
-        } else if args[4].value is f64 {
-            x := args[4].value as f64
-            out = out + pg_text_f64(x)
-        } else if args[4].value is time.Time {
-            x := args[4].value as time.Time
-            out = out + pg_text(x.format_rfc3339())
-        } else if args[4].value is []u8 {
-            bs := args[4].value as []u8
-            out = out + pg_text_bytes(bs)
-        } else {
-            out = out + be32(-1)
-        }
-    }
-    for _ in 5:n {
-        out = out + be32(-1)
     }
     << out
 }

@@ -534,3 +534,172 @@ pub fn load_cases_jsonl(path string) []EvalCase {
     }
     << out
 }
+
+pub struct SchemaFieldRule {
+    pub name string
+    pub expected_type string
+    pub required bool
+}
+
+pub struct SchemaCheckResult {
+    pub valid bool
+    pub pass_rate f64
+    pub missing_fields []string
+    pub type_mismatches []string
+}
+
+fn eval_type_matches(doc &json.Doc, node int, expected &string) bool {
+    if *expected == "string" { << doc.is_string(node) }
+    if *expected == "number" { << doc.is_number(node) }
+    if *expected == "int" { << doc.is_number(node) }
+    if *expected == "bool" { << doc.is_bool(node) }
+    if *expected == "array" || *expected == "list" { << doc.is_list(node) }
+    if *expected == "object" || *expected == "dict" { << doc.is_dict(node) }
+    << true
+}
+
+fn eval_strip_json_fence(raw &string) string {
+    $s := strings.trim_space(raw)
+    if strings.has_prefix(&s, "```json") {
+        s = strings.trim_space(&s[7:s.len])
+    } else if strings.has_prefix(&s, "```") {
+        s = strings.trim_space(&s[3:s.len])
+    }
+    if strings.has_suffix(&s, "```") && s.len >= 3 {
+        s = strings.trim_space(&s[0:s.len - 3])
+    }
+    << s
+}
+
+fn eval_doc_get_or(doc &json.Doc, obj int, key string) int {
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+pub fn evaluate_json_schema(output &string, rules &[]SchemaFieldRule) SchemaCheckResult {
+    raw := eval_strip_json_fence(output)
+    doc := json.parse(&raw)
+    $missing := []string{}
+    $mismatch := []string{}
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        for i in 0:rules.len {
+            if rules[i].required { missing.push(rules[i].name + "") }
+        }
+        << SchemaCheckResult{
+            valid: false, pass_rate: 0.0,
+            missing_fields: ~missing, type_mismatches: ~mismatch
+        }
+    }
+    root := doc.root()
+    if rules.len == 0 {
+        << SchemaCheckResult{
+            valid: true, pass_rate: 1.0,
+            missing_fields: ~missing, type_mismatches: ~mismatch
+        }
+    }
+    $passed := 0
+    for i in 0:rules.len {
+        r := &rules[i]
+        if !doc.has(root, r.name + "") {
+            if r.required { missing.push(r.name + "") }
+            else { passed += 1 }
+            ->
+        }
+        n := eval_doc_get_or(&doc, root, r.name + "")
+        if n < 0 {
+            mismatch.push(r.name + ":unavailable")
+            ->
+        }
+        if r.expected_type.len > 0 && !eval_type_matches(&doc, n, &r.expected_type) {
+            mismatch.push(r.name + ":" + r.expected_type)
+            ->
+        }
+        passed += 1
+    }
+    rate := f64(passed) / f64(rules.len)
+    ok := missing.len == 0 && mismatch.len == 0
+    << SchemaCheckResult{
+        valid: ok, pass_rate: rate,
+        missing_fields: ~missing, type_mismatches: ~mismatch
+    }
+}
+
+pub fn expected_calibration_error(confidences &[]f64, correctness &[]bool, num_bins int) f64 {
+    n := confidences.len
+    if n == 0 || correctness.len != n { << 0.0 }
+    $bins := num_bins
+    if bins <= 0 { bins = 10 }
+    $ece := 0.0
+    for bi in 0:bins {
+        lo := f64(bi) / f64(bins)
+        hi := f64(bi + 1) / f64(bins)
+        $cnt := 0
+        $sum_conf := 0.0
+        $sum_acc := 0.0
+        for i in 0:n {
+            $c := confidences[i]
+            if c < 0.0 { c = 0.0 } else if c > 1.0 { c = 1.0 }
+            $in_bin := false
+            if bi == bins - 1 {
+                in_bin = c >= lo && c <= hi
+            } else {
+                in_bin = c >= lo && c < hi
+            }
+            if in_bin {
+                cnt += 1
+                sum_conf += c
+                if correctness[i] { sum_acc += 1.0 }
+            }
+        }
+        if cnt > 0 {
+            avg_c := sum_conf / f64(cnt)
+            avg_a := sum_acc / f64(cnt)
+            $diff := avg_a - avg_c
+            if diff < 0.0 { diff = -diff }
+            ece += (f64(cnt) / f64(n)) * diff
+        }
+    }
+    << ece
+}
+
+pub struct RegressionGateResult {
+    pub passed bool
+    pub em_delta f64
+    pub f1_delta f64
+    pub rouge_delta f64
+    pub summary string
+}
+
+fn eval_fmt_f64(v f64) string {
+    << strconv.format_float(v, 102, 6) >>> (_) { << "0.0" }
+}
+
+pub fn compare_summaries(baseline &EvalSummary, candidate &EvalSummary, max_drop f64) RegressionGateResult {
+    em_d := candidate.exact_match_avg - baseline.exact_match_avg
+    f1_d := candidate.token_f1_avg - baseline.token_f1_avg
+    rg_d := candidate.rouge_l_avg - baseline.rouge_l_avg
+    $drop_lim := max_drop
+    if drop_lim < 0.0 { drop_lim = 0.0 }
+    ok := em_d >= -drop_lim && f1_d >= -drop_lim && rg_d >= -drop_lim
+    $st := "PASS"
+    if !ok { st = "FAIL" }
+    msg := st + " (em_delta=" + eval_fmt_f64(em_d) + ", f1_delta=" + eval_fmt_f64(f1_d) + ", rouge_l_delta=" + eval_fmt_f64(rg_d) + ")"
+    << RegressionGateResult{passed: ok, em_delta: em_d, f1_delta: f1_d, rouge_delta: rg_d, summary: msg}
+}
+
+pub fn format_summary_markdown(name string, s &EvalSummary) string {
+    << "### Eval Summary: " + name + "\n" +
+       "| Metric | Value |\n| --- | --- |\n" +
+       "| total | " + str(s.total) + " |\n" +
+       "| exact_match_avg | " + eval_fmt_f64(s.exact_match_avg) + " |\n" +
+       "| token_f1_avg | " + eval_fmt_f64(s.token_f1_avg) + " |\n" +
+       "| rouge_l_avg | " + eval_fmt_f64(s.rouge_l_avg) + " |\n"
+}
+
+pub fn format_summary_json(name string, s &EvalSummary) string {
+    << "{\"name\":" + json.quote(&name) +
+       ",\"total\":" + str(s.total) +
+       ",\"exact_match_avg\":" + eval_fmt_f64(s.exact_match_avg) +
+       ",\"token_f1_avg\":" + eval_fmt_f64(s.token_f1_avg) +
+       ",\"rouge_l_avg\":" + eval_fmt_f64(s.rouge_l_avg) + "}"
+}
+

@@ -1,0 +1,371 @@
+@"github.com/xulang-org/packages/synth"
+
+#encoding/json
+#errors
+#math
+#os
+#strings
+openai #"github.com/xulang-org/packages/openai"
+
+pub struct SftExample {
+    pub instruction string
+    pub input string
+    pub output string
+    pub system string
+}
+
+pub struct DpoPair {
+    pub prompt string
+    pub chosen string
+    pub rejected string
+}
+
+pub struct RlvrTask {
+    pub id string
+    pub prompt string
+    pub expected string
+    pub verifier string
+}
+
+pub struct FilterStats {
+    pub total_input int
+    pub kept int
+    pub dropped_empty int
+    pub dropped_duplicate int
+}
+
+fn synth_ascii_lower_byte(ch int) int {
+    if ch >= 65 && ch <= 90 { << ch + 32 }
+    << ch
+}
+
+fn synth_tokens(s &string) []string {
+    $out := []string{}
+    $cur := ""
+    for i in 0:s.len {
+        ch := synth_ascii_lower_byte((*s)[i] & 255)
+        is_alnum := (ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57)
+        if is_alnum {
+            cur.push_str(string_from_byte(ch))
+        } else if cur.len > 0 {
+            out.push(cur)
+            cur = ""
+        }
+    }
+    if cur.len > 0 { out.push(cur) }
+    << out
+}
+
+fn synth_ngram_set(s &string, n int) []string {
+    toks := synth_tokens(s)
+    $ng := []string{}
+    if toks.len == 0 { << ng }
+    $k := n
+    if k <= 0 { k = 2 }
+    if toks.len < k {
+        $joined := ""
+        for i in 0:toks.len {
+            if i > 0 { joined = joined + " " }
+            joined = joined + toks[i]
+        }
+        ng.push(joined)
+        << ng
+    }
+    for i in 0:(toks.len - k + 1) {
+        $g := ""
+        for j in 0:k {
+            if j > 0 { g = g + string_from_byte(31) }
+            g = g + toks[i + j]
+        }
+        $seen := false
+        for si in 0:ng.len {
+            if ng[si] == g {
+                seen = true
+                <-
+            }
+        }
+        if !seen { ng.push(g) }
+    }
+    << ng
+}
+
+pub fn jaccard_ngram_similarity(a &string, b &string, n int) f64 {
+    sa := synth_ngram_set(a, n)
+    sb := synth_ngram_set(b, n)
+    if sa.len == 0 && sb.len == 0 { << 1.0 }
+    if sa.len == 0 || sb.len == 0 { << 0.0 }
+    $inter := 0
+    for i in 0:sa.len {
+        for j in 0:sb.len {
+            if sa[i] == sb[j] {
+                inter += 1
+                <-
+            }
+        }
+    }
+    union_cnt := sa.len + sb.len - inter
+    if union_cnt <= 0 { << 0.0 }
+    << f64(inter) / f64(union_cnt)
+}
+
+pub fn format_sft_jsonl(examples &[]SftExample) string {
+    $out := ""
+    for i in 0:examples.len {
+        ex := &examples[i]
+        $usr := ex.instruction + ""
+        if ex.input.len > 0 {
+            if usr.len > 0 { usr = usr + "\n" + ex.input }
+            else { usr = ex.input + "" }
+        }
+        $msgs := "["
+        $first := true
+        if ex.system.len > 0 {
+            msgs = msgs + "{\"role\":\"system\",\"content\":" + json.quote(&ex.system) + "}"
+            first = false
+        }
+        if !first { msgs = msgs + "," }
+        msgs = msgs + "{\"role\":\"user\",\"content\":" + json.quote(&usr) + "}"
+        msgs = msgs + ",{\"role\":\"assistant\",\"content\":" + json.quote(&ex.output) + "}]"
+        out = out + "{\"messages\":" + msgs + "}\n"
+    }
+    << out
+}
+
+fn synth_json_str_or(doc &json.Doc, obj int, key string, def string) string {
+    if !doc.is_dict(obj) || !doc.has(obj, key) { << def }
+    n := doc.get(obj, key) >>> (_) { << def }
+    if doc.is_string(n) {
+        << doc.as_string(n) >>> (_) { << def }
+    }
+    << def
+}
+
+fn strip_code_fences(raw &string) string {
+    $s := strings.trim_space(raw)
+    if strings.has_prefix(&s, "```json") {
+        s = strings.trim_space(&s[7:s.len])
+    } else if strings.has_prefix(&s, "```") {
+        s = strings.trim_space(&s[3:s.len])
+    }
+    if strings.has_suffix(&s, "```") && s.len >= 3 {
+        s = strings.trim_space(&s[0:s.len - 3])
+    }
+    << s
+}
+
+pub fn parse_sft_jsonl(jsonl &string) []SftExample {
+    lines := strings.split(jsonl, "\n")
+    $out := []SftExample{}
+    for i in 0:lines.len {
+        ln := strings.trim_space(&lines[i])
+        if ln.len == 0 { -> }
+        doc := json.parse(&ln)
+        if !doc.ok() || !doc.is_dict(doc.root()) {
+            >>> errors.new("synth: invalid JSONL line " + str(i + 1))
+        }
+        root := doc.root()
+        $sys := ""
+        $inst := ""
+        $inp := ""
+        $resp := ""
+        if doc.has(root, "messages") {
+            msgs := doc.get(root, "messages") >>>
+            if doc.is_list(msgs) {
+                cnt := doc.count(msgs)
+                for mi in 0:cnt {
+                    m := doc.at(msgs, mi) >>>
+                    if !doc.is_dict(m) { -> }
+                    role := synth_json_str_or(&doc, m, "role", "")
+                    content := synth_json_str_or(&doc, m, "content", "")
+                    if role == "system" { sys = content }
+                    else if role == "user" {
+                        if inst.len == 0 { inst = content }
+                        else { inp = content }
+                    } else if role == "assistant" {
+                        resp = content
+                    }
+                }
+            }
+        } else {
+            sys = synth_json_str_or(&doc, root, "system", "")
+            inst = synth_json_str_or(&doc, root, "instruction", "")
+            inp = synth_json_str_or(&doc, root, "input", "")
+            resp = synth_json_str_or(&doc, root, "output", "")
+        }
+        out.push(SftExample{instruction: inst, input: inp, output: resp, system: sys})
+    }
+    << out
+}
+
+pub fn format_dpo_jsonl(pairs &[]DpoPair) string {
+    $out := ""
+    for i in 0:pairs.len {
+        p := &pairs[i]
+        out = out + "{\"prompt\":" + json.quote(&p.prompt) +
+              ",\"chosen\":" + json.quote(&p.chosen) +
+              ",\"rejected\":" + json.quote(&p.rejected) + "}\n"
+    }
+    << out
+}
+
+pub fn format_rlvr_jsonl(tasks &[]RlvrTask) string {
+    $out := ""
+    for i in 0:tasks.len {
+        t := &tasks[i]
+        out = out + "{\"id\":" + json.quote(&t.id) +
+              ",\"prompt\":" + json.quote(&t.prompt) +
+              ",\"expected\":" + json.quote(&t.expected) +
+              ",\"verifier\":" + json.quote(&t.verifier) + "}\n"
+    }
+    << out
+}
+
+pub fn save_jsonl(path string, content &string) int {
+    _ := os.write(path + "", (*content) + "") >>>
+    lines := strings.split(content, "\n")
+    $cnt := 0
+    for i in 0:lines.len {
+        if strings.trim_space(&lines[i]).len > 0 { cnt += 1 }
+    }
+    << cnt
+}
+
+pub fn dedup_exact(items &[]string) []string {
+    $out := []string{}
+    for i in 0:items.len {
+        $seen := false
+        for j in 0:out.len {
+            if out[j] == items[i] {
+                seen = true
+                <-
+            }
+        }
+        if !seen { out.push(items[i] + "") }
+    }
+    << out
+}
+
+pub fn dedup_near_jaccard(items &[]string, ngram int, threshold f64) []string {
+    $out := []string{}
+    for i in 0:items.len {
+        cand := &items[i]
+        $dup := false
+        for j in 0:out.len {
+            if jaccard_ngram_similarity(cand, &out[j], ngram) >= threshold {
+                dup = true
+                <-
+            }
+        }
+        if !dup { out.push((*cand) + "") }
+    }
+    << out
+}
+
+pub fn filter_sft_quality(examples &[]SftExample, min_output_chars int, dedup_jaccard f64, stats_out $&FilterStats) []SftExample {
+    $out := []SftExample{}
+    $keys := []string{}
+    $dropped_empty := 0
+    $dropped_dup := 0
+    for i in 0:examples.len {
+        ex := &examples[i]
+        inst_t := strings.trim_space(&ex.instruction)
+        out_t := strings.trim_space(&ex.output)
+        if inst_t.len == 0 || out_t.len < min_output_chars {
+            dropped_empty += 1
+            ->
+        }
+        key := inst_t + "\n" + out_t
+        $dup := false
+        for j in 0:keys.len {
+            if keys[j] == key || (dedup_jaccard > 0.0 && dedup_jaccard <= 1.0 && jaccard_ngram_similarity(&key, &keys[j], 2) >= dedup_jaccard) {
+                dup = true
+                <-
+            }
+        }
+        if dup {
+            dropped_dup += 1
+            ->
+        }
+        keys.push(key)
+        out.push(SftExample{
+            instruction: ex.instruction + "",
+            input: ex.input + "",
+            output: ex.output + "",
+            system: ex.system + ""
+        })
+    }
+    stats_out.total_input = examples.len
+    stats_out.kept = out.len
+    stats_out.dropped_empty = dropped_empty
+    stats_out.dropped_duplicate = dropped_dup
+    << out
+}
+
+pub fn generate_sft_openai(client &openai.Client, model string, topic string, count int, system_hint string) []SftExample {
+    $n := count
+    if n <= 0 { n = 3 }
+    sys := "You are a synthetic dataset generator. Output ONLY a JSON array of objects, each with keys \"instruction\", \"input\", and \"output\"."
+    $usr := "Topic: " + topic + "\nGenerate " + str(n) + " high-quality supervised fine-tuning examples."
+    if system_hint.len > 0 {
+        usr = usr + "\nTarget system persona: " + system_hint
+    }
+    req := openai.chat_request(model + "", [openai.message("system", sys), openai.message("user", usr)])
+    resp := client.chat(&req) >>>
+    raw := strip_code_fences(&resp.content)
+    doc := json.parse(&raw)
+    if !doc.ok() {
+        >>> errors.new("synth: invalid JSON response from SFT generator")
+    }
+    $arr := doc.root()
+    if doc.is_dict(arr) && doc.has(arr, "examples") {
+        arr = doc.get(arr, "examples") >>>
+    }
+    if !doc.is_list(arr) {
+        >>> errors.new("synth: expected JSON array of SftExample")
+    }
+    $out := []SftExample{}
+    cnt := doc.count(arr)
+    for i in 0:cnt {
+        item := doc.at(arr, i) >>>
+        if !doc.is_dict(item) { -> }
+        out.push(SftExample{
+            instruction: synth_json_str_or(&doc, item, "instruction", ""),
+            input: synth_json_str_or(&doc, item, "input", ""),
+            output: synth_json_str_or(&doc, item, "output", ""),
+            system: synth_json_str_or(&doc, item, "system", system_hint + "")
+        })
+    }
+    << out
+}
+
+pub fn generate_dpo_pair_openai(client &openai.Client, strong_model string, weak_model string, prompt string) DpoPair {
+    req_c := openai.chat_request(strong_model + "", [openai.message("user", prompt + "")])
+    resp_c := client.chat(&req_c) >>>
+    req_r := openai.chat_request(weak_model + "", [openai.message("user", prompt + "")])
+    resp_r := client.chat(&req_r) >>>
+    << DpoPair{
+        prompt: prompt + "",
+        chosen: strings.trim_space(&resp_c.content),
+        rejected: strings.trim_space(&resp_r.content)
+    }
+}
+
+pub fn distill_dataset_openai(teacher &openai.Client, teacher_model string, prompts &[]string, system_prompt string) []SftExample {
+    $out := []SftExample{}
+    for i in 0:prompts.len {
+        $msgs := []openai.Message{}
+        if system_prompt.len > 0 {
+            msgs.push(openai.message("system", system_prompt + ""))
+        }
+        msgs.push(openai.message("user", prompts[i] + ""))
+        req := openai.chat_request(teacher_model + "", ~msgs)
+        resp := teacher.chat(&req) >>>
+        out.push(SftExample{
+            instruction: prompts[i] + "",
+            input: "",
+            output: strings.trim_space(&resp.content),
+            system: system_prompt + ""
+        })
+    }
+    << out
+}

@@ -54,47 +54,43 @@ fn quote_string(s &string) string {
     << out + "'"
 }
 
-fn mysql_arg_val(args &[]driver.NamedValue, i int) string {
-    if i < 0 || i >= args.len {
-        << "NULL"
-    }
-    if args[i].value is int {
-        x := args[i].value as int
-        << str(x)
-    }
-    if args[i].value is string {
-        x := args[i].value as string
-        << quote_string(&x)
-    }
-    if args[i].value is bool {
-        x := args[i].value as bool
-        if x { << "1" }
-        << "0"
-    }
-    if args[i].value is f64 {
-        x := args[i].value as f64
-        << strconv.format_float(x, 103, -1) >>> (err) { << "0" }
-    }
-    if args[i].value is time.Time {
-        x := args[i].value as time.Time
-        ts := x.format_rfc3339()
-        << quote_string(&ts)
-    }
-    if args[i].value is []u8 {
-        bs := args[i].value as []u8
-        $raw := ""
-        for k in 0:bs.len { raw.push_byte(int(bs[k]) & 255) }
-        << "X'" + hex.encode_to_string(raw) + "'"
-    }
-    << "NULL"
+fn format_mysql_f64(x f64) string {
+    << strconv.format_float(x, 103, -1) >>> (err) { << "0" }
 }
 
-fn arg_at(args &[]driver.NamedValue, i int) string {
-    << mysql_arg_val(args, i)
+fn encode_mysql_args(args []driver.NamedValue) []string {
+    $out := []string{}
+    for i in 0:args.len {
+        if args[i].value is int {
+            x := args[i].value as int
+            out.push(str(x))
+        } else if args[i].value is string {
+            x := args[i].value as string
+            out.push(quote_string(&x))
+        } else if args[i].value is bool {
+            x := args[i].value as bool
+            if x { out.push("1") } else { out.push("0") }
+        } else if args[i].value is f64 {
+            x := args[i].value as f64
+            out.push(format_mysql_f64(x))
+        } else if args[i].value is time.Time {
+            x := args[i].value as time.Time
+            ts := x.format_rfc3339()
+            out.push(quote_string(&ts))
+        } else if args[i].value is []u8 {
+            bs := args[i].value as []u8
+            $raw := ""
+            for k in 0:bs.len { raw.push_byte(int(bs[k]) & 255) }
+            out.push("X'" + hex.encode_to_string(raw) + "'")
+        } else {
+            out.push("NULL")
+        }
+    }
+    << out
 }
 
-fn interpolate(q string, args &[]driver.NamedValue) string {
-    if args.len == 0 { << strings.clone(&q) }
+fn interpolate(q string, vals &[]string) string {
+    if vals.len == 0 { << strings.clone(&q) }
     $out := ""
     $i := 0
     $ai := 0
@@ -162,8 +158,8 @@ fn interpolate(q string, args &[]driver.NamedValue) string {
             i += 2
             ->
         }
-        if c == 63 && ai < args.len {
-            out = out + arg_at(args, ai)
+        if c == 63 && ai < vals.len {
+            out = out + vals[ai]
             ai += 1
             i += 1
             ->
@@ -171,7 +167,7 @@ fn interpolate(q string, args &[]driver.NamedValue) string {
         out.push_byte(c)
         i += 1
     }
-    if ai != args.len { << "" }
+    if ai != vals.len { << "" }
     << out
 }
 
@@ -315,10 +311,11 @@ fn parse_result(fd int, first string) QueryResult {
     << qr
 }
 
-fn query_wire(fd int, q string, args &[]driver.NamedValue) QueryResult {
-    sql := interpolate(strings.clone(&q), args)
+fn query_wire(fd int, q string, args []driver.NamedValue) QueryResult {
+    vals := encode_mysql_args(args)
+    sql := interpolate(strings.clone(&q), &vals)
     $qr := empty_query()
-    if sql.len == 0 && (q.len > 0 || args.len > 0) {
+    if sql.len == 0 && (q.len > 0 || vals.len > 0) {
         qr.err = "mysql: parameter count mismatch"
         << qr
     }
@@ -434,10 +431,11 @@ fn parse_result_tls(tc $&transport.Conn, first string) QueryResult {
     << qr
 }
 
-fn query_wire_tls(tc $&transport.Conn, q string, args &[]driver.NamedValue) QueryResult {
-    sql := interpolate(strings.clone(&q), args)
+fn query_wire_tls(tc $&transport.Conn, q string, args []driver.NamedValue) QueryResult {
+    vals := encode_mysql_args(args)
+    sql := interpolate(strings.clone(&q), &vals)
     $qr := empty_query()
-    if sql.len == 0 && (q.len > 0 || args.len > 0) {
+    if sql.len == 0 && (q.len > 0 || vals.len > 0) {
         qr.err = "mysql: parameter count mismatch"
         << qr
     }
@@ -474,7 +472,7 @@ fn closed_tc_chan() chan transport.Conn {
     << ch
 }
 
-fn query_state(s $&MysqlState, q string, args &[]driver.NamedValue) QueryResult {
+fn query_state(s $&MysqlState, q string, args []driver.NamedValue) QueryResult {
     if s.secure != 0 {
         $tc := <-s.tc_chan
         qr := query_wire_tls($&tc, q, args)
@@ -679,8 +677,7 @@ fn (c MysqlConn) reset_session(ctx &context.Context) string {
         put_st(&c, s)
         << driver.err_bad_conn()
     }
-    noargs := []driver.NamedValue{}
-    qr := query_state($&s, "ROLLBACK", &noargs)
+    qr := query_state($&s, "ROLLBACK", []driver.NamedValue{})
     if qr.err.len > 0 {
         s.closed = 1
         put_st(&c, s)
@@ -702,7 +699,7 @@ fn (c MysqlConn) exec(q string, args []driver.NamedValue) driver.ExecResult {
         put_st(&c, s)
         << fail_exec("sql: connection is closed")
     }
-    qr := query_state($&s, q, &args)
+    qr := query_state($&s, q, args)
     if qr.err.len > 0 {
         if strings.contains(&qr.err, "connection") {
             s.closed = 1
@@ -727,7 +724,7 @@ fn (c MysqlConn) query(q string, args []driver.NamedValue) driver.RowsResult {
         put_st(&c, s)
         << fail_rows("sql: connection is closed")
     }
-    qr := query_state($&s, q, &args)
+    qr := query_state($&s, q, args)
     if qr.err.len > 0 {
         if strings.contains(&qr.err, "connection") {
             s.closed = 1
@@ -760,8 +757,7 @@ fn (c MysqlConn) begin_tx(iso int, ro bool) driver.Tx {
     $q := "START TRANSACTION"
     if ro { q = "START TRANSACTION READ ONLY" }
     _ := iso
-    noargs := []driver.NamedValue{}
-    qr := query_state($&s, q, &noargs)
+    qr := query_state($&s, q, []driver.NamedValue{})
     if qr.err.len == 0 { s.tx = 1 }
     put_st(&c, s)
     << driver.Tx(MysqlTx{st: c.st})
@@ -774,8 +770,7 @@ fn (t MysqlTx) commit() string {
         put_st(&c, s)
         << "sql: connection is closed"
     }
-    noargs := []driver.NamedValue{}
-    qr := query_state($&s, "COMMIT", &noargs)
+    qr := query_state($&s, "COMMIT", []driver.NamedValue{})
     s.tx = 0
     put_st(&c, s)
     << qr.err
@@ -788,8 +783,7 @@ fn (t MysqlTx) rollback() string {
         put_st(&c, s)
         << "sql: connection is closed"
     }
-    noargs := []driver.NamedValue{}
-    qr := query_state($&s, "ROLLBACK", &noargs)
+    qr := query_state($&s, "ROLLBACK", []driver.NamedValue{})
     s.tx = 0
     put_st(&c, s)
     << qr.err

@@ -91,7 +91,7 @@ fn (c SqliteConn) exec(query string, args []driver.NamedValue) driver.ExecResult
     e := state_error(&st)
     if e.len > 0 { put_st(&c, st)
         << driver.exec_err(e) }
-    reply := session_reply_safe($&st, query, &args)
+    reply := session_reply_safe($&st, query, args)
     result := parse_exec_reply(&reply)
     put_st(&c, st)
     << result
@@ -102,7 +102,7 @@ fn (c SqliteConn) query(query string, args []driver.NamedValue) driver.RowsResul
     e := state_error(&st)
     if e.len > 0 { put_st(&c, st)
         << driver.rows_err(e) }
-    reply := session_reply_safe($&st, query, &args)
+    reply := session_reply_safe($&st, query, args)
     result := parse_rows_reply(&reply)
     put_st(&c, st)
     << result

@@ -117,24 +117,41 @@ struct BindArg {
     buffer int
 }
 
-fn prepare_binding(args &[]driver.NamedValue, i int) BindArg {
-    if args[i].value is int { value := args[i].value as int
-        << BindArg{kind: 1, value: value, buffer: 0} }
-    if args[i].value is bool { value := args[i].value as bool
-        if value { << BindArg{kind: 1, value: 1, buffer: 0} }
-        << BindArg{kind: 1, value: 0, buffer: 0} }
-    if args[i].value is f64 { value := args[i].value as f64
-        encoded := driver.encode_value(value)
-        text := encoded[2:encoded.len] + ""
-        << BindArg{kind: 2, value: 0, buffer: native_buffer(&text)} }
-    if args[i].value is []u8 { value := args[i].value as []u8
-        << BindArg{kind: 4, value: 0, buffer: native_blob(&value)} }
-    if args[i].value is string { value := args[i].value as string
-        << BindArg{kind: 3, value: 0, buffer: native_buffer(&value)} }
-    if args[i].value is time.Time { value := args[i].value as time.Time
-        text := value.format_rfc3339()
-        << BindArg{kind: 3, value: 0, buffer: native_buffer(&text)} }
-    << BindArg{kind: 0, value: 0, buffer: 0}
+fn bind_arg_int(v int) BindArg { << BindArg{kind: 1, value: v, buffer: 0} }
+
+fn bind_arg_bool(v bool) BindArg {
+    if v { << BindArg{kind: 1, value: 1, buffer: 0} }
+    << BindArg{kind: 1, value: 0, buffer: 0}
+}
+
+fn bind_arg_f64(v f64) BindArg {
+    encoded := driver.encode_value(v)
+    text := encoded[2:encoded.len] + ""
+    << BindArg{kind: 2, value: 0, buffer: native_buffer(&text)}
+}
+
+fn bind_arg_bytes(bs []u8) BindArg { << BindArg{kind: 4, value: 0, buffer: native_blob(&bs)} }
+fn bind_arg_str(s string) BindArg { << BindArg{kind: 3, value: 0, buffer: native_buffer(&s)} }
+
+fn bind_arg_time(t time.Time) BindArg {
+    text := t.format_rfc3339()
+    << BindArg{kind: 3, value: 0, buffer: native_buffer(&text)}
+}
+
+// Runtime-index each NamedValue slot so MS6 B2 consumes args[i].value in place
+// while supporting arbitrary parameter counts without whole-root moves.
+fn prepare_all_bindings(args []driver.NamedValue) []BindArg {
+    $values := []BindArg{}
+    for i in 0:args.len {
+        if args[i].value is int { values.push(bind_arg_int(args[i].value as int)) }
+        else if args[i].value is bool { values.push(bind_arg_bool(args[i].value as bool)) }
+        else if args[i].value is f64 { values.push(bind_arg_f64(args[i].value as f64)) }
+        else if args[i].value is []u8 { values.push(bind_arg_bytes(args[i].value as []u8)) }
+        else if args[i].value is string { values.push(bind_arg_str(args[i].value as string)) }
+        else if args[i].value is time.Time { values.push(bind_arg_time(args[i].value as time.Time)) }
+        else { values.push(BindArg{kind: 0, value: 0, buffer: 0}) }
+    }
+    << values
 }
 
 fn bind_index(stmt int, index int, values &[]BindArg, i int) int {
@@ -147,22 +164,26 @@ fn bind_index(stmt int, index int, values &[]BindArg, i int) int {
     << sqlite_native.bind_buffer(stmt, index, values[i].buffer, 0)
 }
 
-fn bind_parameters(stmt int, args &[]driver.NamedValue) string {
+fn bind_parameters(stmt int, args []driver.NamedValue) string {
     count := sqlite_native.parameter_count(stmt)
+    $names := []string{}
     $named := 0
-    for i in 0:args.len { if args[i].name.len > 0 { named += 1 } }
+    for i in 0:args.len {
+        nm := args[i].name + ""
+        if nm.len > 0 { named += 1 }
+        names.push(nm)
+    }
     if named > 0 && named != args.len { << "sqlite: mixed named and positional parameters" }
     if named == 0 && count != args.len { << "sqlite: incorrect parameter count" }
-    $values := []BindArg{}
-    for i in 0:args.len { values.push(prepare_binding(args, i)) }
-    result := bind_prepared(stmt, count, named > 0, args, &values)
+    values := prepare_all_bindings(args)
+    result := bind_prepared(stmt, count, named > 0, &names, &values)
     for i in 0:values.len { sqlite_native.buffer_free(values[i].buffer) }
     << result
 }
 
-fn bind_prepared(stmt int, count int, named bool, args &[]driver.NamedValue, values &[]BindArg) string {
+fn bind_prepared(stmt int, count int, named bool, names &[]string, values &[]BindArg) string {
     if !named {
-        for i in 0:args.len {
+        for i in 0:names.len {
             if bind_index(stmt, i + 1, values, i) != 0 { << "sqlite: parameter binding failed" }
         }
         << ""
@@ -174,7 +195,7 @@ fn bind_prepared(stmt int, count int, named bool, args &[]driver.NamedValue, val
         name := native_text(token)
         key := name[1:name.len] + ""
         $found := -1
-        for i in 0:args.len { if args[i].name == key { found = i } }
+        for i in 0:names.len { if names[i] == key { found = i } }
         if found < 0 { << "sqlite: missing named parameter: " + key }
         if bind_index(stmt, index, values, found) != 0 { << "sqlite: parameter binding failed" }
     }
@@ -206,14 +227,15 @@ fn column_value(stmt int, column int) string {
     << ""
 }
 
-fn session_query(st $&SqliteState, query string, args &[]driver.NamedValue) QueryReply {
+fn session_query(st $&SqliteState, query string, args []driver.NamedValue) QueryReply {
+    arg_count := args.len
     buffer := native_buffer(&query)
     if buffer == 0 { << query_error("sqlite: SQL allocation failed or exceeds 16 MiB") }
     stmt := sqlite_native.prepare(st.handle, buffer)
     sqlite_native.buffer_free(buffer)
     if stmt == 0 {
         if sqlite_native.status(st.handle) != 0 { << query_error(db_error_text(st.handle)) }
-        if args.len > 0 { << query_error("sqlite: incorrect parameter count") }
+        if arg_count > 0 { << query_error("sqlite: incorrect parameter count") }
         << QueryReply{err: "", columns: []string{}, cells: []string{}, last_id: 0, affected: 0}
     }
     reply := read_statement(st, stmt, args)
@@ -221,7 +243,7 @@ fn session_query(st $&SqliteState, query string, args &[]driver.NamedValue) Quer
     << reply
 }
 
-fn read_statement(st $&SqliteState, stmt int, args &[]driver.NamedValue) QueryReply {
+fn read_statement(st $&SqliteState, stmt int, args []driver.NamedValue) QueryReply {
     bound := bind_parameters(stmt, args)
     if bound.len > 0 { << query_error(bound) }
     $columns := []string{}
@@ -259,13 +281,13 @@ fn query_error(message string) QueryReply {
     << reply
 }
 
-fn session_reply_safe(st $&SqliteState, query string, args &[]driver.NamedValue) QueryReply {
+fn session_reply_safe(st $&SqliteState, query string, args []driver.NamedValue) QueryReply {
     << session_query(st, query, args)
 }
 
 fn session_command(st $&SqliteState, query string) string {
     args := []driver.NamedValue{}
-    reply := session_reply_safe(st, query, &args)
+    reply := session_reply_safe(st, query, args)
     << strings.clone(&reply.err)
 }
 

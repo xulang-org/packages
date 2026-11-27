@@ -16,6 +16,7 @@ mcp #github.com/xulang-org/packages/mcp
 rag #github.com/xulang-org/packages/rag
 guardrails #github.com/xulang-org/packages/guardrails
 prompt #github.com/xulang-org/packages/prompt
+a2a #github.com/xulang-org/packages/a2a
 
 pub struct LocalTool {
     pub name string
@@ -108,6 +109,7 @@ pub struct Agent {
     pub parallel_tools bool
     pub context_max_tokens int
     pub max_tool_output_chars int
+    pub progressive_skills bool
     local_tools []LocalTool
     skills []Skill
     tool_hook fn(&string, &string) string
@@ -134,6 +136,7 @@ pub fn new_agent(client openai.Client, model string) Agent {
         parallel_tools: false,
         context_max_tokens: 0,
         max_tool_output_chars: 0,
+        progressive_skills: false,
         local_tools: []LocalTool{},
         skills: []Skill{},
         tool_hook: default_tool_hook,
@@ -157,6 +160,10 @@ pub fn (a $&Agent) add_skill(skill Skill) {
 pub fn (a $&Agent) set_context_budget(max_tokens int, max_tool_output_chars int) {
     a.context_max_tokens = max_tokens
     a.max_tool_output_chars = max_tool_output_chars
+}
+
+pub fn (a $&Agent) set_progressive_skills(enabled bool) {
+    a.progressive_skills = enabled
 }
 
 pub fn (a $&Agent) set_guardrails_policy(policy guardrails.Policy) {
@@ -291,11 +298,18 @@ fn copy_messages(src &[]openai.Message) []openai.Message {
     << out
 }
 
-fn build_tool_defs(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []openai.ToolDef {
+fn load_skill_tool_schema() string {
+    << "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Exact skill name to load\"}},\"required\":[\"name\"]}"
+}
+
+fn build_tool_defs_ex(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo, include_load_skill bool) []openai.ToolDef {
     $out := []openai.ToolDef{}
     for i in 0:local_tools.len {
         lt := &local_tools[i]
         out.push(openai.tool(lt.name + "", lt.description + "", lt.parameters_json + ""))
+    }
+    if include_load_skill {
+        out.push(openai.tool("load_skill", "Load full instructions for a skill by name from available_skills.", load_skill_tool_schema()))
     }
     mcp_defs := from_mcp_tools(extra_tools)
     for i in 0:mcp_defs.len {
@@ -303,6 +317,10 @@ fn build_tool_defs(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []open
         out.push(openai.tool(td.name + "", td.description + "", td.parameters_json + ""))
     }
     << out
+}
+
+fn build_tool_defs(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []openai.ToolDef {
+    << build_tool_defs_ex(local_tools, extra_tools, false)
 }
 
 fn find_local_tool(local_tools &[]LocalTool, name &string) int {
@@ -335,11 +353,16 @@ fn build_initial_history(a &Agent, user_prompt &string) []openai.Message {
 fn make_turn_request(a &Agent, history &[]openai.Message, extra_tools &[]mcp.ToolInfo) openai.ChatRequest {
     $msgs := copy_messages(history)
     if a.skills.len > 0 {
-        $last_user := ""
-        for mi in 0:msgs.len {
-            if msgs[mi].role == "user" { last_user = msgs[mi].content + "" }
+        $sk_txt := ""
+        if a.progressive_skills {
+            sk_txt = format_skills_catalog(&a.skills)
+        } else {
+            $last_user := ""
+            for mi in 0:msgs.len {
+                if msgs[mi].role == "user" { last_user = msgs[mi].content + "" }
+            }
+            sk_txt = format_skills_prompt(&a.skills, &last_user)
         }
-        sk_txt := format_skills_prompt(&a.skills, &last_user)
         if sk_txt.len > 0 {
             if msgs.len > 0 && msgs[0].role == "system" {
                 msgs[0].content = msgs[0].content + "\n\n" + sk_txt
@@ -355,7 +378,7 @@ fn make_turn_request(a &Agent, history &[]openai.Message, extra_tools &[]mcp.Too
         msgs = compact_messages(&msgs, a.context_max_tokens, 4)
     }
     $req := openai.chat_request(a.model + "", ~msgs)
-    req.tools = build_tool_defs(&a.local_tools, extra_tools)
+    req.tools = build_tool_defs_ex(&a.local_tools, extra_tools, a.progressive_skills && a.skills.len > 0)
     if a.has_temperature {
         req.temperature = a.temperature
         req.has_temperature = true
@@ -471,6 +494,74 @@ fn execute_tools_batch(local_tools &[]LocalTool, specs &[]ToolExecSpec, parallel
         }
     }
     << results
+}
+
+fn extract_skill_arg_name(args_json &string) string {
+    doc := json.parse(args_json)
+    if doc.ok() && doc.is_dict(doc.root()) {
+        nm := ck_str_or(&doc, doc.root(), "name", "")
+        if nm.len > 0 { << nm }
+        << ck_str_or(&doc, doc.root(), "skill", "")
+    }
+    << strings.trim_space(args_json)
+}
+
+fn execute_agent_tools(local_tools &[]LocalTool, specs &[]ToolExecSpec, parallel bool,
+                       use_http_mcp bool, http_mc $&mcp.Client,
+                       use_stdio_mcp bool, stdio_mc $&mcp.StdioClient,
+                       tool_hook fn(&string, &string) string,
+                       has_approval bool, approval_hook fn(&string, &string) bool,
+                       skills &[]Skill, progressive_skills bool) []ToolExecItem {
+    if !progressive_skills || skills.len == 0 {
+        << execute_tools_checked(local_tools, specs, parallel, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, tool_hook, has_approval, approval_hook)
+    }
+    $has_load := false
+    for i in 0:specs.len {
+        if specs[i].name == "load_skill" {
+            has_load = true
+            <-
+        }
+    }
+    if !has_load {
+        << execute_tools_checked(local_tools, specs, parallel, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, tool_hook, has_approval, approval_hook)
+    }
+    $out := []ToolExecItem{}
+    $rest := []ToolExecSpec{}
+    $rest_idx := []int{}
+    for i in 0:specs.len {
+        sp := &specs[i]
+        if sp.name == "load_skill" {
+            if has_approval && !approval_hook(&sp.name, &sp.arguments) {
+                out.push(ToolExecItem{idx: i, output: "denied by approval hook", is_error: true})
+            } else {
+                reason := tool_hook(&sp.name, &sp.arguments)
+                if reason.len > 0 {
+                    out.push(ToolExecItem{idx: i, output: "blocked: " + reason, is_error: true})
+                } else {
+                    sname := extract_skill_arg_name(&sp.arguments)
+                    body := lookup_skill_body(skills, &sname)
+                    if body.len == 0 {
+                        out.push(ToolExecItem{idx: i, output: "unknown skill: " + sname, is_error: true})
+                    } else {
+                        out.push(ToolExecItem{idx: i, output: body, is_error: false})
+                    }
+                }
+            }
+        } else {
+            out.push(ToolExecItem{idx: i, output: "", is_error: false})
+            rest.push(ToolExecSpec{name: sp.name + "", arguments: sp.arguments + ""})
+            rest_idx.push(i)
+        }
+    }
+    if rest.len > 0 {
+        sub := execute_tools_checked(local_tools, &rest, parallel, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, tool_hook, has_approval, approval_hook)
+        for j in 0:sub.len {
+            orig_i := rest_idx[j]
+            sr := &sub[j]
+            out[orig_i] = ToolExecItem{idx: orig_i, output: sr.output + "", is_error: sr.is_error}
+        }
+    }
+    << out
 }
 
 fn execute_tools_checked(local_tools &[]LocalTool, specs &[]ToolExecSpec, parallel bool,
@@ -694,7 +785,7 @@ fn run_loop_history_impl(a &Agent, history $&[]openai.Message, use_http_mcp bool
             }
         }
         tool_t0 := time.now()
-        results := execute_tools_checked(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook, a.has_approval_hook, a.approval_hook)
+        results := execute_agent_tools(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook, a.has_approval_hook, a.approval_hook, &a.skills, a.progressive_skills)
         tool_ms := time.since(tool_t0) / 1000000
         for ti in 0:resp.tool_calls.len {
             tc := &resp.tool_calls[ti]
@@ -878,8 +969,18 @@ pub struct AnthropicAgent {
     pub has_temperature bool
     pub thinking_budget_tokens int
     pub parallel_tools bool
+    pub context_max_tokens int
+    pub max_tool_output_chars int
+    pub progressive_skills bool
     local_tools []LocalTool
+    skills []Skill
     tool_hook fn(&string, &string) string
+    guard_policy guardrails.Policy
+    has_guardrails bool
+    trace_hook fn(TraceSpan)
+    has_trace_hook bool
+    approval_hook fn(&string, &string) bool
+    has_approval_hook bool
 }
 
 pub fn new_anthropic_agent(client anthropic.Client, model string) AnthropicAgent {
@@ -894,13 +995,60 @@ pub fn new_anthropic_agent(client anthropic.Client, model string) AnthropicAgent
         has_temperature: false,
         thinking_budget_tokens: 0,
         parallel_tools: false,
+        context_max_tokens: 0,
+        max_tool_output_chars: 0,
+        progressive_skills: false,
         local_tools: []LocalTool{},
-        tool_hook: default_tool_hook
+        skills: []Skill{},
+        tool_hook: default_tool_hook,
+        guard_policy: guardrails.default_policy(),
+        has_guardrails: false,
+        trace_hook: default_trace_hook,
+        has_trace_hook: false,
+        approval_hook: default_approval_hook,
+        has_approval_hook: false
     }
 }
 
 pub fn (a $&AnthropicAgent) set_tool_hook(hook fn(&string, &string) string) {
     a.tool_hook = hook
+}
+
+pub fn (a $&AnthropicAgent) add_skill(skill Skill) {
+    a.skills.push(~skill)
+}
+
+pub fn (a $&AnthropicAgent) load_skills_dir(dir_path string) int {
+    found := discover_skills_dir(dir_path) >>>
+    for i in 0:found.len {
+        s := &found[i]
+        a.skills.push(Skill{name: s.name + "", description: s.description + "", body: s.body + "", path: s.path + ""})
+    }
+    << found.len
+}
+
+pub fn (a $&AnthropicAgent) set_progressive_skills(enabled bool) {
+    a.progressive_skills = enabled
+}
+
+pub fn (a $&AnthropicAgent) set_context_budget(max_tokens int, max_tool_output_chars int) {
+    a.context_max_tokens = max_tokens
+    a.max_tool_output_chars = max_tool_output_chars
+}
+
+pub fn (a $&AnthropicAgent) set_guardrails_policy(policy guardrails.Policy) {
+    a.guard_policy = ~policy
+    a.has_guardrails = true
+}
+
+pub fn (a $&AnthropicAgent) set_trace_hook(hook fn(TraceSpan)) {
+    a.trace_hook = hook
+    a.has_trace_hook = true
+}
+
+pub fn (a $&AnthropicAgent) set_approval_hook(hook fn(&string, &string) bool) {
+    a.approval_hook = hook
+    a.has_approval_hook = true
 }
 
 pub fn (a $&AnthropicAgent) set_system_prompt(prompt string) {
@@ -965,16 +1113,51 @@ fn copy_anth_messages(src &[]anthropic.Message) []anthropic.Message {
     << out
 }
 
-fn build_anth_tools(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []anthropic.Tool {
+fn build_anth_tools_ex(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo, include_load_skill bool) []anthropic.Tool {
     $out := []anthropic.Tool{}
     for i in 0:local_tools.len {
         lt := &local_tools[i]
         out.push(anthropic.tool(lt.name + "", lt.description + "", lt.parameters_json + ""))
     }
+    if include_load_skill {
+        out.push(anthropic.tool("load_skill", "Load full instructions for a skill by name from available_skills.", load_skill_tool_schema()))
+    }
     mtools := from_mcp_anthropic_tools(extra_tools)
     for i in 0:mtools.len {
         mt := &mtools[i]
         out.push(anthropic.tool(mt.name + "", mt.description + "", mt.input_schema_json + ""))
+    }
+    << out
+}
+
+fn estimate_anth_msg_tokens(m &anthropic.Message) int {
+    $t := estimate_tokens(&m.content) + 4
+    for i in 0:m.blocks.len {
+        b := &m.blocks[i]
+        t += estimate_tokens(&b.text) + estimate_tokens(&b.thinking) + estimate_tokens(&b.input_json)
+    }
+    << t
+}
+
+pub fn compact_anthropic_messages(messages &[]anthropic.Message, max_tokens int, keep_recent int) []anthropic.Message {
+    if max_tokens <= 0 || messages.len == 0 { << copy_anth_messages(messages) }
+    $kr := keep_recent
+    if kr < 1 { kr = 1 }
+    $total := 0
+    for i in 0:messages.len { total += estimate_anth_msg_tokens(&messages[i]) }
+    if total <= max_tokens || messages.len <= kr { << copy_anth_messages(messages) }
+    $start := messages.len - kr
+    if start < 0 { start = 0 }
+    $cur_toks := 0
+    for i in start:messages.len { cur_toks += estimate_anth_msg_tokens(&messages[i]) }
+    while cur_toks > max_tokens && start < messages.len - 1 {
+        cur_toks -= estimate_anth_msg_tokens(&messages[start])
+        start += 1
+    }
+    $out := []anthropic.Message{}
+    for i in start:messages.len {
+        m := &messages[i]
+        out.push(anthropic.Message{role: m.role + "", content: m.content + "", blocks: copy_anth_blocks(&m.blocks)})
     }
     << out
 }
@@ -1036,12 +1219,48 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
     $last_stop := ""
     $limit := a.max_turns
     if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+    trace_id := "tr_" + str(time.now_time().unix_nano())
+    $last_user_prompt := ""
+    if a.has_guardrails || a.skills.len > 0 {
+        $ui := -1
+        for hi in 0:history.len {
+            if history[hi].role == "user" && history[hi].content.len > 0 { ui = hi }
+        }
+        if ui >= 0 {
+            last_user_prompt = history[ui].content + ""
+            if a.has_guardrails {
+                g_in := guardrails.check_input(&a.guard_policy, &history[ui].content)
+                if !g_in.allowed {
+                    >>> errors.new("agent guardrails input blocked: " + g_in.reason)
+                }
+                history[ui].content = g_in.sanitized_text + ""
+                last_user_prompt = history[ui].content + ""
+            }
+        }
+    }
 
     while turns < limit {
         turns += 1
-        $req := anthropic.messages_request(a.model + "", copy_anth_messages(history), a.max_tokens)
-        req.system = a.system_prompt + ""
-        req.tools = build_anth_tools(&a.local_tools, &extra_tools)
+        $req_msgs := copy_anth_messages(history)
+        if a.context_max_tokens > 0 {
+            req_msgs = compact_anthropic_messages(&req_msgs, a.context_max_tokens, 4)
+        }
+        $sys_txt := a.system_prompt + ""
+        if a.skills.len > 0 {
+            $sk_txt := ""
+            if a.progressive_skills {
+                sk_txt = format_skills_catalog(&a.skills)
+            } else {
+                sk_txt = format_skills_prompt(&a.skills, &last_user_prompt)
+            }
+            if sk_txt.len > 0 {
+                if sys_txt.len > 0 { sys_txt = sys_txt + "\n\n" + sk_txt }
+                else { sys_txt = sk_txt }
+            }
+        }
+        $req := anthropic.messages_request(a.model + "", ~req_msgs, a.max_tokens)
+        req.system = sys_txt
+        req.tools = build_anth_tools_ex(&a.local_tools, &extra_tools, a.progressive_skills && a.skills.len > 0)
         if a.has_temperature {
             req.temperature = a.temperature
             req.has_temperature = true
@@ -1050,6 +1269,7 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
             req.thinking_budget_tokens = a.thinking_budget_tokens
         }
         $resp := empty_anth_resp()
+        turn_t0 := time.now()
         if use_stream {
             ech := chan anthropic.StreamEvent{cap: 64}
             rch := chan AnthStreamOutcome{cap: 1}
@@ -1079,8 +1299,17 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
         } else {
             resp = a.client.messages(&req) >>>
         }
+        turn_ms := time.since(turn_t0) / 1000000
         pt += resp.usage.input_tokens
         ct += resp.usage.output_tokens
+        if a.has_trace_hook {
+            th := a.trace_hook
+            th(TraceSpan{
+                trace_id: trace_id + "", kind: "llm_turn", name: a.model + "",
+                turn: turns, duration_ms: turn_ms, tokens: resp.usage.input_tokens + resp.usage.output_tokens,
+                is_error: false, detail: resp.stop_reason + ""
+            })
+        }
         if a.max_total_tokens > 0 && (pt + ct) > a.max_total_tokens {
             >>> errors.new("agent: token budget exceeded")
         }
@@ -1091,6 +1320,13 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
         last_content = resp.content + ""
         last_stop = resp.stop_reason + ""
         if resp.tool_uses.len == 0 {
+            if a.has_guardrails {
+                g_out := guardrails.check_output(&a.guard_policy, &last_content)
+                if !g_out.allowed {
+                    >>> errors.new("agent guardrails output blocked: " + g_out.reason)
+                }
+                last_content = g_out.sanitized_text + ""
+            }
             history.push(anthropic.message("assistant", last_content + ""))
             if use_stream {
                 emit_agent_ev(on_event, AgentEvent{
@@ -1134,26 +1370,50 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
             }
         }
         $dummy_stdio := mcp.closed_stdio_client()
-        results := execute_tools_batch(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, false, $&dummy_stdio, a.tool_hook)
+        tool_t0 := time.now()
+        results := execute_agent_tools(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, false, $&dummy_stdio, a.tool_hook, a.has_approval_hook, a.approval_hook, &a.skills, a.progressive_skills)
+        tool_ms := time.since(tool_t0) / 1000000
         $res_blocks := []anthropic.ContentBlock{}
         for ti in 0:resp.tool_uses.len {
             tu := &resp.tool_uses[ti]
             res := &results[ti]
+            $tout := res.output + ""
+            $terr := res.is_error
+            if a.has_guardrails {
+                g_tool := guardrails.check_tool_output(&a.guard_policy, &tu.name, &tout)
+                if !g_tool.allowed {
+                    tout = "blocked by guardrails: " + g_tool.reason
+                    terr = true
+                } else {
+                    tout = g_tool.sanitized_text + ""
+                }
+            }
+            if a.max_tool_output_chars > 0 && tout.len > a.max_tool_output_chars {
+                tout = tout[0:a.max_tool_output_chars] + "\n...[truncated]"
+            }
+            if a.has_trace_hook {
+                th := a.trace_hook
+                th(TraceSpan{
+                    trace_id: trace_id + "", kind: "tool_call", name: tu.name + "",
+                    turn: turns, duration_ms: tool_ms, tokens: 0,
+                    is_error: terr, detail: tout[0:mini_int(tout.len, 64)]
+                })
+            }
             steps.push(Step{
                 turn: turns, tool_name: tu.name + "", arguments_json: tu.input_json + "",
-                output: res.output + "", is_error: res.is_error
+                output: tout + "", is_error: terr
             })
             if use_stream {
                 emit_agent_ev(on_event, AgentEvent{
                     kind: "tool_end", turn: turns, text_delta: "", reasoning_delta: "",
                     tool_name: tu.name + "", arguments_json: tu.input_json + "",
-                    tool_output: res.output + "", is_error: res.is_error, finish_reason: ""
+                    tool_output: tout + "", is_error: terr, finish_reason: ""
                 })
             }
             $ie := "false"
-            if res.is_error { ie = "true" }
+            if terr { ie = "true" }
             res_blocks.push(anthropic.ContentBlock{
-                kind: "tool_result", text: res.output + "", thinking: "",
+                kind: "tool_result", text: tout + "", thinking: "",
                 id: tu.id + "", name: "", input_json: ie,
                 media_type: "", data: "", cache_control: ""
             })
@@ -1260,8 +1520,18 @@ pub struct GeminiAgent {
     pub has_temperature bool
     pub thinking_budget int
     pub parallel_tools bool
+    pub context_max_tokens int
+    pub max_tool_output_chars int
+    pub progressive_skills bool
     local_tools []LocalTool
+    skills []Skill
     tool_hook fn(&string, &string) string
+    guard_policy guardrails.Policy
+    has_guardrails bool
+    trace_hook fn(TraceSpan)
+    has_trace_hook bool
+    approval_hook fn(&string, &string) bool
+    has_approval_hook bool
 }
 
 pub fn new_gemini_agent(client gemini.Client, model string) GeminiAgent {
@@ -1276,13 +1546,60 @@ pub fn new_gemini_agent(client gemini.Client, model string) GeminiAgent {
         has_temperature: false,
         thinking_budget: -1,
         parallel_tools: false,
+        context_max_tokens: 0,
+        max_tool_output_chars: 0,
+        progressive_skills: false,
         local_tools: []LocalTool{},
-        tool_hook: default_tool_hook
+        skills: []Skill{},
+        tool_hook: default_tool_hook,
+        guard_policy: guardrails.default_policy(),
+        has_guardrails: false,
+        trace_hook: default_trace_hook,
+        has_trace_hook: false,
+        approval_hook: default_approval_hook,
+        has_approval_hook: false
     }
 }
 
 pub fn (a $&GeminiAgent) set_tool_hook(hook fn(&string, &string) string) {
     a.tool_hook = hook
+}
+
+pub fn (a $&GeminiAgent) add_skill(skill Skill) {
+    a.skills.push(~skill)
+}
+
+pub fn (a $&GeminiAgent) load_skills_dir(dir_path string) int {
+    found := discover_skills_dir(dir_path) >>>
+    for i in 0:found.len {
+        s := &found[i]
+        a.skills.push(Skill{name: s.name + "", description: s.description + "", body: s.body + "", path: s.path + ""})
+    }
+    << found.len
+}
+
+pub fn (a $&GeminiAgent) set_progressive_skills(enabled bool) {
+    a.progressive_skills = enabled
+}
+
+pub fn (a $&GeminiAgent) set_context_budget(max_tokens int, max_tool_output_chars int) {
+    a.context_max_tokens = max_tokens
+    a.max_tool_output_chars = max_tool_output_chars
+}
+
+pub fn (a $&GeminiAgent) set_guardrails_policy(policy guardrails.Policy) {
+    a.guard_policy = ~policy
+    a.has_guardrails = true
+}
+
+pub fn (a $&GeminiAgent) set_trace_hook(hook fn(TraceSpan)) {
+    a.trace_hook = hook
+    a.has_trace_hook = true
+}
+
+pub fn (a $&GeminiAgent) set_approval_hook(hook fn(&string, &string) bool) {
+    a.approval_hook = hook
+    a.has_approval_hook = true
 }
 
 pub fn (a $&GeminiAgent) set_system_prompt(prompt string) {
@@ -1354,16 +1671,51 @@ fn copy_gem_contents(src &[]gemini.Content) []gemini.Content {
     << out
 }
 
-fn build_gem_tools(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo) []gemini.FunctionDecl {
+fn build_gem_tools_ex(local_tools &[]LocalTool, extra_tools &[]mcp.ToolInfo, include_load_skill bool) []gemini.FunctionDecl {
     $out := []gemini.FunctionDecl{}
     for i in 0:local_tools.len {
         lt := &local_tools[i]
         out.push(gemini.function_decl(lt.name + "", lt.description + "", lt.parameters_json + ""))
     }
+    if include_load_skill {
+        out.push(gemini.function_decl("load_skill", "Load full instructions for a skill by name from available_skills.", load_skill_tool_schema()))
+    }
     mtools := from_mcp_gemini_tools(extra_tools)
     for i in 0:mtools.len {
         mt := &mtools[i]
         out.push(gemini.function_decl(mt.name + "", mt.description + "", mt.parameters_json + ""))
+    }
+    << out
+}
+
+fn estimate_gem_content_tokens(c &gemini.Content) int {
+    $t := 4
+    for i in 0:c.parts.len {
+        p := &c.parts[i]
+        t += estimate_tokens(&p.text) + estimate_tokens(&p.args_json) + estimate_tokens(&p.response_json)
+    }
+    << t
+}
+
+pub fn compact_gemini_contents(contents &[]gemini.Content, max_tokens int, keep_recent int) []gemini.Content {
+    if max_tokens <= 0 || contents.len == 0 { << copy_gem_contents(contents) }
+    $kr := keep_recent
+    if kr < 1 { kr = 1 }
+    $total := 0
+    for i in 0:contents.len { total += estimate_gem_content_tokens(&contents[i]) }
+    if total <= max_tokens || contents.len <= kr { << copy_gem_contents(contents) }
+    $start := contents.len - kr
+    if start < 0 { start = 0 }
+    $cur_toks := 0
+    for i in start:contents.len { cur_toks += estimate_gem_content_tokens(&contents[i]) }
+    while cur_toks > max_tokens && start < contents.len - 1 {
+        cur_toks -= estimate_gem_content_tokens(&contents[start])
+        start += 1
+    }
+    $out := []gemini.Content{}
+    for i in start:contents.len {
+        c := &contents[i]
+        out.push(gemini.Content{role: c.role + "", parts: copy_gem_parts(&c.parts)})
     }
     << out
 }
@@ -1416,12 +1768,50 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
     $last_finish := ""
     $limit := a.max_turns
     if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+    trace_id := "tr_" + str(time.now_time().unix_nano())
+    $last_user_prompt := ""
+    if a.has_guardrails || a.skills.len > 0 {
+        $ui := -1
+        for hi in 0:history.len {
+            if history[hi].role == "user" && history[hi].parts.len > 0 && history[hi].parts[0].kind == "text" {
+                ui = hi
+            }
+        }
+        if ui >= 0 {
+            last_user_prompt = history[ui].parts[0].text + ""
+            if a.has_guardrails {
+                g_in := guardrails.check_input(&a.guard_policy, &history[ui].parts[0].text)
+                if !g_in.allowed {
+                    >>> errors.new("agent guardrails input blocked: " + g_in.reason)
+                }
+                history[ui].parts[0].text = g_in.sanitized_text + ""
+                last_user_prompt = history[ui].parts[0].text + ""
+            }
+        }
+    }
 
     while turns < limit {
         turns += 1
-        $req := gemini.generate_request(a.model + "", copy_gem_contents(history))
-        req.system_instruction = a.system_prompt + ""
-        req.tools = build_gem_tools(&a.local_tools, &extra_tools)
+        $req_contents := copy_gem_contents(history)
+        if a.context_max_tokens > 0 {
+            req_contents = compact_gemini_contents(&req_contents, a.context_max_tokens, 4)
+        }
+        $sys_txt := a.system_prompt + ""
+        if a.skills.len > 0 {
+            $sk_txt := ""
+            if a.progressive_skills {
+                sk_txt = format_skills_catalog(&a.skills)
+            } else {
+                sk_txt = format_skills_prompt(&a.skills, &last_user_prompt)
+            }
+            if sk_txt.len > 0 {
+                if sys_txt.len > 0 { sys_txt = sys_txt + "\n\n" + sk_txt }
+                else { sys_txt = sk_txt }
+            }
+        }
+        $req := gemini.generate_request(a.model + "", ~req_contents)
+        req.system_instruction = sys_txt
+        req.tools = build_gem_tools_ex(&a.local_tools, &extra_tools, a.progressive_skills && a.skills.len > 0)
         if a.has_temperature {
             req.temperature = a.temperature
             req.has_temperature = true
@@ -1433,6 +1823,7 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
             req.thinking_budget = a.thinking_budget
         }
         $resp := empty_gem_resp()
+        turn_t0 := time.now()
         if use_stream {
             ech := chan gemini.StreamChunk{cap: 64}
             rch := chan GemStreamOutcome{cap: 1}
@@ -1462,6 +1853,7 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
         } else {
             resp = a.client.generate(&req) >>>
         }
+        turn_ms := time.since(turn_t0) / 1000000
         pt += resp.usage.prompt_token_count
         ct += resp.usage.candidates_token_count
         $tt_turn := resp.usage.total_token_count
@@ -1469,6 +1861,14 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
             tt_turn = resp.usage.prompt_token_count + resp.usage.candidates_token_count
         }
         tt += tt_turn
+        if a.has_trace_hook {
+            th := a.trace_hook
+            th(TraceSpan{
+                trace_id: trace_id + "", kind: "llm_turn", name: a.model + "",
+                turn: turns, duration_ms: turn_ms, tokens: tt_turn,
+                is_error: false, detail: resp.finish_reason + ""
+            })
+        }
         if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
             >>> errors.new("agent: token budget exceeded")
         }
@@ -1479,6 +1879,13 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
         last_content = resp.text + ""
         last_finish = resp.finish_reason + ""
         if resp.function_calls.len == 0 {
+            if a.has_guardrails {
+                g_out := guardrails.check_output(&a.guard_policy, &last_content)
+                if !g_out.allowed {
+                    >>> errors.new("agent guardrails output blocked: " + g_out.reason)
+                }
+                last_content = g_out.sanitized_text + ""
+            }
             history.push(gemini.model_text(last_content + ""))
             if use_stream {
                 emit_agent_ev(on_event, AgentEvent{
@@ -1512,23 +1919,47 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
             }
         }
         history.push(gemini.content("model", ~m_parts))
-        results := execute_tools_batch(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook)
+        tool_t0 := time.now()
+        results := execute_agent_tools(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook, a.has_approval_hook, a.approval_hook, &a.skills, a.progressive_skills)
+        tool_ms := time.since(tool_t0) / 1000000
         $r_parts := []gemini.Part{}
         for ti in 0:resp.function_calls.len {
             fc := &resp.function_calls[ti]
             res := &results[ti]
+            $tout := res.output + ""
+            $terr := res.is_error
+            if a.has_guardrails {
+                g_tool := guardrails.check_tool_output(&a.guard_policy, &fc.name, &tout)
+                if !g_tool.allowed {
+                    tout = "blocked by guardrails: " + g_tool.reason
+                    terr = true
+                } else {
+                    tout = g_tool.sanitized_text + ""
+                }
+            }
+            if a.max_tool_output_chars > 0 && tout.len > a.max_tool_output_chars {
+                tout = tout[0:a.max_tool_output_chars] + "\n...[truncated]"
+            }
+            if a.has_trace_hook {
+                th := a.trace_hook
+                th(TraceSpan{
+                    trace_id: trace_id + "", kind: "tool_call", name: fc.name + "",
+                    turn: turns, duration_ms: tool_ms, tokens: 0,
+                    is_error: terr, detail: tout[0:mini_int(tout.len, 64)]
+                })
+            }
             steps.push(Step{
                 turn: turns, tool_name: fc.name + "", arguments_json: fc.args_json + "",
-                output: res.output + "", is_error: res.is_error
+                output: tout + "", is_error: terr
             })
             if use_stream {
                 emit_agent_ev(on_event, AgentEvent{
                     kind: "tool_end", turn: turns, text_delta: "", reasoning_delta: "",
                     tool_name: fc.name + "", arguments_json: fc.args_json + "",
-                    tool_output: res.output + "", is_error: res.is_error, finish_reason: ""
+                    tool_output: tout + "", is_error: terr, finish_reason: ""
                 })
             }
-            res_json := "{\"result\":" + json.quote(&res.output) + "}"
+            res_json := "{\"result\":" + json.quote(&tout) + "}"
             r_parts.push(gemini.function_response_part(fc.name + "", res_json))
         }
         history.push(gemini.content("user", ~r_parts))
@@ -1659,8 +2090,18 @@ pub struct ResponsesAgent {
     pub max_total_tokens int
     pub tool_choice string
     pub parallel_tools bool
+    pub context_max_tokens int
+    pub max_tool_output_chars int
+    pub progressive_skills bool
     local_tools []LocalTool
+    skills []Skill
     tool_hook fn(&string, &string) string
+    guard_policy guardrails.Policy
+    has_guardrails bool
+    trace_hook fn(TraceSpan)
+    has_trace_hook bool
+    approval_hook fn(&string, &string) bool
+    has_approval_hook bool
 }
 
 pub fn new_responses_agent(client openai.Client, model string) ResponsesAgent {
@@ -1675,8 +2116,18 @@ pub fn new_responses_agent(client openai.Client, model string) ResponsesAgent {
         max_total_tokens: 0,
         tool_choice: "",
         parallel_tools: false,
+        context_max_tokens: 0,
+        max_tool_output_chars: 0,
+        progressive_skills: false,
         local_tools: []LocalTool{},
-        tool_hook: default_tool_hook
+        skills: []Skill{},
+        tool_hook: default_tool_hook,
+        guard_policy: guardrails.default_policy(),
+        has_guardrails: false,
+        trace_hook: default_trace_hook,
+        has_trace_hook: false,
+        approval_hook: default_approval_hook,
+        has_approval_hook: false
     }
 }
 
@@ -1691,6 +2142,32 @@ pub fn (a $&ResponsesAgent) set_max_total_tokens(n int) { if n >= 0 { a.max_tota
 pub fn (a $&ResponsesAgent) set_tool_choice(c string) { a.tool_choice = c + "" }
 pub fn (a $&ResponsesAgent) set_parallel_tools(enabled bool) { a.parallel_tools = enabled }
 pub fn (a $&ResponsesAgent) set_tool_hook(hook fn(&string, &string) string) { a.tool_hook = hook }
+pub fn (a $&ResponsesAgent) add_skill(skill Skill) { a.skills.push(~skill) }
+pub fn (a $&ResponsesAgent) load_skills_dir(dir_path string) int {
+    found := discover_skills_dir(dir_path) >>>
+    for i in 0:found.len {
+        s := &found[i]
+        a.skills.push(Skill{name: s.name + "", description: s.description + "", body: s.body + "", path: s.path + ""})
+    }
+    << found.len
+}
+pub fn (a $&ResponsesAgent) set_progressive_skills(enabled bool) { a.progressive_skills = enabled }
+pub fn (a $&ResponsesAgent) set_context_budget(max_tokens int, max_tool_output_chars int) {
+    a.context_max_tokens = max_tokens
+    a.max_tool_output_chars = max_tool_output_chars
+}
+pub fn (a $&ResponsesAgent) set_guardrails_policy(policy guardrails.Policy) {
+    a.guard_policy = ~policy
+    a.has_guardrails = true
+}
+pub fn (a $&ResponsesAgent) set_trace_hook(hook fn(TraceSpan)) {
+    a.trace_hook = hook
+    a.has_trace_hook = true
+}
+pub fn (a $&ResponsesAgent) set_approval_hook(hook fn(&string, &string) bool) {
+    a.approval_hook = hook
+    a.has_approval_hook = true
+}
 
 pub fn (a $&ResponsesAgent) add_tool(name string, description string, parameters_json string,
                                       handler fn(&string) string) {
@@ -1748,16 +2225,41 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
     $last_status := ""
     $limit := a.max_turns
     if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+    trace_id := "tr_" + str(time.now_time().unix_nano())
 
     $cur_input := user_prompt + ""
+    if a.has_guardrails {
+        g_in := guardrails.check_input(&a.guard_policy, &cur_input)
+        if !g_in.allowed {
+            >>> errors.new("agent guardrails input blocked: " + g_in.reason)
+        }
+        cur_input = g_in.sanitized_text + ""
+    }
     $cur_input_json := ""
     while turns < limit {
         turns += 1
+        $instr := a.instructions + ""
+        if a.skills.len > 0 {
+            $sk_txt := ""
+            if a.progressive_skills {
+                sk_txt = format_skills_catalog(&a.skills)
+            } else {
+                sk_txt = format_skills_prompt(&a.skills, &user_prompt)
+            }
+            if sk_txt.len > 0 {
+                if instr.len > 0 { instr = instr + "\n\n" + sk_txt }
+                else { instr = sk_txt }
+            }
+        }
+        if a.context_max_tokens > 0 && cur_input.len > a.context_max_tokens * 4 {
+            max_ch := a.context_max_tokens * 4
+            if cur_input.len > max_ch { cur_input = cur_input[0:max_ch] }
+        }
         $req := openai.new_responses_request(a.model + "", cur_input)
         req.input_json = cur_input_json + ""
-        req.instructions = a.instructions + ""
+        req.instructions = instr
         req.previous_response_id = (*prev_id_ref) + ""
-        req.tools = build_tool_defs(&a.local_tools, &extra_tools)
+        req.tools = build_tool_defs_ex(&a.local_tools, &extra_tools, a.progressive_skills && a.skills.len > 0)
         if a.has_temperature {
             req.temperature = a.temperature
             req.has_temperature = true
@@ -1769,6 +2271,7 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
             req.tool_choice = a.tool_choice + ""
         }
         $resp := empty_resp_api_out()
+        turn_t0 := time.now()
         if use_stream {
             ech := chan openai.ResponsesStreamEvent{cap: 64}
             rch := chan RespStreamOutcome{cap: 1}
@@ -1791,16 +2294,32 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
         } else {
             resp = a.client.responses(&req) >>>
         }
+        turn_ms := time.since(turn_t0) / 1000000
         if resp.id.len > 0 { *prev_id_ref = resp.id + "" }
         pt += resp.usage.prompt_tokens
         ct += resp.usage.completion_tokens
         tt += resp.usage.total_tokens
+        if a.has_trace_hook {
+            th := a.trace_hook
+            th(TraceSpan{
+                trace_id: trace_id + "", kind: "llm_turn", name: a.model + "",
+                turn: turns, duration_ms: turn_ms, tokens: resp.usage.total_tokens,
+                is_error: false, detail: resp.status + ""
+            })
+        }
         if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
             >>> errors.new("agent: token budget exceeded")
         }
         last_content = resp.output_text + ""
         last_status = resp.status + ""
         if resp.tool_calls.len == 0 {
+            if a.has_guardrails {
+                g_out := guardrails.check_output(&a.guard_policy, &last_content)
+                if !g_out.allowed {
+                    >>> errors.new("agent guardrails output blocked: " + g_out.reason)
+                }
+                last_content = g_out.sanitized_text + ""
+            }
             if use_stream {
                 emit_agent_ev(on_event, AgentEvent{
                     kind: "turn_end", turn: turns, text_delta: "", reasoning_delta: "",
@@ -1830,25 +2349,53 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
                 })
             }
         }
-        results := execute_tools_batch(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook)
+        tool_t0 := time.now()
+        results := execute_agent_tools(&a.local_tools, &specs, a.parallel_tools, use_http_mcp, http_mc, use_stdio_mcp, stdio_mc, a.tool_hook, a.has_approval_hook, a.approval_hook, &a.skills, a.progressive_skills)
+        tool_ms := time.since(tool_t0) / 1000000
         $out_items := []string{}
         for ti in 0:resp.tool_calls.len {
             tc := &resp.tool_calls[ti]
             res := &results[ti]
+            $tout := res.output + ""
+            $terr := res.is_error
+            if a.has_guardrails {
+                g_tool := guardrails.check_tool_output(&a.guard_policy, &tc.name, &tout)
+                if !g_tool.allowed {
+                    tout = "blocked by guardrails: " + g_tool.reason
+                    terr = true
+                } else {
+                    tout = g_tool.sanitized_text + ""
+                }
+            }
+            if a.max_tool_output_chars > 0 && tout.len > a.max_tool_output_chars {
+                tout = tout[0:a.max_tool_output_chars] + "\n...[truncated]"
+            }
+            if a.context_max_tokens > 0 && tout.len > a.context_max_tokens * 4 {
+                max_ch := a.context_max_tokens * 4
+                if tout.len > max_ch { tout = tout[0:max_ch] + "\n...[truncated]" }
+            }
+            if a.has_trace_hook {
+                th := a.trace_hook
+                th(TraceSpan{
+                    trace_id: trace_id + "", kind: "tool_call", name: tc.name + "",
+                    turn: turns, duration_ms: tool_ms, tokens: 0,
+                    is_error: terr, detail: tout[0:mini_int(tout.len, 64)]
+                })
+            }
             steps.push(Step{
                 turn: turns, tool_name: tc.name + "", arguments_json: tc.arguments + "",
-                output: res.output + "", is_error: res.is_error
+                output: tout + "", is_error: terr
             })
             if use_stream {
                 emit_agent_ev(on_event, AgentEvent{
                     kind: "tool_end", turn: turns, text_delta: "", reasoning_delta: "",
                     tool_name: tc.name + "", arguments_json: tc.arguments + "",
-                    tool_output: res.output + "", is_error: res.is_error, finish_reason: ""
+                    tool_output: tout + "", is_error: terr, finish_reason: ""
                 })
             }
             $cid := tc.call_id + ""
             if cid.len == 0 { cid = tc.id + "" }
-            out_items.push(openai.responses_function_call_output_item(cid, res.output + ""))
+            out_items.push(openai.responses_function_call_output_item(cid, tout + ""))
         }
         cur_input = ""
         cur_input_json = openai.responses_input_array(&out_items)
@@ -2052,6 +2599,34 @@ pub fn format_skills_prompt(skills &[]Skill, user_prompt &string) string {
         }
     }
     << out
+}
+
+pub fn format_skills_catalog(skills &[]Skill) string {
+    if skills.len == 0 { << "" }
+    $out := "<available_skills>\nTo load full instructions for a skill, call tool `load_skill` with {\"name\":\"<skill_name>\"}."
+    for i in 0:skills.len {
+        sk := &skills[i]
+        out = out + "\n- " + sk.name + ": " + sk.description
+    }
+    out = out + "\n</available_skills>"
+    << out
+}
+
+pub fn lookup_skill_body(skills &[]Skill, name &string) string {
+    for i in 0:skills.len {
+        if skills[i].name == *name {
+            sk := &skills[i]
+            << "<skill name=" + json.quote(&sk.name) + ">\n" + sk.body + "\n</skill>"
+        }
+    }
+    low_t := agent_ascii_lower(name)
+    for i in 0:skills.len {
+        if agent_ascii_lower(&skills[i].name) == low_t {
+            sk := &skills[i]
+            << "<skill name=" + json.quote(&sk.name) + ">\n" + sk.body + "\n</skill>"
+        }
+    }
+    << ""
 }
 
 pub fn new_memory(dim int) AgentMemory {
@@ -2414,6 +2989,7 @@ fn clone_agent_for_worker(src &Agent) Agent {
         parallel_tools: src.parallel_tools,
         context_max_tokens: src.context_max_tokens,
         max_tool_output_chars: src.max_tool_output_chars,
+        progressive_skills: src.progressive_skills,
         local_tools: tools,
         skills: skills,
         tool_hook: src.tool_hook,
@@ -2688,9 +3264,21 @@ pub struct GraphCondEdge {
     pub router fn(&string) string
 }
 
+pub struct GraphParallelBranch {
+    pub name string
+    pub handler fn(&string) string
+}
+
+pub struct GraphFanOutNode {
+    pub name string
+    pub branches []GraphParallelBranch
+    pub reducer fn(&string, &[]string) string
+}
+
 pub struct StateGraph {
     pub entry string
     nodes []GraphNode
+    fanout_nodes []GraphFanOutNode
     edges []GraphEdge
     cond_edges []GraphCondEdge
     interrupt_before []string
@@ -2723,6 +3311,7 @@ pub fn new_state_graph(entry string) StateGraph {
     << StateGraph{
         entry: entry,
         nodes: []GraphNode{},
+        fanout_nodes: []GraphFanOutNode{},
         edges: []GraphEdge{},
         cond_edges: []GraphCondEdge{},
         interrupt_before: []string{}
@@ -2735,6 +3324,18 @@ pub fn (g $&StateGraph) add_interrupt_before(node string) {
 
 pub fn (g $&StateGraph) add_node(name string, handler fn(&string) string) {
     g.nodes.push(GraphNode{name: name, handler: handler})
+}
+
+pub fn (g $&StateGraph) add_parallel_node(name string, branch_names []string,
+                                          branch_handlers []fn(&string) string,
+                                          reducer fn(&string, &[]string) string) {
+    $branches := []GraphParallelBranch{}
+    for i in 0:branch_handlers.len {
+        $bname := "branch_" + str(i)
+        if i < branch_names.len && branch_names[i].len > 0 { bname = branch_names[i] + "" }
+        branches.push(GraphParallelBranch{name: bname, handler: branch_handlers[i]})
+    }
+    g.fanout_nodes.push(GraphFanOutNode{name: name, branches: branches, reducer: reducer})
 }
 
 pub fn (g $&StateGraph) add_edge(from string, to string) {
@@ -2750,6 +3351,70 @@ fn find_graph_node_idx(nodes &[]GraphNode, name &string) int {
         if nodes[i].name == *name { << i }
     }
     << -1
+}
+
+fn find_graph_fanout_idx(nodes &[]GraphFanOutNode, name &string) int {
+    for i in 0:nodes.len {
+        if nodes[i].name == *name { << i }
+    }
+    << -1
+}
+
+struct GraphBranchOutcome {
+    idx int
+    name string
+    output string
+}
+
+fn run_graph_branch_worker(idx int, name string, h fn(&string) string, inp string, ch chan GraphBranchOutcome) {
+    $in_s := inp + ""
+    out := h(&in_s)
+    ch <- GraphBranchOutcome{idx: idx, name: name, output: out}
+}
+
+pub fn graph_state_get(state_json &string, key string, def string) string {
+    doc := json.parse(state_json)
+    if !doc.ok() || !doc.is_dict(doc.root()) { << def }
+    << ck_str_or(&doc, doc.root(), key, def)
+}
+
+fn ck_get_or(doc &json.Doc, obj int, key string) int {
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn ck_encode_or(doc &json.Doc, n int, def string) string {
+    if n < 0 { << def }
+    << doc.encode(n) >>> (_) { << def }
+}
+
+pub fn graph_state_set(state_json &string, key string, value string) string {
+    doc := json.parse(state_json)
+    $parts := []string{}
+    $replaced := false
+    if doc.ok() && doc.is_dict(doc.root()) {
+        root := doc.root()
+        keys := doc.dict_keys(root)
+        for i in 0:keys.len {
+            k := keys[i]
+            if k == key {
+                parts.push(json.quote(&key) + ":" + json.quote(&value))
+                replaced = true
+            } else {
+                kn := ck_get_or(&doc, root, k)
+                kenc := ck_encode_or(&doc, kn, "null")
+                parts.push(json.quote(&k) + ":" + kenc)
+            }
+        }
+    }
+    if !replaced {
+        parts.push(json.quote(&key) + ":" + json.quote(&value))
+    }
+    $out := "{"
+    for i in 0:parts.len {
+        if i > 0 { out = out + "," }
+        out = out + parts[i]
+    }
+    << out + "}"
 }
 
 fn graph_has_interrupt(list &[]string, node &string) bool {
@@ -2801,18 +3466,56 @@ fn run_graph_from(g &StateGraph, start_node string, initial_state string,
             }
         }
         ni := find_graph_node_idx(&g.nodes, &cur)
-        if ni < 0 {
-            >>> errors.new("agent: unknown StateGraph node: " + cur)
-        }
-        h := g.nodes[ni].handler
         inp := state + ""
-        next_state := h(&inp)
-        steps.push(GraphStep{
-            step: steps.len + 1,
-            node: cur + "",
-            input: inp,
-            output: next_state + ""
-        })
+        $next_state := ""
+        if ni >= 0 {
+            h := g.nodes[ni].handler
+            next_state = h(&inp)
+            steps.push(GraphStep{
+                step: steps.len + 1,
+                node: cur + "",
+                input: inp,
+                output: next_state + ""
+            })
+        } else {
+            fi := find_graph_fanout_idx(&g.fanout_nodes, &cur)
+            if fi < 0 {
+                >>> errors.new("agent: unknown StateGraph node: " + cur)
+            }
+            fo := &g.fanout_nodes[fi]
+            nb := fo.branches.len
+            $branch_outputs := []string{}
+            for _ in 0:nb { branch_outputs.push("") }
+            if nb > 0 {
+                bch := chan GraphBranchOutcome{cap: nb}
+                for bi in 0:nb {
+                    br := &fo.branches[bi]
+                    xu run_graph_branch_worker(bi, br.name + "", br.handler, inp + "", bch)
+                }
+                for _ in 0:nb {
+                    res := <-bch
+                    if res.idx >= 0 && res.idx < nb {
+                        branch_outputs[res.idx] = res.output + ""
+                    }
+                }
+                for bi in 0:nb {
+                    steps.push(GraphStep{
+                        step: steps.len + 1,
+                        node: cur + "/" + fo.branches[bi].name,
+                        input: inp + "",
+                        output: branch_outputs[bi] + ""
+                    })
+                }
+            }
+            red := fo.reducer
+            next_state = red(&inp, &branch_outputs)
+            steps.push(GraphStep{
+                step: steps.len + 1,
+                node: cur + "",
+                input: inp,
+                output: next_state + ""
+            })
+        }
         last_node = cur + ""
         state = next_state
 
@@ -2985,7 +3688,7 @@ pub fn format_trace_otlp_json(service_name string, spans &[]TraceSpan) string {
     }
     arr = arr + "]"
     << "{\"resourceSpans\":[{\"resource\":{\"attributes\":[{\"key\":\"service.name\",\"value\":{\"stringValue\":" +
-       json.quote(&svc) + "}}]},\"scopeSpans\":[{\"scope\":{\"name\":\"xulang.packages.agent\",\"version\":\"1.13.0\"},\"spans\":" +
+       json.quote(&svc) + "}}]},\"scopeSpans\":[{\"scope\":{\"name\":\"xulang.packages.agent\",\"version\":\"1.15.0\"},\"spans\":" +
        arr + "}]}]}"
 }
 
@@ -3071,3 +3774,411 @@ pub fn export_traces_otlp_http(endpoint string, service_name string, spans &[]Tr
     }
     << resp.status_code
 }
+
+pub struct HandoffAgent {
+    pub name string
+    pub instructions string
+}
+
+pub struct HandoffTeam {
+    pub entry string
+    pub agents []HandoffAgent
+}
+
+pub struct HandoffResult {
+    pub final_agent string
+    pub content string
+    pub route_trace []string
+    pub handoffs int
+    pub turns int
+}
+
+pub fn new_handoff_team(entry_agent string) HandoffTeam {
+    << HandoffTeam{entry: entry_agent + "", agents: []HandoffAgent{}}
+}
+
+pub fn (t $&HandoffTeam) add_agent(name string, instructions string) {
+    t.agents.push(HandoffAgent{name: name + "", instructions: instructions + ""})
+}
+
+fn find_handoff_agent_idx(agents &[]HandoffAgent, name &string) int {
+    for i in 0:agents.len {
+        if agents[i].name == *name { << i }
+    }
+    << -1
+}
+
+fn parse_handoff_directive(text &string) []string {
+    // Returns [target_agent, remaining_note] if HANDOFF:<target> is present; else []string{}.
+    lines := strings.split(text, "\n")
+    for i in 0:lines.len {
+        ln := strings.trim_space(&lines[i])
+        if strings.has_prefix(&ln, "HANDOFF:") {
+            rest := strings.trim_space(&ln[8:ln.len])
+            $tgt := ""
+            $note := ""
+            $sp := -1
+            for ci in 0:rest.len {
+                ch := rest[ci] & 255
+                if ch == 32 || ch == 9 || ch == 58 {
+                    sp = ci
+                    <-
+                }
+            }
+            if sp >= 0 {
+                tgt = strings.trim_space(&rest[0:sp])
+                note = strings.trim_space(&rest[(sp + 1):rest.len])
+            } else {
+                tgt = rest
+            }
+            if tgt.len > 0 {
+                << [tgt, note]
+            }
+        }
+    }
+    << []string{}
+}
+
+pub fn run_handoff_openai(team &HandoffTeam, client &openai.Client, model string,
+                          user_prompt string, max_handoffs int) HandoffResult {
+    if team.agents.len == 0 {
+        >>> errors.new("agent: HandoffTeam has no agents")
+    }
+    $cur := team.entry + ""
+    if cur.len == 0 { cur = team.agents[0].name + "" }
+    $limit := max_handoffs
+    if limit < 0 { limit = 0 }
+    $roster := "Team agents available for delegation:"
+    for i in 0:team.agents.len {
+        ag := &team.agents[i]
+        roster = roster + "\n- " + ag.name + ": " + ag.instructions
+    }
+    roster = roster + "\nTo hand off control, respond ONLY with: HANDOFF:<agent_name> <reason>"
+
+    $trace := []string{}
+    $msgs := [openai.message("user", user_prompt + "")]
+    $handoffs := 0
+    $turns := 0
+    $final_content := ""
+
+    while turns <= limit {
+        idx := find_handoff_agent_idx(&team.agents, &cur)
+        if idx < 0 {
+            >>> errors.new("agent: unknown HandoffAgent: " + cur)
+        }
+        trace.push(cur + "")
+        ag := &team.agents[idx]
+        sys := "You are agent '" + ag.name + "'. " + ag.instructions + "\n" + roster
+        $req_msgs := [openai.message("system", sys)]
+        for mi in 0:msgs.len {
+            req_msgs.push(openai.message(msgs[mi].role + "", msgs[mi].content + ""))
+        }
+        req := openai.chat_request(model + "", ~req_msgs)
+        resp := client.chat(&req) >>>
+        turns += 1
+        out_txt := strings.trim_space(&resp.content)
+        hd := parse_handoff_directive(&out_txt)
+        if hd.len == 2 {
+            next_name := hd[0]
+            note := hd[1]
+            if find_handoff_agent_idx(&team.agents, &next_name) < 0 {
+                final_content = out_txt
+                <-
+            }
+            if handoffs >= limit {
+                final_content = out_txt
+                <-
+            }
+            handoffs += 1
+            msgs.push(openai.message("assistant", "[" + cur + " handed off to " + next_name + "] " + note))
+            cur = next_name
+            ->
+        }
+        final_content = out_txt
+        <-
+    }
+
+    << HandoffResult{
+        final_agent: cur,
+        content: final_content,
+        route_trace: ~trace,
+        handoffs: handoffs,
+        turns: turns
+    }
+}
+
+pub fn discover_a2a_skills_prompt(base_url string) string {
+    cli := a2a.new_client(base_url + "")
+    card := cli.discover() >>>
+    $out := "Remote A2A Agent: " + card.name + " (" + card.version + ") - " + card.description
+    for i in 0:card.skills.len {
+        sk := &card.skills[i]
+        out = out + "\n- [" + sk.id + "] " + sk.name + ": " + sk.description
+    }
+    << out
+}
+
+pub fn delegate_to_a2a(base_url string, auth_token string, task_id string, prompt string) string {
+    $cli := a2a.new_client(base_url + "")
+    if auth_token.len > 0 { cli.set_auth_token(auth_token + "") }
+    task := cli.send_task(task_id + "", prompt + "") >>>
+    if task.output.len > 0 { << task.output }
+    if task.artifacts.len > 0 { << task.artifacts[0].text }
+    if task.history.len > 0 { << task.history[task.history.len - 1].text }
+    << ""
+}
+
+pub struct SwarmMember {
+    pub name string
+    pub description string
+    pub agent Agent
+}
+
+pub struct AgentSwarm {
+    pub entry string
+    pub members []SwarmMember
+}
+
+pub struct SwarmResult {
+    pub final_agent string
+    pub content string
+    pub route_trace []string
+    pub handoffs int
+    pub turns int
+    pub steps []Step
+    pub total_tokens int
+}
+
+pub fn new_agent_swarm(entry string) AgentSwarm {
+    << AgentSwarm{entry: entry + "", members: []SwarmMember{}}
+}
+
+pub fn (s $&AgentSwarm) add_member(name string, description string, agent Agent) {
+    s.members.push(SwarmMember{name: name + "", description: description + "", agent: agent})
+}
+
+fn find_swarm_member_idx(members &[]SwarmMember, name &string) int {
+    for i in 0:members.len {
+        if members[i].name == *name { << i }
+    }
+    << -1
+}
+
+pub fn (s &AgentSwarm) run(user_prompt string, max_handoffs int) SwarmResult {
+    if s.members.len == 0 {
+        >>> errors.new("agent: AgentSwarm has no members")
+    }
+    $cur := s.entry + ""
+    if cur.len == 0 { cur = s.members[0].name + "" }
+    $limit := max_handoffs
+    if limit < 0 { limit = 0 }
+
+    $roster := "Swarm specialists available (call tool `transfer_to_agent` with {\"agent\":\"<name>\",\"reason\":\"...\"} to delegate):"
+    for i in 0:s.members.len {
+        mb := &s.members[i]
+        roster = roster + "\n- " + mb.name + ": " + mb.description
+    }
+
+    $shared_msgs := [openai.message("user", user_prompt + "")]
+    entry_idx := find_swarm_member_idx(&s.members, &cur)
+    if entry_idx < 0 {
+        >>> errors.new("agent: unknown AgentSwarm entry member: " + cur)
+    }
+    if s.members[entry_idx].agent.has_guardrails {
+        g_in := guardrails.check_input(&s.members[entry_idx].agent.guard_policy, &shared_msgs[0].content)
+        if !g_in.allowed {
+            >>> errors.new("agent swarm guardrails input blocked: " + g_in.reason)
+        }
+        shared_msgs[0].content = g_in.sanitized_text + ""
+    }
+
+    $trace := [cur + ""]
+    $steps := []Step{}
+    $handoffs := 0
+    $turns := 0
+    $tt := 0
+    $final_content := ""
+    trace_id := "sw_" + str(time.now_time().unix_nano())
+
+    $max_loop := 32
+    while turns < max_loop {
+        idx := find_swarm_member_idx(&s.members, &cur)
+        if idx < 0 {
+            >>> errors.new("agent: unknown AgentSwarm member: " + cur)
+        }
+        mb := &s.members[idx]
+        ag := &mb.agent
+
+        $sys := "You are specialist agent '" + mb.name + "'."
+        if mb.description.len > 0 { sys = sys + " Role: " + mb.description }
+        if ag.system_prompt.len > 0 { sys = sys + "\n" + ag.system_prompt }
+        if ag.skills.len > 0 {
+            $sk_txt := ""
+            if ag.progressive_skills {
+                sk_txt = format_skills_catalog(&ag.skills)
+            } else {
+                sk_txt = format_skills_prompt(&ag.skills, &user_prompt)
+            }
+            if sk_txt.len > 0 { sys = sys + "\n\n" + sk_txt }
+        }
+        sys = sys + "\n\n" + roster
+
+        $req_msgs := [openai.message("system", sys)]
+        for mi in 0:shared_msgs.len {
+            req_msgs.push(copy_message(&shared_msgs[mi]))
+        }
+        if ag.context_max_tokens > 0 {
+            req_msgs = compact_messages(&req_msgs, ag.context_max_tokens, 6)
+        }
+        $req := openai.chat_request(ag.model + "", ~req_msgs)
+        empty_mcp := []mcp.ToolInfo{}
+        req.tools = build_tool_defs_ex(&ag.local_tools, &empty_mcp, ag.progressive_skills && ag.skills.len > 0)
+        req.tools.push(openai.tool("transfer_to_agent", "Delegate control and conversation context to another specialist agent in the swarm.", "{\"type\":\"object\",\"properties\":{\"agent\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"}},\"required\":[\"agent\"]}"))
+        if ag.has_temperature {
+            req.temperature = ag.temperature
+            req.has_temperature = true
+        }
+        if ag.max_tokens > 0 {
+            req.max_tokens = ag.max_tokens
+        }
+        turn_t0 := time.now()
+        resp := ag.client.chat(&req) >>>
+        turn_ms := time.since(turn_t0) / 1000000
+        turns += 1
+        tt += resp.usage.total_tokens
+        if ag.has_trace_hook {
+            th := ag.trace_hook
+            th(TraceSpan{
+                trace_id: trace_id + "", kind: "llm_turn", name: cur + "/" + ag.model,
+                turn: turns, duration_ms: turn_ms, tokens: resp.usage.total_tokens,
+                is_error: false, detail: resp.finish_reason + ""
+            })
+        }
+        if ag.max_total_tokens > 0 && tt > ag.max_total_tokens {
+            >>> errors.new("agent swarm: token budget exceeded")
+        }
+
+        if resp.tool_calls.len == 0 {
+            out_txt := strings.trim_space(&resp.content)
+            hd := parse_handoff_directive(&out_txt)
+            if hd.len == 2 && find_swarm_member_idx(&s.members, &hd[0]) >= 0 && handoffs < limit {
+                handoffs += 1
+                steps.push(Step{turn: turns, tool_name: "transfer_to_agent", arguments_json: "{\"agent\":" + json.quote(&hd[0]) + "}", output: "transferred to " + hd[0], is_error: false})
+                shared_msgs.push(openai.message("assistant", "[" + cur + " handed off to " + hd[0] + "] " + hd[1]))
+                cur = hd[0] + ""
+                trace.push(cur + "")
+                ->
+            }
+            $fin := resp.content + ""
+            if ag.has_guardrails {
+                g_out := guardrails.check_output(&ag.guard_policy, &fin)
+                if !g_out.allowed {
+                    >>> errors.new("agent swarm guardrails output blocked: " + g_out.reason)
+                }
+                fin = g_out.sanitized_text + ""
+            }
+            final_content = fin
+            <-
+        }
+
+        shared_msgs.push(openai.Message{
+            role: "assistant",
+            content: resp.content + "",
+            parts: []openai.ContentPart{},
+            tool_call_id: "",
+            tool_calls: copy_tool_calls(&resp.tool_calls)
+        })
+
+        $non_xfer := []ToolExecSpec{}
+        $non_xfer_pos := []int{}
+        for ti in 0:resp.tool_calls.len {
+            tc := &resp.tool_calls[ti]
+            if tc.name != "transfer_to_agent" {
+                non_xfer.push(ToolExecSpec{name: tc.name + "", arguments: tc.arguments + ""})
+                non_xfer_pos.push(ti)
+            }
+        }
+        $dummy_http := mcp.new_http_client("http://127.0.0.1:0")
+        $dummy_stdio := mcp.closed_stdio_client()
+        $non_xfer_res := []ToolExecItem{}
+        $tool_ms := 0
+        if non_xfer.len > 0 {
+            tool_t0 := time.now()
+            non_xfer_res = execute_agent_tools(&ag.local_tools, &non_xfer, ag.parallel_tools, false, $&dummy_http, false, $&dummy_stdio, ag.tool_hook, ag.has_approval_hook, ag.approval_hook, &ag.skills, ag.progressive_skills)
+            tool_ms = time.since(tool_t0) / 1000000
+        }
+
+        $next_member := ""
+        $nx_i := 0
+        for ti in 0:resp.tool_calls.len {
+            tc := &resp.tool_calls[ti]
+            if tc.name == "transfer_to_agent" {
+                doc := json.parse(&tc.arguments)
+                $tgt := ""
+                $reason := ""
+                if doc.ok() && doc.is_dict(doc.root()) {
+                    tgt = ck_str_or(&doc, doc.root(), "agent", "")
+                    reason = ck_str_or(&doc, doc.root(), "reason", "")
+                }
+                $tout := ""
+                $terr := false
+                if tgt.len == 0 || find_swarm_member_idx(&s.members, &tgt) < 0 {
+                    tout = "unknown swarm agent: " + tgt
+                    terr = true
+                } else if handoffs >= limit {
+                    tout = "handoff limit reached"
+                    terr = true
+                } else {
+                    next_member = tgt + ""
+                    tout = "transferred from " + cur + " to " + tgt
+                    if reason.len > 0 { tout = tout + " (" + reason + ")" }
+                }
+                steps.push(Step{turn: turns, tool_name: tc.name + "", arguments_json: tc.arguments + "", output: tout + "", is_error: terr})
+                shared_msgs.push(openai.tool_message(tc.id + "", tout + ""))
+            } else {
+                res := &non_xfer_res[nx_i]
+                nx_i += 1
+                $tout := res.output + ""
+                $terr := res.is_error
+                if ag.has_guardrails {
+                    g_tool := guardrails.check_tool_output(&ag.guard_policy, &tc.name, &tout)
+                    if !g_tool.allowed {
+                        tout = "blocked by guardrails: " + g_tool.reason
+                        terr = true
+                    } else {
+                        tout = g_tool.sanitized_text + ""
+                    }
+                }
+                if ag.max_tool_output_chars > 0 && tout.len > ag.max_tool_output_chars {
+                    tout = tout[0:ag.max_tool_output_chars] + "\n...[truncated]"
+                }
+                if ag.has_trace_hook {
+                    th := ag.trace_hook
+                    th(TraceSpan{
+                        trace_id: trace_id + "", kind: "tool_call", name: tc.name + "",
+                        turn: turns, duration_ms: tool_ms, tokens: 0,
+                        is_error: terr, detail: tout[0:mini_int(tout.len, 64)]
+                    })
+                }
+                steps.push(Step{turn: turns, tool_name: tc.name + "", arguments_json: tc.arguments + "", output: tout + "", is_error: terr})
+                shared_msgs.push(openai.tool_message(tc.id + "", tout + ""))
+            }
+        }
+        if next_member.len > 0 {
+            handoffs += 1
+            cur = next_member
+            trace.push(cur + "")
+        }
+    }
+
+    << SwarmResult{
+        final_agent: cur,
+        content: final_content,
+        route_trace: ~trace,
+        handoffs: handoffs,
+        turns: turns,
+        steps: ~steps,
+        total_tokens: tt
+    }
+}
+

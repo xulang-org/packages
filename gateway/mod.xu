@@ -1,16 +1,27 @@
 @"github.com/xulang-org/packages/gateway"
 
+#encoding/json
 #errors
+#strconv
 #tensor
-openai #github.com/xulang-org/packages/openai
+#time
+openai #"github.com/xulang-org/packages/openai"
+anthropic #"github.com/xulang-org/packages/anthropic"
+gemini #"github.com/xulang-org/packages/gemini"
 
 pub struct ProviderRoute {
     pub name string
+    pub provider string
     pub client openai.Client
+    anthropic_client anthropic.Client
+    gemini_client gemini.Client
     pub model string
     pub input_cost_per_1m f64
     pub output_cost_per_1m f64
     pub enabled bool
+    pub weight int
+    pub consecutive_failures int
+    pub circuit_open_until_ms int
 }
 
 pub struct SemanticCacheEntry {
@@ -36,16 +47,29 @@ pub struct Gateway {
     cache_enabled bool
     cache_threshold f64
     cache_max_entries int
+    fail_threshold int
+    cooldown_ms int
+    rate_limit_rpm int
+    window_start_ms int
+    window_requests int
+    rr_cursor int
     stats GatewayStats
 }
 
 pub fn new_gateway() Gateway {
+    now_ms := time.now_time().unix_milli()
     << Gateway{
         routes: []ProviderRoute{},
         cache: []SemanticCacheEntry{},
         cache_enabled: false,
         cache_threshold: 0.92,
         cache_max_entries: 128,
+        fail_threshold: 0,
+        cooldown_ms: 0,
+        rate_limit_rpm: 0,
+        window_start_ms: now_ms,
+        window_requests: 0,
+        rr_cursor: 0,
         stats: GatewayStats{
             total_requests: 0,
             cache_hits: 0,
@@ -62,12 +86,96 @@ pub fn (g $&Gateway) add_route(name string, client openai.Client, model string,
                                input_cost_per_1m f64, output_cost_per_1m f64) {
     g.routes.push(ProviderRoute{
         name: name,
+        provider: "openai",
         client: ~client,
+        anthropic_client: anthropic.new_client(""),
+        gemini_client: gemini.new_client(""),
         model: model,
         input_cost_per_1m: input_cost_per_1m,
         output_cost_per_1m: output_cost_per_1m,
-        enabled: true
+        enabled: true,
+        weight: 1,
+        consecutive_failures: 0,
+        circuit_open_until_ms: 0
     })
+}
+
+pub fn (g $&Gateway) add_weighted_route(name string, client openai.Client, model string,
+                                        input_cost_per_1m f64, output_cost_per_1m f64, weight int) {
+    $w := weight
+    if w <= 0 { w = 1 }
+    g.routes.push(ProviderRoute{
+        name: name,
+        provider: "openai",
+        client: ~client,
+        anthropic_client: anthropic.new_client(""),
+        gemini_client: gemini.new_client(""),
+        model: model,
+        input_cost_per_1m: input_cost_per_1m,
+        output_cost_per_1m: output_cost_per_1m,
+        enabled: true,
+        weight: w,
+        consecutive_failures: 0,
+        circuit_open_until_ms: 0
+    })
+}
+
+pub fn (g $&Gateway) add_anthropic_route(name string, client anthropic.Client, model string,
+                                         input_cost_per_1m f64, output_cost_per_1m f64, weight int) {
+    $w := weight
+    if w <= 0 { w = 1 }
+    g.routes.push(ProviderRoute{
+        name: name,
+        provider: "anthropic",
+        client: openai.new_client("", ""),
+        anthropic_client: ~client,
+        gemini_client: gemini.new_client(""),
+        model: model,
+        input_cost_per_1m: input_cost_per_1m,
+        output_cost_per_1m: output_cost_per_1m,
+        enabled: true,
+        weight: w,
+        consecutive_failures: 0,
+        circuit_open_until_ms: 0
+    })
+}
+
+pub fn (g $&Gateway) add_gemini_route(name string, client gemini.Client, model string,
+                                      input_cost_per_1m f64, output_cost_per_1m f64, weight int) {
+    $w := weight
+    if w <= 0 { w = 1 }
+    g.routes.push(ProviderRoute{
+        name: name,
+        provider: "gemini",
+        client: openai.new_client("", ""),
+        anthropic_client: anthropic.new_client(""),
+        gemini_client: ~client,
+        model: model,
+        input_cost_per_1m: input_cost_per_1m,
+        output_cost_per_1m: output_cost_per_1m,
+        enabled: true,
+        weight: w,
+        consecutive_failures: 0,
+        circuit_open_until_ms: 0
+    })
+}
+
+pub fn (g $&Gateway) set_circuit_breaker(fail_threshold int, cooldown_ms int) {
+    g.fail_threshold = fail_threshold
+    g.cooldown_ms = cooldown_ms
+}
+
+pub fn (g $&Gateway) reset_circuits() {
+    for i in 0:g.routes.len {
+        g.routes[i].consecutive_failures = 0
+        g.routes[i].circuit_open_until_ms = 0
+    }
+}
+
+pub fn (g $&Gateway) set_rate_limit(requests_per_min int) {
+    g.rate_limit_rpm = requests_per_min
+    g.window_start_ms = time.now_time().unix_milli()
+    g.window_requests = 0
 }
 
 pub fn (g $&Gateway) enable_semantic_cache(threshold f64, max_entries int) {
@@ -147,45 +255,636 @@ struct RouteAttempt {
     resp openai.ChatResponse
 }
 
-fn try_route_chat(c &openai.Client, req &openai.ChatRequest) RouteAttempt {
-    resp := c.chat(req) >>> (err) {
-        << RouteAttempt{
-            ok: false,
-            err_msg: err.msg(),
-            resp: openai.ChatResponse{
-                id: "", model: "", content: "", reasoning_content: "", finish_reason: "",
-                tool_calls: []openai.ToolCall{},
-                usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+fn empty_gw_chat_resp() openai.ChatResponse {
+    << openai.ChatResponse{
+        id: "", model: "", content: "", reasoning_content: "", finish_reason: "",
+        tool_calls: []openai.ToolCall{},
+        usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+    }
+}
+
+fn openai_req_to_anthropic(req &openai.ChatRequest, model string) anthropic.MessagesRequest {
+    $sys := ""
+    $msgs := []anthropic.Message{}
+    for i in 0:req.messages.len {
+        m := &req.messages[i]
+        if m.role == "system" {
+            if sys.len > 0 { sys = sys + "\n" }
+            sys = sys + m.content
+        } else if m.role == "tool" {
+            msgs.push(anthropic.tool_result_message(m.tool_call_id + "", m.content + "", false))
+        } else if m.role == "assistant" && m.tool_calls.len > 0 {
+            $blocks := []anthropic.ContentBlock{}
+            if m.content.len > 0 { blocks.push(anthropic.text_block(m.content + "")) }
+            for ti in 0:m.tool_calls.len {
+                tc := &m.tool_calls[ti]
+                blocks.push(anthropic.ContentBlock{
+                    kind: "tool_use", text: "", thinking: "", id: tc.id + "", name: tc.name + "",
+                    input_json: tc.arguments + "", media_type: "", data: "", cache_control: ""
+                })
             }
+            msgs.push(anthropic.message_blocks("assistant", ~blocks))
+        } else {
+            $role := m.role + ""
+            if role != "assistant" { role = "user" }
+            msgs.push(anthropic.message(role, m.content + ""))
         }
     }
+    $mt := req.max_tokens
+    if mt <= 0 { mt = req.max_completion_tokens }
+    if mt <= 0 { mt = 1024 }
+    $out := anthropic.messages_request(model + "", ~msgs, mt)
+    out.system = sys
+    if req.has_temperature {
+        out.temperature = req.temperature
+        out.has_temperature = true
+    }
+    if req.has_top_p {
+        out.top_p = req.top_p
+        out.has_top_p = true
+    }
+    for i in 0:req.stop.len { out.stop_sequences.push(req.stop[i] + "") }
+    for i in 0:req.tools.len {
+        t := &req.tools[i]
+        out.tools.push(anthropic.tool(t.name + "", t.description + "", t.parameters_json + ""))
+    }
+    << out
+}
+
+fn anthropic_resp_to_openai(r &anthropic.MessagesResponse, model_fallback string) openai.ChatResponse {
+    $tcs := []openai.ToolCall{}
+    for i in 0:r.tool_uses.len {
+        tu := &r.tool_uses[i]
+        tcs.push(openai.ToolCall{id: tu.id + "", kind: "function", name: tu.name + "", arguments: tu.input_json + ""})
+    }
+    $m := r.model + ""
+    if m.len == 0 { m = model_fallback + "" }
+    pt := r.usage.input_tokens
+    ct := r.usage.output_tokens
+    << openai.ChatResponse{
+        id: r.id + "",
+        model: m,
+        content: r.content + "",
+        reasoning_content: r.thinking + "",
+        finish_reason: r.stop_reason + "",
+        tool_calls: ~tcs,
+        usage: openai.Usage{prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct}
+    }
+}
+
+fn openai_req_to_gemini(req &openai.ChatRequest, model string) gemini.GenerateRequest {
+    $sys := ""
+    $contents := []gemini.Content{}
+    for i in 0:req.messages.len {
+        m := &req.messages[i]
+        if m.role == "system" {
+            if sys.len > 0 { sys = sys + "\n" }
+            sys = sys + m.content
+        } else if m.role == "tool" {
+            resp_json := "{\"result\":" + json.quote(&m.content) + "}"
+            $parts := [gemini.function_response_part(m.tool_call_id + "", resp_json)]
+            contents.push(gemini.content("user", ~parts))
+        } else if m.role == "assistant" && m.tool_calls.len > 0 {
+            $parts := []gemini.Part{}
+            if m.content.len > 0 { parts.push(gemini.text_part(m.content + "")) }
+            for ti in 0:m.tool_calls.len {
+                tc := &m.tool_calls[ti]
+                parts.push(gemini.function_call_part(tc.name + "", tc.arguments + ""))
+            }
+            contents.push(gemini.content("model", ~parts))
+        } else if m.role == "assistant" {
+            contents.push(gemini.model_text(m.content + ""))
+        } else {
+            contents.push(gemini.user_text(m.content + ""))
+        }
+    }
+    $out := gemini.generate_request(model + "", ~contents)
+    out.system_instruction = sys
+    if req.has_temperature {
+        out.temperature = req.temperature
+        out.has_temperature = true
+    }
+    if req.has_top_p {
+        out.top_p = req.top_p
+        out.has_top_p = true
+    }
+    $mt := req.max_tokens
+    if mt <= 0 { mt = req.max_completion_tokens }
+    if mt > 0 { out.max_output_tokens = mt }
+    for i in 0:req.stop.len { out.stop_sequences.push(req.stop[i] + "") }
+    for i in 0:req.tools.len {
+        t := &req.tools[i]
+        out.tools.push(gemini.function_decl(t.name + "", t.description + "", t.parameters_json + ""))
+    }
+    << out
+}
+
+fn gemini_resp_to_openai(r &gemini.GenerateResponse, model string) openai.ChatResponse {
+    $tcs := []openai.ToolCall{}
+    for i in 0:r.function_calls.len {
+        fc := &r.function_calls[i]
+        tcs.push(openai.ToolCall{id: "gem_tc_" + str(i), kind: "function", name: fc.name + "", arguments: fc.args_json + ""})
+    }
+    pt := r.usage.prompt_token_count
+    ct := r.usage.candidates_token_count
+    $tt := r.usage.total_token_count
+    if tt <= 0 { tt = pt + ct }
+    << openai.ChatResponse{
+        id: "gem-gw",
+        model: model + "",
+        content: r.text + "",
+        reasoning_content: r.thoughts + "",
+        finish_reason: r.finish_reason + "",
+        tool_calls: ~tcs,
+        usage: openai.Usage{prompt_tokens: pt, completion_tokens: ct, total_tokens: tt}
+    }
+}
+
+fn try_route_dispatch(rt &ProviderRoute, req &openai.ChatRequest) RouteAttempt {
+    if rt.provider == "anthropic" {
+        areq := openai_req_to_anthropic(req, rt.model + "")
+        ares := rt.anthropic_client.messages(&areq) >>> (err) {
+            << RouteAttempt{ok: false, err_msg: err.msg(), resp: empty_gw_chat_resp()}
+        }
+        << RouteAttempt{ok: true, err_msg: "", resp: anthropic_resp_to_openai(&ares, rt.model + "")}
+    }
+    if rt.provider == "gemini" {
+        greq := openai_req_to_gemini(req, rt.model + "")
+        gres := rt.gemini_client.generate(&greq) >>> (err) {
+            << RouteAttempt{ok: false, err_msg: err.msg(), resp: empty_gw_chat_resp()}
+        }
+        << RouteAttempt{ok: true, err_msg: "", resp: gemini_resp_to_openai(&gres, rt.model + "")}
+    }
+    r_req := clone_gw_request(req, rt.model + "")
+    resp := rt.client.chat(&r_req) >>> (err) {
+        << RouteAttempt{ok: false, err_msg: err.msg(), resp: empty_gw_chat_resp()}
+    }
     << RouteAttempt{ok: true, err_msg: "", resp: ~resp}
+}
+
+fn check_gw_rate_limit(g $&Gateway, now_ms int) int {
+    if g.rate_limit_rpm <= 0 { << 0 }
+    if now_ms - g.window_start_ms >= 60000 {
+        g.window_start_ms = now_ms
+        g.window_requests = 0
+    }
+    if g.window_requests >= g.rate_limit_rpm {
+        g.stats.failed_requests += 1
+        >>> errors.new("gateway: rate limit exceeded")
+    }
+    g.window_requests += 1
+    << 0
+}
+
+fn try_route_at(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, tried $&int, last_err $&string) RouteAttempt {
+    rt := $&g.routes[i]
+    if !rt.enabled {
+        << RouteAttempt{ok: false, err_msg: "disabled", resp: openai.ChatResponse{id: "", model: "", content: "", reasoning_content: "", finish_reason: "", tool_calls: []openai.ToolCall{}, usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}}}
+    }
+    if rt.circuit_open_until_ms > now_ms {
+        *last_err = rt.name + ": circuit open"
+        << RouteAttempt{ok: false, err_msg: "circuit open", resp: openai.ChatResponse{id: "", model: "", content: "", reasoning_content: "", finish_reason: "", tool_calls: []openai.ToolCall{}, usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}}}
+    }
+    if *tried > 0 { g.stats.fallbacks += 1 }
+    *tried += 1
+    att := try_route_dispatch(rt, req)
+    if att.ok {
+        rt.consecutive_failures = 0
+        rt.circuit_open_until_ms = 0
+        g.stats.total_prompt_tokens += att.resp.usage.prompt_tokens
+        g.stats.total_completion_tokens += att.resp.usage.completion_tokens
+        g.stats.estimated_cost_usd += g.estimate_cost_usd(i, att.resp.usage.prompt_tokens, att.resp.usage.completion_tokens)
+        << att
+    }
+    rt.consecutive_failures += 1
+    if g.fail_threshold > 0 && rt.consecutive_failures >= g.fail_threshold {
+        $cd := g.cooldown_ms
+        if cd <= 0 { cd = 30000 }
+        rt.circuit_open_until_ms = now_ms + cd
+    }
+    *last_err = rt.name + ": " + att.err_msg
+    << att
 }
 
 pub fn (g $&Gateway) chat_with_fallback(req &openai.ChatRequest) openai.ChatResponse {
     if g.routes.len == 0 {
         >>> errors.new("gateway: no provider routes configured")
     }
+    now_ms := time.now_time().unix_milli()
+    _ := check_gw_rate_limit(g, now_ms) >>>
     g.stats.total_requests += 1
     $last_err := "gateway: all routes failed"
     $tried := 0
     for i in 0:g.routes.len {
-        rt := &g.routes[i]
-        if !rt.enabled { -> }
-        if tried > 0 { g.stats.fallbacks += 1 }
-        tried += 1
-        r_req := clone_gw_request(req, rt.model + "")
-        att := try_route_chat(&rt.client, &r_req)
-        if att.ok {
-            g.stats.total_prompt_tokens += att.resp.usage.prompt_tokens
-            g.stats.total_completion_tokens += att.resp.usage.completion_tokens
-            g.stats.estimated_cost_usd += g.estimate_cost_usd(i, att.resp.usage.prompt_tokens, att.resp.usage.completion_tokens)
-            << ~att.resp
-        }
-        last_err = rt.name + ": " + att.err_msg
+        att := try_route_at(g, req, i, now_ms, $&tried, $&last_err)
+        if att.ok { << ~att.resp }
     }
     g.stats.failed_requests += 1
     >>> errors.new(last_err)
+}
+
+pub fn (g $&Gateway) chat_weighted(req &openai.ChatRequest) openai.ChatResponse {
+    if g.routes.len == 0 {
+        >>> errors.new("gateway: no provider routes configured")
+    }
+    now_ms := time.now_time().unix_milli()
+    _ := check_gw_rate_limit(g, now_ms) >>>
+    g.stats.total_requests += 1
+
+    $total_w := 0
+    for i in 0:g.routes.len {
+        rt := &g.routes[i]
+        if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+            $w := rt.weight
+            if w <= 0 { w = 1 }
+            total_w += w
+        }
+    }
+    $start := 0
+    if total_w > 0 {
+        slot := g.rr_cursor % total_w
+        g.rr_cursor += 1
+        $acc := 0
+        for i in 0:g.routes.len {
+            rt := &g.routes[i]
+            if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+                $w := rt.weight
+                if w <= 0 { w = 1 }
+                acc += w
+                if slot < acc {
+                    start = i
+                    <-
+                }
+            }
+        }
+    }
+
+    $last_err := "gateway: all routes failed"
+    $tried := 0
+    for off in 0:g.routes.len {
+        idx := (start + off) % g.routes.len
+        att := try_route_at(g, req, idx, now_ms, $&tried, $&last_err)
+        if att.ok { << ~att.resp }
+    }
+    g.stats.failed_requests += 1
+    >>> errors.new(last_err)
+}
+
+struct GwAnthStreamOutcome {
+    ok bool
+    err_msg string
+    resp anthropic.MessagesResponse
+}
+
+fn empty_gw_anth_resp() anthropic.MessagesResponse {
+    << anthropic.MessagesResponse{
+        id: "", model: "", role: "assistant", stop_reason: "", content: "", thinking: "",
+        tool_uses: []anthropic.ToolUse{}, blocks: []anthropic.ContentBlock{},
+        usage: anthropic.Usage{input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0}
+    }
+}
+
+fn gw_anth_stream_worker(c anthropic.Client, req anthropic.MessagesRequest,
+                         ech chan anthropic.StreamEvent, rch chan GwAnthStreamOutcome) {
+    resp := c.messages_stream_chan(&req, ech) >>> (err) {
+        ech <- anthropic.StreamEvent{
+            event_type: "message_stop", text_delta: "", thinking_delta: "", stop_reason: "",
+            tool_use: anthropic.ToolUse{id: "", name: "", input_json: ""}, has_tool_use: false,
+            usage: anthropic.Usage{input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0},
+            done: true
+        }
+        rch <- GwAnthStreamOutcome{ok: false, err_msg: err.msg(), resp: empty_gw_anth_resp()}
+        <<
+    }
+    rch <- GwAnthStreamOutcome{ok: true, err_msg: "", resp: ~resp}
+}
+
+struct GwGemStreamOutcome {
+    ok bool
+    err_msg string
+    resp gemini.GenerateResponse
+}
+
+fn empty_gw_gem_resp() gemini.GenerateResponse {
+    << gemini.GenerateResponse{
+        text: "", thoughts: "", function_calls: []gemini.FunctionCall{}, finish_reason: "",
+        usage: gemini.Usage{prompt_token_count: 0, candidates_token_count: 0, total_token_count: 0, thoughts_token_count: 0}
+    }
+}
+
+fn gw_gem_stream_worker(c gemini.Client, req gemini.GenerateRequest,
+                        ech chan gemini.StreamChunk, rch chan GwGemStreamOutcome) {
+    resp := c.generate_stream_chan(&req, ech) >>> (err) {
+        ech <- gemini.StreamChunk{
+            text_delta: "", thought_delta: "", function_calls: []gemini.FunctionCall{}, finish_reason: "",
+            usage: gemini.Usage{prompt_token_count: 0, candidates_token_count: 0, total_token_count: 0, thoughts_token_count: 0},
+            done: true
+        }
+        rch <- GwGemStreamOutcome{ok: false, err_msg: err.msg(), resp: empty_gw_gem_resp()}
+        <<
+    }
+    rch <- GwGemStreamOutcome{ok: true, err_msg: "", resp: ~resp}
+}
+
+struct GwOpenaiStreamOutcome {
+    ok bool
+    err_msg string
+    resp openai.ChatResponse
+}
+
+fn gw_openai_stream_worker(c openai.Client, req openai.ChatRequest,
+                           dch chan openai.StreamDelta, rch chan GwOpenaiStreamOutcome) {
+    resp := c.chat_stream_chan(&req, dch) >>> (err) {
+        dch <- openai.StreamDelta{
+            content: "", reasoning_content: "", finish_reason: "",
+            tool_calls: []openai.ToolCall{}, has_usage: false,
+            usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}, done: true
+        }
+        rch <- GwOpenaiStreamOutcome{ok: false, err_msg: err.msg(), resp: empty_gw_chat_resp()}
+        <<
+    }
+    rch <- GwOpenaiStreamOutcome{ok: true, err_msg: "", resp: ~resp}
+}
+
+fn record_route_failure(g &Gateway, rt $&ProviderRoute, now_ms int, err_msg string, last_err $&string) {
+    rt.consecutive_failures += 1
+    if g.fail_threshold > 0 && rt.consecutive_failures >= g.fail_threshold {
+        $cd := g.cooldown_ms
+        if cd <= 0 { cd = 30000 }
+        rt.circuit_open_until_ms = now_ms + cd
+    }
+    *last_err = rt.name + ": " + err_msg
+}
+
+fn emit_gw_delta(sd openai.StreamDelta, use_cb bool, on_delta fn(openai.StreamDelta) bool,
+                 has_ch bool, delta_ch chan openai.StreamDelta, stopped_by_cb $&bool) {
+    if has_ch {
+        $tcs := []openai.ToolCall{}
+        for i in 0:sd.tool_calls.len {
+            tc := &sd.tool_calls[i]
+            tcs.push(openai.ToolCall{id: tc.id + "", kind: tc.kind + "", name: tc.name + "", arguments: tc.arguments + ""})
+        }
+        delta_ch <- openai.StreamDelta{
+            content: sd.content + "", reasoning_content: sd.reasoning_content + "",
+            finish_reason: sd.finish_reason + "", tool_calls: ~tcs,
+            has_usage: sd.has_usage, usage: sd.usage, done: sd.done
+        }
+    }
+    if use_cb && !*stopped_by_cb {
+        $tcs_cb := []openai.ToolCall{}
+        for i in 0:sd.tool_calls.len {
+            tc := &sd.tool_calls[i]
+            tcs_cb.push(openai.ToolCall{id: tc.id + "", kind: tc.kind + "", name: tc.name + "", arguments: tc.arguments + ""})
+        }
+        sd_cb := openai.StreamDelta{
+            content: sd.content + "", reasoning_content: sd.reasoning_content + "",
+            finish_reason: sd.finish_reason + "", tool_calls: ~tcs_cb,
+            has_usage: sd.has_usage, usage: sd.usage, done: sd.done
+        }
+        if !on_delta(sd_cb) { *stopped_by_cb = true }
+    }
+}
+
+fn ignore_gw_delta(d openai.StreamDelta) bool {
+    _ := d
+    << true
+}
+
+fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, tried $&int, last_err $&string,
+                      use_cb bool, on_delta fn(openai.StreamDelta) bool, has_ch bool, delta_ch chan openai.StreamDelta,
+                      emitted_out $&bool) RouteAttempt {
+    rt := $&g.routes[i]
+    *emitted_out = false
+    if !rt.enabled {
+        << RouteAttempt{ok: false, err_msg: "disabled", resp: empty_gw_chat_resp()}
+    }
+    if rt.circuit_open_until_ms > now_ms {
+        *last_err = rt.name + ": circuit open"
+        << RouteAttempt{ok: false, err_msg: "circuit open", resp: empty_gw_chat_resp()}
+    }
+    if *tried > 0 { g.stats.fallbacks += 1 }
+    *tried += 1
+
+    if rt.provider == "anthropic" {
+        areq := openai_req_to_anthropic(req, rt.model + "")
+        c_copy := rt.anthropic_client.clone_client()
+        ech := chan anthropic.StreamEvent{cap: 64}
+        rch := chan GwAnthStreamOutcome{cap: 1}
+        xu gw_anth_stream_worker(~c_copy, ~areq, ech, rch)
+        $stopped_by_cb := false
+        for {
+            ev := <-ech
+            if ev.done { <- }
+            if !stopped_by_cb && (ev.text_delta.len > 0 || ev.thinking_delta.len > 0 || ev.has_tool_use) {
+                $tcs := []openai.ToolCall{}
+                if ev.has_tool_use {
+                    tcs.push(openai.ToolCall{id: ev.tool_use.id + "", kind: "function", name: ev.tool_use.name + "", arguments: ev.tool_use.input_json + ""})
+                }
+                *emitted_out = true
+                emit_gw_delta(openai.StreamDelta{
+                    content: ev.text_delta + "", reasoning_content: ev.thinking_delta + "",
+                    finish_reason: ev.stop_reason + "", tool_calls: ~tcs, has_usage: false,
+                    usage: openai.Usage{prompt_tokens: ev.usage.input_tokens, completion_tokens: ev.usage.output_tokens, total_tokens: ev.usage.input_tokens + ev.usage.output_tokens},
+                    done: false
+                }, use_cb, on_delta, has_ch, delta_ch, $&stopped_by_cb)
+            }
+        }
+        outc := <-rch
+        if outc.ok {
+            resp := anthropic_resp_to_openai(&outc.resp, rt.model + "")
+            rt.consecutive_failures = 0
+            rt.circuit_open_until_ms = 0
+            g.stats.total_prompt_tokens += resp.usage.prompt_tokens
+            g.stats.total_completion_tokens += resp.usage.completion_tokens
+            g.stats.estimated_cost_usd += g.estimate_cost_usd(i, resp.usage.prompt_tokens, resp.usage.completion_tokens)
+            emit_gw_delta(openai.StreamDelta{
+                content: "", reasoning_content: "", finish_reason: resp.finish_reason + "",
+                tool_calls: []openai.ToolCall{}, has_usage: true, usage: resp.usage, done: true
+            }, use_cb, on_delta, has_ch, delta_ch, $&stopped_by_cb)
+            << RouteAttempt{ok: true, err_msg: "", resp: ~resp}
+        }
+        record_route_failure(g, rt, now_ms, outc.err_msg + "", last_err)
+        << RouteAttempt{ok: false, err_msg: outc.err_msg + "", resp: empty_gw_chat_resp()}
+    }
+
+    if rt.provider == "gemini" {
+        greq := openai_req_to_gemini(req, rt.model + "")
+        c_copy := rt.gemini_client.clone_client()
+        ech := chan gemini.StreamChunk{cap: 64}
+        rch := chan GwGemStreamOutcome{cap: 1}
+        xu gw_gem_stream_worker(~c_copy, ~greq, ech, rch)
+        $stopped_by_cb := false
+        for {
+            ev := <-ech
+            if ev.done { <- }
+            if !stopped_by_cb && (ev.text_delta.len > 0 || ev.thought_delta.len > 0 || ev.function_calls.len > 0 || ev.finish_reason.len > 0) {
+                $tcs := []openai.ToolCall{}
+                for fi in 0:ev.function_calls.len {
+                    fc := &ev.function_calls[fi]
+                    tcs.push(openai.ToolCall{id: "gem_tc_" + str(fi), kind: "function", name: fc.name + "", arguments: fc.args_json + ""})
+                }
+                *emitted_out = true
+                pt := ev.usage.prompt_token_count
+                ct := ev.usage.candidates_token_count
+                emit_gw_delta(openai.StreamDelta{
+                    content: ev.text_delta + "", reasoning_content: ev.thought_delta + "",
+                    finish_reason: ev.finish_reason + "", tool_calls: ~tcs, has_usage: false,
+                    usage: openai.Usage{prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct},
+                    done: false
+                }, use_cb, on_delta, has_ch, delta_ch, $&stopped_by_cb)
+            }
+        }
+        outc := <-rch
+        if outc.ok {
+            resp := gemini_resp_to_openai(&outc.resp, rt.model + "")
+            rt.consecutive_failures = 0
+            rt.circuit_open_until_ms = 0
+            g.stats.total_prompt_tokens += resp.usage.prompt_tokens
+            g.stats.total_completion_tokens += resp.usage.completion_tokens
+            g.stats.estimated_cost_usd += g.estimate_cost_usd(i, resp.usage.prompt_tokens, resp.usage.completion_tokens)
+            emit_gw_delta(openai.StreamDelta{
+                content: "", reasoning_content: "", finish_reason: resp.finish_reason + "",
+                tool_calls: []openai.ToolCall{}, has_usage: true, usage: resp.usage, done: true
+            }, use_cb, on_delta, has_ch, delta_ch, $&stopped_by_cb)
+            << RouteAttempt{ok: true, err_msg: "", resp: ~resp}
+        }
+        record_route_failure(g, rt, now_ms, outc.err_msg + "", last_err)
+        << RouteAttempt{ok: false, err_msg: outc.err_msg + "", resp: empty_gw_chat_resp()}
+    }
+
+    r_req := clone_gw_request(req, rt.model + "")
+    c_copy := rt.client.clone_client()
+    dch := chan openai.StreamDelta{cap: 64}
+    rch := chan GwOpenaiStreamOutcome{cap: 1}
+    xu gw_openai_stream_worker(~c_copy, ~r_req, dch, rch)
+    $stopped_by_cb := false
+    for {
+        ev := <-dch
+        if ev.done { <- }
+        if !stopped_by_cb && (ev.content.len > 0 || ev.reasoning_content.len > 0 || ev.tool_calls.len > 0 || ev.finish_reason.len > 0) {
+            *emitted_out = true
+            $tcs_ev := []openai.ToolCall{}
+            for ti in 0:ev.tool_calls.len {
+                tc := &ev.tool_calls[ti]
+                tcs_ev.push(openai.ToolCall{id: tc.id + "", kind: tc.kind + "", name: tc.name + "", arguments: tc.arguments + ""})
+            }
+            sd_ev := openai.StreamDelta{
+                content: ev.content + "", reasoning_content: ev.reasoning_content + "",
+                finish_reason: ev.finish_reason + "", tool_calls: ~tcs_ev,
+                has_usage: ev.has_usage, usage: ev.usage, done: ev.done
+            }
+            emit_gw_delta(sd_ev, use_cb, on_delta, has_ch, delta_ch, $&stopped_by_cb)
+        }
+    }
+    outc := <-rch
+    if outc.ok {
+        rt.consecutive_failures = 0
+        rt.circuit_open_until_ms = 0
+        g.stats.total_prompt_tokens += outc.resp.usage.prompt_tokens
+        g.stats.total_completion_tokens += outc.resp.usage.completion_tokens
+        g.stats.estimated_cost_usd += g.estimate_cost_usd(i, outc.resp.usage.prompt_tokens, outc.resp.usage.completion_tokens)
+        emit_gw_delta(openai.StreamDelta{
+            content: "", reasoning_content: "", finish_reason: outc.resp.finish_reason + "",
+            tool_calls: []openai.ToolCall{}, has_usage: true, usage: outc.resp.usage, done: true
+        }, use_cb, on_delta, has_ch, delta_ch, $&stopped_by_cb)
+        << RouteAttempt{ok: true, err_msg: "", resp: ~outc.resp}
+    }
+    record_route_failure(g, rt, now_ms, outc.err_msg + "", last_err)
+    << RouteAttempt{ok: false, err_msg: outc.err_msg + "", resp: empty_gw_chat_resp()}
+}
+
+fn chat_stream_fallback_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, on_delta fn(openai.StreamDelta) bool,
+                             has_ch bool, delta_ch chan openai.StreamDelta) openai.ChatResponse {
+    if g.routes.len == 0 {
+        >>> errors.new("gateway: no provider routes configured")
+    }
+    now_ms := time.now_time().unix_milli()
+    _ := check_gw_rate_limit(g, now_ms) >>>
+    g.stats.total_requests += 1
+    $last_err := "gateway: all routes failed"
+    $tried := 0
+    for i in 0:g.routes.len {
+        $emitted := false
+        att := stream_route_at_ex(g, req, i, now_ms, $&tried, $&last_err, use_cb, on_delta, has_ch, delta_ch, $&emitted)
+        if att.ok { << ~att.resp }
+        if emitted {
+            g.stats.failed_requests += 1
+            >>> errors.new(last_err)
+        }
+    }
+    g.stats.failed_requests += 1
+    >>> errors.new(last_err)
+}
+
+pub fn (g $&Gateway) chat_stream_with_fallback(req &openai.ChatRequest, on_delta fn(openai.StreamDelta) bool) openai.ChatResponse {
+    dummy_ch := chan openai.StreamDelta{cap: 1}
+    << chat_stream_fallback_impl(g, req, true, on_delta, false, dummy_ch) >>>
+}
+
+pub fn (g $&Gateway) chat_stream_chan_with_fallback(req &openai.ChatRequest, ch chan openai.StreamDelta) openai.ChatResponse {
+    << chat_stream_fallback_impl(g, req, false, ignore_gw_delta, true, ch) >>>
+}
+
+fn chat_stream_weighted_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, on_delta fn(openai.StreamDelta) bool,
+                             has_ch bool, delta_ch chan openai.StreamDelta) openai.ChatResponse {
+    if g.routes.len == 0 {
+        >>> errors.new("gateway: no provider routes configured")
+    }
+    now_ms := time.now_time().unix_milli()
+    _ := check_gw_rate_limit(g, now_ms) >>>
+    g.stats.total_requests += 1
+
+    $total_w := 0
+    for i in 0:g.routes.len {
+        rt := &g.routes[i]
+        if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+            $w := rt.weight
+            if w <= 0 { w = 1 }
+            total_w += w
+        }
+    }
+    $start := 0
+    if total_w > 0 {
+        slot := g.rr_cursor % total_w
+        g.rr_cursor += 1
+        $acc := 0
+        for i in 0:g.routes.len {
+            rt := &g.routes[i]
+            if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+                $w := rt.weight
+                if w <= 0 { w = 1 }
+                acc += w
+                if slot < acc {
+                    start = i
+                    <-
+                }
+            }
+        }
+    }
+
+    $last_err := "gateway: all routes failed"
+    $tried := 0
+    for off in 0:g.routes.len {
+        idx := (start + off) % g.routes.len
+        $emitted := false
+        att := stream_route_at_ex(g, req, idx, now_ms, $&tried, $&last_err, use_cb, on_delta, has_ch, delta_ch, $&emitted)
+        if att.ok { << ~att.resp }
+        if emitted {
+            g.stats.failed_requests += 1
+            >>> errors.new(last_err)
+        }
+    }
+    g.stats.failed_requests += 1
+    >>> errors.new(last_err)
+}
+
+pub fn (g $&Gateway) chat_stream_weighted(req &openai.ChatRequest, on_delta fn(openai.StreamDelta) bool) openai.ChatResponse {
+    dummy_ch := chan openai.StreamDelta{cap: 1}
+    << chat_stream_weighted_impl(g, req, true, on_delta, false, dummy_ch) >>>
+}
+
+pub fn (g $&Gateway) chat_stream_chan_weighted(req &openai.ChatRequest, ch chan openai.StreamDelta) openai.ChatResponse {
+    << chat_stream_weighted_impl(g, req, false, ignore_gw_delta, true, ch) >>>
 }
 
 fn copy_gw_f32(src &[]f32) []f32 {
@@ -253,4 +952,26 @@ pub fn (g $&Gateway) chat_cached(req &openai.ChatRequest, query_emb &[]f32) open
 
 pub fn (g &Gateway) get_stats() GatewayStats {
     << g.stats
+}
+
+fn gw_fmt_f64(v f64) string {
+    << strconv.format_float(v, 102, 6) >>> (_) { << "0.0" }
+}
+
+pub fn (g &Gateway) format_metrics_prometheus() string {
+    cost_s := gw_fmt_f64(g.stats.estimated_cost_usd)
+    << "# TYPE xu_gateway_requests_total counter\n" +
+       "xu_gateway_requests_total " + str(g.stats.total_requests) + "\n" +
+       "# TYPE xu_gateway_cache_hits_total counter\n" +
+       "xu_gateway_cache_hits_total " + str(g.stats.cache_hits) + "\n" +
+       "# TYPE xu_gateway_fallbacks_total counter\n" +
+       "xu_gateway_fallbacks_total " + str(g.stats.fallbacks) + "\n" +
+       "# TYPE xu_gateway_failed_total counter\n" +
+       "xu_gateway_failed_total " + str(g.stats.failed_requests) + "\n" +
+       "# TYPE xu_gateway_prompt_tokens_total counter\n" +
+       "xu_gateway_prompt_tokens_total " + str(g.stats.total_prompt_tokens) + "\n" +
+       "# TYPE xu_gateway_completion_tokens_total counter\n" +
+       "xu_gateway_completion_tokens_total " + str(g.stats.total_completion_tokens) + "\n" +
+       "# TYPE xu_gateway_estimated_cost_usd gauge\n" +
+       "xu_gateway_estimated_cost_usd " + cost_s + "\n"
 }

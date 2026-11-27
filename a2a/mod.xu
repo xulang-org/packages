@@ -27,16 +27,37 @@ pub struct TaskMessage {
     pub text string
 }
 
+pub struct TaskArtifact {
+    pub name string
+    pub mime_type string
+    pub text string
+}
+
 pub struct Task {
     pub id string
     pub state string
     pub history []TaskMessage
     pub output string
+    pub artifacts []TaskArtifact
+}
+
+pub struct StreamChunk {
+    pub text string
+    pub done bool
+}
+
+fn default_stream_handler(tid &string, inp &string, ch chan StreamChunk) string {
+    _ := tid
+    _ := inp
+    ch <- StreamChunk{text: "", done: true}
+    << ""
 }
 
 pub struct Server {
     pub card AgentCard
     handler fn(&string, &string) string
+    stream_handler fn(&string, &string, chan StreamChunk) string
+    has_stream_handler bool
     tasks []Task
     next_id int
 }
@@ -84,7 +105,7 @@ pub fn format_agent_card_json(c &AgentCard) string {
             ",\"description\":" + json.quote(&c.description) +
             ",\"url\":" + json.quote(&c.url) +
             ",\"version\":" + json.quote(&c.version) +
-            ",\"capabilities\":{\"streaming\":false,\"pushNotifications\":false}" +
+            ",\"capabilities\":{\"streaming\":true,\"pushNotifications\":false}" +
             ",\"skills\":["
     for i in 0:c.skills.len {
         if i > 0 { out = out + "," }
@@ -129,7 +150,19 @@ pub fn parse_agent_card_json(raw &string) AgentCard {
 }
 
 pub fn new_server(card AgentCard, handler fn(&string, &string) string) Server {
-    << Server{card: card, handler: handler, tasks: []Task{}, next_id: 1}
+    << Server{
+        card: card,
+        handler: handler,
+        stream_handler: default_stream_handler,
+        has_stream_handler: false,
+        tasks: []Task{},
+        next_id: 1
+    }
+}
+
+pub fn (s $&Server) set_stream_handler(handler fn(&string, &string, chan StreamChunk) string) {
+    s.stream_handler = handler
+    s.has_stream_handler = true
 }
 
 fn copy_history(src &[]TaskMessage) []TaskMessage {
@@ -142,12 +175,23 @@ fn copy_history(src &[]TaskMessage) []TaskMessage {
     << out
 }
 
+fn copy_artifacts(src &[]TaskArtifact) []TaskArtifact {
+    $out := []TaskArtifact{}
+    out.reserve(src.len)
+    for i in 0:src.len {
+        a := &src[i]
+        out.push(TaskArtifact{name: a.name + "", mime_type: a.mime_type + "", text: a.text + ""})
+    }
+    << out
+}
+
 fn copy_task(t &Task) Task {
     << Task{
         id: t.id + "",
         state: t.state + "",
         history: copy_history(&t.history),
-        output: t.output + ""
+        output: t.output + "",
+        artifacts: copy_artifacts(&t.artifacts)
     }
 }
 
@@ -161,8 +205,18 @@ fn task_to_json(t &Task) string {
     }
     hjson = hjson + "]"
     $arts := "[]"
-    if t.output.len > 0 {
-        arts = "[{\"parts\":[{\"type\":\"text\",\"text\":" + json.quote(&t.output) + "}]}]"
+    if t.artifacts.len > 0 {
+        $ab := "["
+        for i in 0:t.artifacts.len {
+            if i > 0 { ab = ab + "," }
+            a := &t.artifacts[i]
+            ab = ab + "{\"name\":" + json.quote(&a.name) +
+                 ",\"mimeType\":" + json.quote(&a.mime_type) +
+                 ",\"parts\":[{\"type\":\"text\",\"text\":" + json.quote(&a.text) + "}]}"
+        }
+        arts = ab + "]"
+    } else if t.output.len > 0 {
+        arts = "[{\"name\":\"result\",\"mimeType\":\"text/plain\",\"parts\":[{\"type\":\"text\",\"text\":" + json.quote(&t.output) + "}]}]"
     }
     << "{\"id\":" + json.quote(&t.id) +
        ",\"status\":{\"state\":" + json.quote(&t.state) + "}" +
@@ -182,17 +236,28 @@ fn parse_task_json(doc &json.Doc, obj int) Task {
     }
     if state.len == 0 { state = "unknown" }
     $output := json_str_or(doc, obj, "output", "")
-    if output.len == 0 && doc.has(obj, "artifacts") {
+    $arts := []TaskArtifact{}
+    if doc.has(obj, "artifacts") {
         an := doc_get_or(doc, obj, "artifacts")
-        if an >= 0 && doc.is_list(an) && doc.count(an) > 0 {
-            a0 := doc_at_or(doc, an, 0)
-            if a0 >= 0 && doc.is_dict(a0) && doc.has(a0, "parts") {
-                pn := doc_get_or(doc, a0, "parts")
-                if pn >= 0 && doc.is_list(pn) && doc.count(pn) > 0 {
-                    p0 := doc_at_or(doc, pn, 0)
-                    if p0 >= 0 && doc.is_dict(p0) {
-                        output = json_str_or(doc, p0, "text", "")
+        if an >= 0 && doc.is_list(an) {
+            acnt := doc.count(an)
+            for ai in 0:acnt {
+                aitem := doc_at_or(doc, an, ai)
+                if aitem >= 0 && doc.is_dict(aitem) {
+                    aname := json_str_or(doc, aitem, "name", "artifact")
+                    amime := json_str_or(doc, aitem, "mimeType", "text/plain")
+                    $atxt := ""
+                    if doc.has(aitem, "parts") {
+                        pn := doc_get_or(doc, aitem, "parts")
+                        if pn >= 0 && doc.is_list(pn) && doc.count(pn) > 0 {
+                            p0 := doc_at_or(doc, pn, 0)
+                            if p0 >= 0 && doc.is_dict(p0) {
+                                atxt = json_str_or(doc, p0, "text", "")
+                            }
+                        }
                     }
+                    if output.len == 0 && atxt.len > 0 { output = atxt + "" }
+                    arts.push(TaskArtifact{name: aname, mime_type: amime, text: atxt})
                 }
             }
         }
@@ -221,7 +286,7 @@ fn parse_task_json(doc &json.Doc, obj int) Task {
             }
         }
     }
-    << Task{id: tid, state: state, history: ~hist, output: output}
+    << Task{id: tid, state: state, history: ~hist, output: output, artifacts: ~arts}
 }
 
 fn rpc_ok(id_json &string, result_json &string) string {
@@ -286,7 +351,8 @@ pub fn (s $&Server) handle_rpc(body &string) string {
         $hist := []TaskMessage{}
         hist.push(TaskMessage{role: "user", text: inp + ""})
         hist.push(TaskMessage{role: "agent", text: out + ""})
-        t := Task{id: tid + "", state: "completed", history: ~hist, output: out + ""}
+        $arts := [TaskArtifact{name: "result", mime_type: "text/plain", text: out + ""}]
+        t := Task{id: tid + "", state: "completed", history: ~hist, output: out + "", artifacts: ~arts}
         $found := -1
         for i in 0:s.tasks.len {
             if s.tasks[i].id == tid {
@@ -365,43 +431,289 @@ fn write_http_raw(fd int, status_line string, extra_headers string, ctype string
     << conn_write_all_quiet(fd, &raw)
 }
 
+fn copy_agent_card(c &AgentCard) AgentCard {
+    $skills := []AgentSkill{}
+    for i in 0:c.skills.len {
+        sk := &c.skills[i]
+        skills.push(AgentSkill{id: sk.id + "", name: sk.name + "", description: sk.description + ""})
+    }
+    << AgentCard{
+        name: c.name + "",
+        description: c.description + "",
+        url: c.url + "",
+        version: c.version + "",
+        skills: ~skills
+    }
+}
+
+fn copy_tasks_slice(src &[]Task) []Task {
+    $out := []Task{}
+    out.reserve(src.len)
+    for i in 0:src.len { out.push(copy_task(&src[i])) }
+    << out
+}
+
+struct StoreState {
+    tasks []Task
+    next_id int
+}
+
+fn store_alloc_id(store_ch chan StoreState, req_tid string) string {
+    $st := <-store_ch
+    $tid := req_tid + ""
+    if tid.len == 0 {
+        tid = "task_" + str(st.next_id)
+        st.next_id += 1
+    }
+    store_ch <- st
+    << tid
+}
+
+fn store_upsert(store_ch chan StoreState, t Task) {
+    $st := <-store_ch
+    $found := -1
+    for i in 0:st.tasks.len {
+        if st.tasks[i].id == t.id {
+            found = i
+            <-
+        }
+    }
+    if found >= 0 {
+        st.tasks[found] = copy_task(&t)
+    } else {
+        st.tasks.push(copy_task(&t))
+    }
+    store_ch <- st
+}
+
+fn store_get_task(store_ch chan StoreState, tid &string, found_out $&bool) Task {
+    st := <-store_ch
+    $res := Task{id: "", state: "unknown", history: []TaskMessage{}, output: "", artifacts: []TaskArtifact{}}
+    *found_out = false
+    for i in 0:st.tasks.len {
+        if st.tasks[i].id == *tid {
+            *found_out = true
+            res = copy_task(&st.tasks[i])
+            <-
+        }
+    }
+    store_ch <- st
+    << res
+}
+
+fn store_cancel_task(store_ch chan StoreState, tid &string, found_out $&bool) Task {
+    $st := <-store_ch
+    $res := Task{id: "", state: "unknown", history: []TaskMessage{}, output: "", artifacts: []TaskArtifact{}}
+    *found_out = false
+    for i in 0:st.tasks.len {
+        if st.tasks[i].id == *tid {
+            st.tasks[i].state = "canceled"
+            *found_out = true
+            res = copy_task(&st.tasks[i])
+            <-
+        }
+    }
+    store_ch <- st
+    << res
+}
+
+fn store_is_canceled(store_ch chan StoreState, tid &string) bool {
+    st := <-store_ch
+    $canceled := false
+    for i in 0:st.tasks.len {
+        if st.tasks[i].id == *tid {
+            canceled = st.tasks[i].state == "canceled"
+            <-
+        }
+    }
+    store_ch <- st
+    << canceled
+}
+
+fn write_sse_headers(fd int, extra_headers string) int {
+    raw := "HTTP/1.1 200 OK\r\n" + extra_headers +
+           "Content-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+    << conn_write_all_quiet(fd, &raw)
+}
+
+fn write_sse_task_frame(fd int, id_j &string, t &Task) int {
+    tj := task_to_json(t)
+    frame := "data: " + rpc_ok(id_j, &tj) + "\n\n"
+    << conn_write_all_quiet(fd, &frame)
+}
+
+fn a2a_stream_exec_worker(handler fn(&string, &string, chan StreamChunk) string,
+                          tid string, inp string, cch chan StreamChunk, done_ch chan string) {
+    $t := tid + ""
+    $i := inp + ""
+    out := handler(&t, &i, cch)
+    cch <- StreamChunk{text: "", done: true}
+    done_ch <- out
+}
+
+fn handle_rpc_concurrent(body &string, handler fn(&string, &string) string, store_ch chan StoreState) string {
+    doc := json.parse(body)
+    if !doc.ok() || !doc.is_dict(doc.root()) {
+        << rpc_err(&"null", -32700, "parse error")
+    }
+    root := doc.root()
+    id_json := doc_id_json(&doc, root)
+    method := json_str_or(&doc, root, "method", "")
+    params := doc_get_or(&doc, root, "params")
+
+    if method == "tasks/send" {
+        $req_tid := ""
+        $inp := ""
+        if params >= 0 && doc.is_dict(params) {
+            req_tid = json_str_or(&doc, params, "id", "")
+            inp = extract_send_text(&doc, params)
+        }
+        tid := store_alloc_id(store_ch, req_tid)
+        $h_work := [TaskMessage{role: "user", text: inp + ""}]
+        store_upsert(store_ch, Task{id: tid + "", state: "working", history: copy_history(&h_work), output: "", artifacts: []TaskArtifact{}})
+        out := handler(&tid, &inp)
+        $hist := []TaskMessage{}
+        hist.push(TaskMessage{role: "user", text: inp + ""})
+        hist.push(TaskMessage{role: "agent", text: out + ""})
+        $arts := [TaskArtifact{name: "result", mime_type: "text/plain", text: out + ""}]
+        $fstate := "completed"
+        if store_is_canceled(store_ch, &tid) { fstate = "canceled" }
+        t := Task{id: tid + "", state: fstate, history: ~hist, output: out + "", artifacts: ~arts}
+        store_upsert(store_ch, copy_task(&t))
+        tjson := task_to_json(&t)
+        << rpc_ok(&id_json, &tjson)
+    }
+
+    if method == "tasks/get" || method == "tasks/cancel" {
+        $tid := ""
+        if params >= 0 && doc.is_dict(params) {
+            tid = json_str_or(&doc, params, "id", "")
+        }
+        $found := false
+        $tf := Task{id: "", state: "unknown", history: []TaskMessage{}, output: "", artifacts: []TaskArtifact{}}
+        if method == "tasks/cancel" {
+            tf = store_cancel_task(store_ch, &tid, $&found)
+        } else {
+            tf = store_get_task(store_ch, &tid, $&found)
+        }
+        if !found {
+            << rpc_err(&id_json, -32001, "task not found: " + tid)
+        }
+        tjson := task_to_json(&tf)
+        << rpc_ok(&id_json, &tjson)
+    }
+
+    << rpc_err(&id_json, -32601, "method not found: " + method)
+}
+
+fn a2a_conn_worker(fd int, card AgentCard, handler fn(&string, &string) string,
+                   stream_handler fn(&string, &string, chan StreamChunk) string,
+                   has_stream_handler bool, store_ch chan StoreState) {
+    cors := "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\n"
+    $hreq := http.new_request()
+    if !read_http_req(fd, $&hreq) {
+        _ := conn_close_quiet(fd)
+        <<
+    }
+    method := hreq.method()
+    req_path := hreq.path()
+    if method == "OPTIONS" {
+        empty := ""
+        _ := write_http_raw(fd, "HTTP/1.1 204 No Content", cors, "", &empty)
+        _ := conn_close_quiet(fd)
+        <<
+    }
+    if method == "GET" && (req_path == "/.well-known/agent.json" || req_path == "/.well-known/agent-card.json") {
+        card_json := format_agent_card_json(&card)
+        _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "application/json", &card_json)
+        _ := conn_close_quiet(fd)
+        <<
+    }
+    if method == "POST" {
+        body := hreq.body()
+        bdoc := json.parse(&body)
+        if bdoc.ok() && bdoc.is_dict(bdoc.root()) {
+            rpc_method := json_str_or(&bdoc, bdoc.root(), "method", "")
+            if rpc_method == "tasks/sendSubscribe" {
+                id_j := doc_id_json(&bdoc, bdoc.root())
+                prms := doc_get_or(&bdoc, bdoc.root(), "params")
+                $req_tid := ""
+                $inp := ""
+                if prms >= 0 && bdoc.is_dict(prms) {
+                    req_tid = json_str_or(&bdoc, prms, "id", "")
+                    inp = extract_send_text(&bdoc, prms)
+                }
+                tid := store_alloc_id(store_ch, req_tid)
+                _ := write_sse_headers(fd, cors)
+                $h_sub := [TaskMessage{role: "user", text: inp + ""}]
+                t_sub := Task{id: tid + "", state: "submitted", history: copy_history(&h_sub), output: "", artifacts: []TaskArtifact{}}
+                store_upsert(store_ch, copy_task(&t_sub))
+                _ := write_sse_task_frame(fd, &id_j, &t_sub)
+
+                t_wrk := Task{id: tid + "", state: "working", history: copy_history(&h_sub), output: "", artifacts: []TaskArtifact{}}
+                store_upsert(store_ch, copy_task(&t_wrk))
+                _ := write_sse_task_frame(fd, &id_j, &t_wrk)
+
+                $final_out := ""
+                if has_stream_handler {
+                    cch := chan StreamChunk{cap: 32}
+                    done_ch := chan string{cap: 1}
+                    xu a2a_stream_exec_worker(stream_handler, tid + "", inp + "", cch, done_ch)
+                    $acc := ""
+                    for {
+                        ck := <-cch
+                        if ck.text.len > 0 {
+                            acc = acc + ck.text
+                            $c_arts := [TaskArtifact{name: "chunk", mime_type: "text/plain", text: ck.text + ""}]
+                            t_chunk := Task{id: tid + "", state: "working", history: copy_history(&h_sub), output: acc + "", artifacts: ~c_arts}
+                            if !store_is_canceled(store_ch, &tid) {
+                                store_upsert(store_ch, copy_task(&t_chunk))
+                            }
+                            _ := write_sse_task_frame(fd, &id_j, &t_chunk)
+                        }
+                        if ck.done { <- }
+                    }
+                    ret_out := <-done_ch
+                    if ret_out.len > 0 { final_out = ret_out }
+                    else { final_out = acc }
+                } else {
+                    final_out = handler(&tid, &inp)
+                }
+
+                h_sub.push(TaskMessage{role: "agent", text: final_out + ""})
+                $arts := [TaskArtifact{name: "result", mime_type: "text/plain", text: final_out + ""}]
+                $fstate := "completed"
+                if store_is_canceled(store_ch, &tid) { fstate = "canceled" }
+                t_done := Task{id: tid + "", state: fstate, history: ~h_sub, output: final_out + "", artifacts: ~arts}
+                store_upsert(store_ch, copy_task(&t_done))
+                _ := write_sse_task_frame(fd, &id_j, &t_done)
+                done_frame := "data: [DONE]\n\n"
+                _ := conn_write_all_quiet(fd, &done_frame)
+                _ := conn_close_quiet(fd)
+                <<
+            }
+        }
+        resp := handle_rpc_concurrent(&body, handler, store_ch)
+        _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "application/json", &resp)
+        _ := conn_close_quiet(fd)
+        <<
+    }
+    msg := "{\"error\":\"not found\"}"
+    _ := write_http_raw(fd, "HTTP/1.1 404 Not Found", cors, "application/json", &msg)
+    _ := conn_close_quiet(fd)
+}
+
 pub fn (s $&Server) serve_http_server(srv $&http.Server) int {
     if srv.lfd < 0 {
         >>> errors.new("a2a: HTTP server is not listening")
     }
-    cors := "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\n"
+    store_ch := chan StoreState{cap: 1}
+    store_ch <- StoreState{tasks: copy_tasks_slice(&s.tasks), next_id: s.next_id}
     for {
         fd := accept_fd_or(srv.lfd)
         if fd < 0 { <- }
-        $hreq := http.new_request()
-        if !read_http_req(fd, $&hreq) {
-            _ := conn_close_quiet(fd)
-            ->
-        }
-        method := hreq.method()
-        req_path := hreq.path()
-        if method == "OPTIONS" {
-            empty := ""
-            _ := write_http_raw(fd, "HTTP/1.1 204 No Content", cors, "", &empty)
-            _ := conn_close_quiet(fd)
-            ->
-        }
-        if method == "GET" && (req_path == "/.well-known/agent.json" || req_path == "/.well-known/agent-card.json") {
-            card_json := format_agent_card_json(&s.card)
-            _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "application/json", &card_json)
-            _ := conn_close_quiet(fd)
-            ->
-        }
-        if method == "POST" {
-            body := hreq.body()
-            resp := s.handle_rpc(&body)
-            _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "application/json", &resp)
-            _ := conn_close_quiet(fd)
-            ->
-        }
-        msg := "{\"error\":\"not found\"}"
-        _ := write_http_raw(fd, "HTTP/1.1 404 Not Found", cors, "application/json", &msg)
-        _ := conn_close_quiet(fd)
+        card_copy := copy_agent_card(&s.card)
+        xu a2a_conn_worker(fd, card_copy, s.handler, s.stream_handler, s.has_stream_handler, store_ch)
     }
     << 0
 }
@@ -494,4 +806,156 @@ pub fn (c &Client) get_task(id string) Task {
 pub fn (c &Client) cancel_task(id string) Task {
     params := "{\"id\":" + json.quote(&id) + "}"
     << client_rpc_task(c, "tasks/cancel", &params) >>>
+}
+
+fn a2a_find_crlf2(s &string) int {
+    if s.len < 4 { << -1 }
+    for i in 0:(s.len - 3) {
+        if (*s)[i] == 13 && (*s)[i + 1] == 10 && (*s)[i + 2] == 13 && (*s)[i + 3] == 10 {
+            << i
+        }
+    }
+    << -1
+}
+
+fn a2a_parse_status(head &string) int {
+    $sp := -1
+    for i in 0:head.len {
+        if (*head)[i] == 32 {
+            sp = i
+            <-
+        }
+    }
+    if sp < 0 || sp + 4 > head.len { << 0 }
+    code_s := (*head)[sp + 1:sp + 4]
+    << parse_int(code_s) >>> (_) { << 0 }
+}
+
+fn a2a_close_conn(conn $&transport.Conn) int {
+    _ := conn.close() >>> (_) { << 0 }
+    << 0
+}
+
+fn a2a_conn_read_or(conn $&transport.Conn, n int) string {
+    << conn.read(n) >>> (_) { << "" }
+}
+
+fn a2a_send_stream_impl(c &Client, id string, text string, use_cb bool, on_event fn(Task) bool,
+                        has_ch bool, ch chan Task) []Task {
+    params := "{\"id\":" + json.quote(&id) +
+              ",\"message\":{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":" + json.quote(&text) + "}]}}"
+    rpc := "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tasks/sendSubscribe\",\"params\":" + params + "}"
+    bu := c.base_url + ""
+    def_port := default_port_for(&bu)
+    ep := transport.parse_endpoint(bu + "", def_port) >>>
+    full_path := join_path(ep.path, "/")
+    $raw := "POST " + full_path + " HTTP/1.1\r\n"
+    raw = raw + "Host: " + ep.host + ":" + str(ep.port) + "\r\nAccept: text/event-stream, application/json\r\n"
+    if c.auth_token.len > 0 {
+        raw = raw + "Authorization: Bearer " + c.auth_token + "\r\n"
+    }
+    raw = raw + "Content-Type: application/json\r\nContent-Length: " + str(rpc.len) + "\r\nConnection: close\r\n\r\n" + rpc
+    cfg := tls.new_config(ep.host + "")
+    $conn := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) >>>
+    _ := conn.write_all(raw) >>> (err) {
+        _ := a2a_close_conn($&conn)
+        >>> err
+    }
+
+    $hdr_buf := ""
+    $hdr_end := -1
+    while hdr_end < 0 {
+        chunk := conn.read(4096) >>> (err) {
+            _ := a2a_close_conn($&conn)
+            >>> err
+        }
+        if chunk.len == 0 { <- }
+        hdr_buf = hdr_buf + chunk
+        hdr_end = a2a_find_crlf2(&hdr_buf)
+    }
+    if hdr_end < 0 {
+        _ := a2a_close_conn($&conn)
+        >>> errors.new("a2a: incomplete HTTP headers in stream response")
+    }
+    head := hdr_buf[0:hdr_end]
+    status := a2a_parse_status(&head)
+    if status < 200 || status >= 300 {
+        _ := a2a_close_conn($&conn)
+        >>> errors.code(status, "a2a: HTTP " + str(status))
+    }
+
+    $line_buf := hdr_buf[(hdr_end + 4):hdr_buf.len]
+    $events := []Task{}
+    $stopped := false
+    for {
+        $processed := 0
+        for {
+            $nl := -1
+            for i in processed:line_buf.len {
+                if line_buf[i] == 10 {
+                    nl = i
+                    <-
+                }
+            }
+            if nl < 0 { <- }
+            $line := line_buf[processed:nl]
+            processed = nl + 1
+            ln := strings.trim_space(&line)
+            if strings.has_prefix(&ln, "data:") {
+                payload := strings.trim_space(&ln[5:ln.len])
+                if payload == "[DONE]" {
+                    stopped = true
+                    <-
+                }
+                if payload.len > 0 {
+                    doc := json.parse(&payload)
+                    if doc.ok() && doc.is_dict(doc.root()) {
+                        root := doc.root()
+                        $tnode := root
+                        if doc.has(root, "result") {
+                            r := doc_get_or(&doc, root, "result")
+                            if r >= 0 && doc.is_dict(r) { tnode = r }
+                        }
+                        tk := parse_task_json(&doc, tnode)
+                        events.push(copy_task(&tk))
+                        if has_ch {
+                            ch <- copy_task(&tk)
+                        }
+                        if use_cb {
+                            if !on_event(copy_task(&tk)) {
+                                stopped = true
+                                <-
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if stopped { <- }
+        if processed > 0 {
+            line_buf = line_buf[processed:line_buf.len]
+        }
+        chunk := a2a_conn_read_or($&conn, 4096)
+        if chunk.len == 0 { <- }
+        line_buf = line_buf + chunk
+    }
+    _ := a2a_close_conn($&conn)
+    << events
+}
+
+fn ignore_a2a_task(t Task) bool {
+    << true
+}
+
+pub fn (c &Client) send_task_stream_live(id string, text string, on_event fn(Task) bool) []Task {
+    dummy_ch := chan Task{cap: 1}
+    << a2a_send_stream_impl(c, id, text, true, on_event, false, dummy_ch) >>>
+}
+
+pub fn (c &Client) send_task_stream_chan(id string, text string, ch chan Task) []Task {
+    << a2a_send_stream_impl(c, id, text, false, ignore_a2a_task, true, ch) >>>
+}
+
+pub fn (c &Client) send_task_stream(id string, text string) []Task {
+    << c.send_task_stream_live(id, text, ignore_a2a_task) >>>
 }
