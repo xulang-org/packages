@@ -78,21 +78,13 @@ def start_mock_pgvector_server():
             slen = struct.unpack(">I", exact(conn, 4))[0]
             exact(conn, slen - 4)
             conn.sendall(packet(b"R", struct.pack(">I", 0)) + packet(b"Z", b"I"))
-            while True:
-                try:
-                    kind = exact(conn, 1)
-                except EOFError:
-                    break
-                if kind == b"X":
-                    break
-                plen = struct.unpack(">I", exact(conn, 4))[0]
-                body = exact(conn, plen - 4)
-                if kind != b"Q":
-                    continue
-                sql = body.rstrip(b"\x00").decode("utf-8")
+            pending_sql = ""
+            pending_params = []
+
+            def respond_sql(sql_txt, params):
                 with lock:
-                    queries.append(sql)
-                if sql.startswith("SELECT "):
+                    queries.append(sql_txt)
+                if sql_txt.startswith("SELECT "):
                     cols = [
                         (b"id", 25),
                         (b"doc_id", 25),
@@ -110,16 +102,56 @@ def start_mock_pgvector_server():
                     for v in vals:
                         drow.extend(struct.pack(">i", len(v)) + v)
                     data_pkts += packet(b"D", bytes(drow))
-                    data_pkts += packet(b"C", b"SELECT 1\x00") + packet(b"Z", b"I")
-                    conn.sendall(data_pkts)
-                elif sql.startswith("INSERT INTO "):
+                    data_pkts += packet(b"C", b"SELECT 1\x00")
+                    return data_pkts
+                elif sql_txt.startswith("INSERT INTO "):
                     with lock:
-                        rows_store.append(sql)
-                    conn.sendall(packet(b"C", b"INSERT 0 1\x00") + packet(b"Z", b"I"))
-                elif sql.startswith("DELETE FROM "):
-                    conn.sendall(packet(b"C", b"DELETE 2\x00") + packet(b"Z", b"I"))
+                        rows_store.append((sql_txt, list(params)))
+                    return packet(b"C", b"INSERT 0 1\x00")
+                elif sql_txt.startswith("DELETE FROM "):
+                    return packet(b"C", b"DELETE 2\x00")
                 else:
-                    conn.sendall(packet(b"C", b"CREATE\x00") + packet(b"Z", b"I"))
+                    return packet(b"C", b"CREATE\x00")
+
+            while True:
+                try:
+                    kind = exact(conn, 1)
+                except EOFError:
+                    break
+                if kind == b"X":
+                    break
+                plen = struct.unpack(">I", exact(conn, 4))[0]
+                body = exact(conn, plen - 4)
+                if kind == b"Q":
+                    sql_txt = body.rstrip(b"\x00").decode("utf-8")
+                    conn.sendall(respond_sql(sql_txt, []) + packet(b"Z", b"I"))
+                elif kind == b"P":
+                    nul1 = body.index(0)
+                    nul2 = body.index(0, nul1 + 1)
+                    pending_sql = body[nul1 + 1:nul2].decode("utf-8")
+                elif kind == b"B":
+                    off = body.index(0) + 1
+                    off = body.index(0, off) + 1
+                    fmt_n = struct.unpack(">H", body[off:off + 2])[0]
+                    off += 2 + fmt_n * 2
+                    p_n = struct.unpack(">H", body[off:off + 2])[0]
+                    off += 2
+                    pending_params = []
+                    for _ in range(p_n):
+                        vlen = struct.unpack(">i", body[off:off + 4])[0]
+                        off += 4
+                        if vlen == -1:
+                            pending_params.append(None)
+                        else:
+                            pending_params.append(body[off:off + vlen].decode("utf-8"))
+                            off += vlen
+                elif kind == b"S":
+                    out = packet(b"1", b"") + packet(b"2", b"")
+                    out += respond_sql(pending_sql, pending_params)
+                    out += packet(b"Z", b"I")
+                    conn.sendall(out)
+                else:
+                    continue
 
     def accept_loop():
         while not stop_ev.is_set():

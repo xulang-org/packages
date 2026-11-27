@@ -8,6 +8,31 @@
 openai #"github.com/xulang-org/packages/openai"
 anthropic #"github.com/xulang-org/packages/anthropic"
 gemini #"github.com/xulang-org/packages/gemini"
+redis #"github.com/xulang-org/packages/redis"
+
+pub struct ProviderPassthrough {
+    pub anthropic_cache_system bool
+    pub anthropic_cache_control string
+    pub anthropic_thinking_budget int
+    pub anthropic_extra_body_json string
+    pub gemini_safety_settings_json string
+    pub gemini_thinking_budget int
+    pub gemini_extra_body_json string
+    pub openai_extra_body_json string
+}
+
+pub fn empty_passthrough() ProviderPassthrough {
+    << ProviderPassthrough{
+        anthropic_cache_system: false,
+        anthropic_cache_control: "",
+        anthropic_thinking_budget: 0,
+        anthropic_extra_body_json: "",
+        gemini_safety_settings_json: "",
+        gemini_thinking_budget: -1,
+        gemini_extra_body_json: "",
+        openai_extra_body_json: ""
+    }
+}
 
 pub struct ProviderRoute {
     pub name string
@@ -22,6 +47,7 @@ pub struct ProviderRoute {
     pub weight int
     pub consecutive_failures int
     pub circuit_open_until_ms int
+    pub passthrough ProviderPassthrough
 }
 
 pub struct SemanticCacheEntry {
@@ -47,6 +73,7 @@ pub struct Gateway {
     cache_enabled bool
     cache_threshold f64
     cache_max_entries int
+    cache_ttl_sec int
     fail_threshold int
     cooldown_ms int
     rate_limit_rpm int
@@ -54,6 +81,9 @@ pub struct Gateway {
     window_requests int
     rr_cursor int
     stats GatewayStats
+    redis_enabled bool
+    redis_pool redis.Pool
+    redis_prefix string
 }
 
 pub fn new_gateway() Gateway {
@@ -64,6 +94,7 @@ pub fn new_gateway() Gateway {
         cache_enabled: false,
         cache_threshold: 0.92,
         cache_max_entries: 128,
+        cache_ttl_sec: 300,
         fail_threshold: 0,
         cooldown_ms: 0,
         rate_limit_rpm: 0,
@@ -78,7 +109,48 @@ pub fn new_gateway() Gateway {
             total_prompt_tokens: 0,
             total_completion_tokens: 0,
             estimated_cost_usd: 0.0
-        }
+        },
+        redis_enabled: false,
+        redis_pool: redis.new_pool("", 1),
+        redis_prefix: "gw:"
+    }
+}
+
+pub fn (g $&Gateway) set_redis_pool(pool redis.Pool, prefix string) {
+    $pfx := prefix + ""
+    if pfx.len == 0 { pfx = "gw:" }
+    g.redis_pool = ~pool
+    g.redis_prefix = pfx
+    g.redis_enabled = true
+}
+
+pub fn (g $&Gateway) set_redis_store(addr string, prefix string) {
+    pool := redis.new_pool(addr + "", 16)
+    g.set_redis_pool(~pool, prefix)
+}
+
+pub fn (g $&Gateway) set_redis_store_auth(addr string, password string, prefix string) {
+    pool := redis.new_pool_auth(addr + "", password + "", 16)
+    g.set_redis_pool(~pool, prefix)
+}
+
+pub fn (g $&Gateway) set_redis_url(raw_url string, prefix string) {
+    pool := redis.new_pool_url(raw_url + "", 16)
+    g.set_redis_pool(~pool, prefix)
+}
+
+pub fn (g $&Gateway) set_cache_ttl(seconds int) {
+    if seconds > 0 { g.cache_ttl_sec = seconds }
+}
+
+pub fn (g &Gateway) is_redis_enabled() bool {
+    << g.redis_enabled
+}
+
+pub fn (g $&Gateway) close_redis() {
+    if g.redis_enabled {
+        g.redis_pool.close()
+        g.redis_enabled = false
     }
 }
 
@@ -96,7 +168,8 @@ pub fn (g $&Gateway) add_route(name string, client openai.Client, model string,
         enabled: true,
         weight: 1,
         consecutive_failures: 0,
-        circuit_open_until_ms: 0
+        circuit_open_until_ms: 0,
+        passthrough: empty_passthrough()
     })
 }
 
@@ -116,7 +189,8 @@ pub fn (g $&Gateway) add_weighted_route(name string, client openai.Client, model
         enabled: true,
         weight: w,
         consecutive_failures: 0,
-        circuit_open_until_ms: 0
+        circuit_open_until_ms: 0,
+        passthrough: empty_passthrough()
     })
 }
 
@@ -136,7 +210,8 @@ pub fn (g $&Gateway) add_anthropic_route(name string, client anthropic.Client, m
         enabled: true,
         weight: w,
         consecutive_failures: 0,
-        circuit_open_until_ms: 0
+        circuit_open_until_ms: 0,
+        passthrough: empty_passthrough()
     })
 }
 
@@ -156,8 +231,28 @@ pub fn (g $&Gateway) add_gemini_route(name string, client gemini.Client, model s
         enabled: true,
         weight: w,
         consecutive_failures: 0,
-        circuit_open_until_ms: 0
+        circuit_open_until_ms: 0,
+        passthrough: empty_passthrough()
     })
+}
+
+pub fn (g $&Gateway) set_route_passthrough(name string, pt ProviderPassthrough) bool {
+    for i in 0:g.routes.len {
+        if g.routes[i].name == name {
+            g.routes[i].passthrough = ProviderPassthrough{
+                anthropic_cache_system: pt.anthropic_cache_system,
+                anthropic_cache_control: pt.anthropic_cache_control + "",
+                anthropic_thinking_budget: pt.anthropic_thinking_budget,
+                anthropic_extra_body_json: pt.anthropic_extra_body_json + "",
+                gemini_safety_settings_json: pt.gemini_safety_settings_json + "",
+                gemini_thinking_budget: pt.gemini_thinking_budget,
+                gemini_extra_body_json: pt.gemini_extra_body_json + "",
+                openai_extra_body_json: pt.openai_extra_body_json + ""
+            }
+            << true
+        }
+    }
+    << false
 }
 
 pub fn (g $&Gateway) set_circuit_breaker(fail_threshold int, cooldown_ms int) {
@@ -169,7 +264,290 @@ pub fn (g $&Gateway) reset_circuits() {
     for i in 0:g.routes.len {
         g.routes[i].consecutive_failures = 0
         g.routes[i].circuit_open_until_ms = 0
+        if g.redis_enabled {
+            gw_redis_cb_success(g, &g.routes[i].name)
+        }
     }
+}
+
+fn gw_parse_int_or(s &string, def int) int {
+    if s.len == 0 { << def }
+    << strconv.atoi(s) >>> (_) { << def }
+}
+
+fn gw_val_to_string(v &redis.Value, found $&bool) string {
+    << v.as_string() >>> (_) {
+        *found = false
+        << ""
+    }
+}
+
+fn gw_val_to_int(v &redis.Value) int {
+    << v.as_int() >>> (_) { << 0 }
+}
+
+fn gw_redis_get_str(g &Gateway, key string, found $&bool) string {
+    *found = false
+    if !g.redis_enabled { << "" }
+    $c := g.redis_pool.get() >>> (_) { << "" }
+    v := c.do(["GET", key]) >>> (_) {
+        c.close()
+        << ""
+    }
+    g.redis_pool.put(c)
+    if v.is_nil() { << "" }
+    *found = true
+    << gw_val_to_string(&v, found)
+}
+
+fn gw_redis_incr(g &Gateway, key string, ttl_sec int) int {
+    if !g.redis_enabled { << 0 }
+    $c := g.redis_pool.get() >>> (_) { << 0 }
+    k_exp := "" + key
+    v := c.do(["INCR", key]) >>> (_) {
+        c.close()
+        << 0
+    }
+    if ttl_sec > 0 {
+        _ := c.do(["EXPIRE", k_exp, str(ttl_sec)]) >>> (_) {
+            c.close()
+            << 0
+        }
+    }
+    g.redis_pool.put(c)
+    << gw_val_to_int(&v)
+}
+
+fn gw_redis_decr(g &Gateway, key string) {
+    if !g.redis_enabled { << }
+    $c := g.redis_pool.get() >>> (_) { << }
+    _ := c.do(["DECR", key]) >>> (_) {
+        c.close()
+        <<
+    }
+    g.redis_pool.put(c)
+}
+
+fn gw_redis_set_ex(g &Gateway, key string, ttl_sec int, val string) {
+    if !g.redis_enabled { << }
+    $c := g.redis_pool.get() >>> (_) { << }
+    $t := ttl_sec
+    if t <= 0 { t = 1 }
+    _ := c.do(["SETEX", key, str(t), val]) >>> (_) {
+        c.close()
+        <<
+    }
+    g.redis_pool.put(c)
+}
+
+fn gw_redis_del2(g &Gateway, k1 string, k2 string) {
+    if !g.redis_enabled { << }
+    $c := g.redis_pool.get() >>> (_) { << }
+    _ := c.do(["DEL", k1, k2]) >>> (_) {
+        c.close()
+        <<
+    }
+    g.redis_pool.put(c)
+}
+
+fn gw_redis_hincrby(g &Gateway, key string, field string, delta int) {
+    if !g.redis_enabled || delta == 0 { << }
+    $c := g.redis_pool.get() >>> (_) { << }
+    _ := c.do(["HINCRBY", key, field, str(delta)]) >>> (_) {
+        c.close()
+        <<
+    }
+    g.redis_pool.put(c)
+}
+
+fn gw_redis_hgetall_str(g &Gateway, key string) []string {
+    if !g.redis_enabled { << []string{} }
+    $c := g.redis_pool.get() >>> (_) { << []string{} }
+    v := c.do(["HGETALL", key]) >>> (_) {
+        c.close()
+        << []string{}
+    }
+    g.redis_pool.put(c)
+    << v.as_strings() >>> (_) { << []string{} }
+}
+
+fn gw_redis_lpush_trim_ex(g &Gateway, key string, val string, max_keep int, ttl_sec int) {
+    if !g.redis_enabled { << }
+    $c := g.redis_pool.get() >>> (_) { << }
+    k_trim := "" + key
+    k_exp := "" + key
+    _ := c.do(["LPUSH", key, val]) >>> (_) {
+        c.close()
+        <<
+    }
+    if max_keep > 0 {
+        _ := c.do(["LTRIM", k_trim, "0", str(max_keep - 1)]) >>> (_) {
+            c.close()
+            <<
+        }
+    }
+    if ttl_sec > 0 {
+        _ := c.do(["EXPIRE", k_exp, str(ttl_sec)]) >>> (_) {
+            c.close()
+            <<
+        }
+    }
+    g.redis_pool.put(c)
+}
+
+fn gw_redis_lrange(g &Gateway, key string, stop_idx int) []string {
+    if !g.redis_enabled { << []string{} }
+    $c := g.redis_pool.get() >>> (_) { << []string{} }
+    v := c.do(["LRANGE", key, "0", str(stop_idx)]) >>> (_) {
+        c.close()
+        << []string{}
+    }
+    g.redis_pool.put(c)
+    << v.as_strings() >>> (_) { << []string{} }
+}
+
+fn gw_redis_cb_open(g &Gateway, rt_name &string, now_ms int) bool {
+    if !g.redis_enabled { << false }
+    $ok := false
+    s := gw_redis_get_str(g, g.redis_prefix + "cb:" + (*rt_name) + ":open_until", $&ok)
+    if !ok { << false }
+    until := gw_parse_int_or(&s, 0)
+    << until > now_ms
+}
+
+fn gw_redis_cb_success(g &Gateway, rt_name &string) {
+    gw_redis_del2(g, g.redis_prefix + "cb:" + (*rt_name) + ":fails", g.redis_prefix + "cb:" + (*rt_name) + ":open_until")
+}
+
+fn gw_redis_cb_failure(g &Gateway, rt_name &string, fail_threshold int, cooldown_ms int, now_ms int) {
+    if !g.redis_enabled { << }
+    $cd := cooldown_ms
+    if cd <= 0 { cd = 30000 }
+    ttl_s := (cd + 999) / 1000
+    fkey := g.redis_prefix + "cb:" + (*rt_name) + ":fails"
+    fails := gw_redis_incr(g, fkey, ttl_s + 5)
+    if fail_threshold > 0 && fails >= fail_threshold {
+        okey := g.redis_prefix + "cb:" + (*rt_name) + ":open_until"
+        gw_redis_set_ex(g, okey, ttl_s, str(now_ms + cd))
+    }
+}
+
+fn gw_is_circuit_open(g &Gateway, rt &ProviderRoute, now_ms int) bool {
+    if rt.circuit_open_until_ms > now_ms { << true }
+    if g.redis_enabled && gw_redis_cb_open(g, &rt.name, now_ms) { << true }
+    << false
+}
+
+fn gw_record_stats_req(g $&Gateway, is_hit bool, is_fallback bool, is_fail bool, pt int, ct int, cost_usd f64) {
+    if !g.redis_enabled { << }
+    hkey := g.redis_prefix + "stats"
+    if !is_hit && !is_fallback && !is_fail && pt == 0 && ct == 0 && cost_usd == 0.0 {
+        gw_redis_hincrby(g, hkey, "total_requests", 1)
+        <<
+    }
+    if is_hit {
+        gw_redis_hincrby(g, hkey, "total_requests", 1)
+        gw_redis_hincrby(g, hkey, "cache_hits", 1)
+        <<
+    }
+    if is_fallback {
+        gw_redis_hincrby(g, hkey, "fallbacks", 1)
+        <<
+    }
+    if is_fail {
+        gw_redis_hincrby(g, hkey, "failed_requests", 1)
+        <<
+    }
+    if pt > 0 { gw_redis_hincrby(g, hkey, "total_prompt_tokens", pt) }
+    if ct > 0 { gw_redis_hincrby(g, hkey, "total_completion_tokens", ct) }
+    micro := int(cost_usd * 1000000.0 + 0.5)
+    if micro > 0 { gw_redis_hincrby(g, hkey, "estimated_cost_micro_usd", micro) }
+}
+
+fn gw_merge_passthrough(base &ProviderPassthrough, overlay &ProviderPassthrough) ProviderPassthrough {
+    $out := ProviderPassthrough{
+        anthropic_cache_system: base.anthropic_cache_system || overlay.anthropic_cache_system,
+        anthropic_cache_control: base.anthropic_cache_control + "",
+        anthropic_thinking_budget: base.anthropic_thinking_budget,
+        anthropic_extra_body_json: base.anthropic_extra_body_json + "",
+        gemini_safety_settings_json: base.gemini_safety_settings_json + "",
+        gemini_thinking_budget: base.gemini_thinking_budget,
+        gemini_extra_body_json: base.gemini_extra_body_json + "",
+        openai_extra_body_json: base.openai_extra_body_json + ""
+    }
+    if overlay.anthropic_cache_control.len > 0 { out.anthropic_cache_control = overlay.anthropic_cache_control + "" }
+    if overlay.anthropic_thinking_budget > 0 { out.anthropic_thinking_budget = overlay.anthropic_thinking_budget }
+    if overlay.anthropic_extra_body_json.len > 0 { out.anthropic_extra_body_json = overlay.anthropic_extra_body_json + "" }
+    if overlay.gemini_safety_settings_json.len > 0 { out.gemini_safety_settings_json = overlay.gemini_safety_settings_json + "" }
+    if overlay.gemini_thinking_budget >= 0 { out.gemini_thinking_budget = overlay.gemini_thinking_budget }
+    if overlay.gemini_extra_body_json.len > 0 { out.gemini_extra_body_json = overlay.gemini_extra_body_json + "" }
+    if overlay.openai_extra_body_json.len > 0 { out.openai_extra_body_json = overlay.openai_extra_body_json + "" }
+    << out
+}
+
+fn gw_doc_child(doc &json.Doc, obj int, key string) int {
+    if obj < 0 || !doc.is_dict(obj) || !doc.has(obj, key) { << -1 }
+    << doc.get(obj, key) >>> (_) { << -1 }
+}
+
+fn gw_doc_bool(doc &json.Doc, obj int, key string, def bool) bool {
+    n := gw_doc_child(doc, obj, key)
+    if n < 0 || !doc.is_bool(n) { << def }
+    << doc.as_bool(n) >>> (_) { << def }
+}
+
+fn gw_doc_str(doc &json.Doc, obj int, key string, def string) string {
+    n := gw_doc_child(doc, obj, key)
+    if n < 0 || !doc.is_string(n) { << def }
+    << doc.as_string(n) >>> (_) { << def }
+}
+
+fn gw_doc_int(doc &json.Doc, obj int, key string, def int) int {
+    n := gw_doc_child(doc, obj, key)
+    if n < 0 || !doc.is_number(n) { << def }
+    << doc.as_int(n) >>> (_) { << def }
+}
+
+fn gw_doc_f64(doc &json.Doc, obj int, key string, def f64) f64 {
+    n := gw_doc_child(doc, obj, key)
+    if n < 0 || !doc.is_number(n) { << def }
+    << doc.as_f64(n) >>> (_) { << def }
+}
+
+fn gw_doc_encode(doc &json.Doc, obj int, key string, def string) string {
+    n := gw_doc_child(doc, obj, key)
+    if n < 0 { << def }
+    << doc.encode(n) >>> (_) { << def }
+}
+
+fn parse_req_passthrough(req &openai.ChatRequest) ProviderPassthrough {
+    $pt := empty_passthrough()
+    if req.extra_body_json.len == 0 { << pt }
+    doc := json.parse(&req.extra_body_json)
+    if !doc.ok() || !doc.is_dict(doc.root()) { << pt }
+    root := doc.root()
+    an := gw_doc_child(&doc, root, "anthropic")
+    if an >= 0 && doc.is_dict(an) {
+        pt.anthropic_cache_system = gw_doc_bool(&doc, an, "cache_system", false)
+        pt.anthropic_cache_control = gw_doc_str(&doc, an, "cache_control", "")
+        pt.anthropic_thinking_budget = gw_doc_int(&doc, an, "thinking_budget_tokens", 0)
+        pt.anthropic_extra_body_json = gw_doc_encode(&doc, an, "extra_body", "")
+    }
+    gm := gw_doc_child(&doc, root, "gemini")
+    if gm >= 0 && doc.is_dict(gm) {
+        $ss := gw_doc_encode(&doc, gm, "safetySettings", "")
+        if ss.len == 0 { ss = gw_doc_encode(&doc, gm, "safety_settings", "") }
+        pt.gemini_safety_settings_json = ss
+        $tb := gw_doc_int(&doc, gm, "thinking_budget", -1)
+        if tb < 0 { tb = gw_doc_int(&doc, gm, "thinkingBudget", -1) }
+        pt.gemini_thinking_budget = tb
+        pt.gemini_extra_body_json = gw_doc_encode(&doc, gm, "extra_body", "")
+    }
+    op := gw_doc_child(&doc, root, "openai")
+    if op >= 0 && doc.is_dict(op) {
+        pt.openai_extra_body_json = gw_doc_encode(&doc, op, "extra_body", "")
+    }
+    << pt
 }
 
 pub fn (g $&Gateway) set_rate_limit(requests_per_min int) {
@@ -263,7 +641,7 @@ fn empty_gw_chat_resp() openai.ChatResponse {
     }
 }
 
-fn openai_req_to_anthropic(req &openai.ChatRequest, model string) anthropic.MessagesRequest {
+pub fn openai_req_to_anthropic_with(req &openai.ChatRequest, model string, pt &ProviderPassthrough) anthropic.MessagesRequest {
     $sys := ""
     $msgs := []anthropic.Message{}
     for i in 0:req.messages.len {
@@ -290,11 +668,32 @@ fn openai_req_to_anthropic(req &openai.ChatRequest, model string) anthropic.Mess
             msgs.push(anthropic.message(role, m.content + ""))
         }
     }
+    if pt.anthropic_cache_control.len > 0 && msgs.len > 0 {
+        // Tag last user/message block with cache_control
+        $target := msgs.len - 1
+        for mi in 0:msgs.len {
+            if msgs[mi].role == "user" { target = mi }
+        }
+        tm := $&msgs[target]
+        if tm.blocks.len > 0 {
+            tm.blocks[tm.blocks.len - 1].cache_control = pt.anthropic_cache_control + ""
+        } else {
+            $b := anthropic.text_block(tm.content + "")
+            b.cache_control = pt.anthropic_cache_control + ""
+            $bs := []anthropic.ContentBlock{}
+            bs.push(~b)
+            tm.blocks = ~bs
+            tm.content = ""
+        }
+    }
     $mt := req.max_tokens
     if mt <= 0 { mt = req.max_completion_tokens }
     if mt <= 0 { mt = 1024 }
     $out := anthropic.messages_request(model + "", ~msgs, mt)
     out.system = sys
+    out.cache_system = pt.anthropic_cache_system
+    out.thinking_budget_tokens = pt.anthropic_thinking_budget
+    out.extra_body_json = pt.anthropic_extra_body_json + ""
     if req.has_temperature {
         out.temperature = req.temperature
         out.has_temperature = true
@@ -309,6 +708,11 @@ fn openai_req_to_anthropic(req &openai.ChatRequest, model string) anthropic.Mess
         out.tools.push(anthropic.tool(t.name + "", t.description + "", t.parameters_json + ""))
     }
     << out
+}
+
+fn openai_req_to_anthropic(req &openai.ChatRequest, model string) anthropic.MessagesRequest {
+    pt := parse_req_passthrough(req)
+    << openai_req_to_anthropic_with(req, model, &pt)
 }
 
 fn anthropic_resp_to_openai(r &anthropic.MessagesResponse, model_fallback string) openai.ChatResponse {
@@ -332,7 +736,7 @@ fn anthropic_resp_to_openai(r &anthropic.MessagesResponse, model_fallback string
     }
 }
 
-fn openai_req_to_gemini(req &openai.ChatRequest, model string) gemini.GenerateRequest {
+pub fn openai_req_to_gemini_with(req &openai.ChatRequest, model string, pt &ProviderPassthrough) gemini.GenerateRequest {
     $sys := ""
     $contents := []gemini.Content{}
     for i in 0:req.messages.len {
@@ -360,6 +764,9 @@ fn openai_req_to_gemini(req &openai.ChatRequest, model string) gemini.GenerateRe
     }
     $out := gemini.generate_request(model + "", ~contents)
     out.system_instruction = sys
+    out.thinking_budget = pt.gemini_thinking_budget
+    out.safety_settings_json = pt.gemini_safety_settings_json + ""
+    out.extra_body_json = pt.gemini_extra_body_json + ""
     if req.has_temperature {
         out.temperature = req.temperature
         out.has_temperature = true
@@ -377,6 +784,11 @@ fn openai_req_to_gemini(req &openai.ChatRequest, model string) gemini.GenerateRe
         out.tools.push(gemini.function_decl(t.name + "", t.description + "", t.parameters_json + ""))
     }
     << out
+}
+
+fn openai_req_to_gemini(req &openai.ChatRequest, model string) gemini.GenerateRequest {
+    pt := parse_req_passthrough(req)
+    << openai_req_to_gemini_with(req, model, &pt)
 }
 
 fn gemini_resp_to_openai(r &gemini.GenerateResponse, model string) openai.ChatResponse {
@@ -400,22 +812,28 @@ fn gemini_resp_to_openai(r &gemini.GenerateResponse, model string) openai.ChatRe
     }
 }
 
-fn try_route_dispatch(rt &ProviderRoute, req &openai.ChatRequest) RouteAttempt {
+fn try_route_dispatch(rt &ProviderRoute, req &openai.ChatRequest, pt_override &ProviderPassthrough) RouteAttempt {
+    req_pt := parse_req_passthrough(req)
+    $eff := gw_merge_passthrough(&rt.passthrough, &req_pt)
+    eff = gw_merge_passthrough(&eff, pt_override)
     if rt.provider == "anthropic" {
-        areq := openai_req_to_anthropic(req, rt.model + "")
+        areq := openai_req_to_anthropic_with(req, rt.model + "", &eff)
         ares := rt.anthropic_client.messages(&areq) >>> (err) {
             << RouteAttempt{ok: false, err_msg: err.msg(), resp: empty_gw_chat_resp()}
         }
         << RouteAttempt{ok: true, err_msg: "", resp: anthropic_resp_to_openai(&ares, rt.model + "")}
     }
     if rt.provider == "gemini" {
-        greq := openai_req_to_gemini(req, rt.model + "")
+        greq := openai_req_to_gemini_with(req, rt.model + "", &eff)
         gres := rt.gemini_client.generate(&greq) >>> (err) {
             << RouteAttempt{ok: false, err_msg: err.msg(), resp: empty_gw_chat_resp()}
         }
         << RouteAttempt{ok: true, err_msg: "", resp: gemini_resp_to_openai(&gres, rt.model + "")}
     }
-    r_req := clone_gw_request(req, rt.model + "")
+    $r_req := clone_gw_request(req, rt.model + "")
+    if eff.openai_extra_body_json.len > 0 {
+        r_req.extra_body_json = eff.openai_extra_body_json + ""
+    }
     resp := rt.client.chat(&r_req) >>> (err) {
         << RouteAttempt{ok: false, err_msg: err.msg(), resp: empty_gw_chat_resp()}
     }
@@ -424,6 +842,24 @@ fn try_route_dispatch(rt &ProviderRoute, req &openai.ChatRequest) RouteAttempt {
 
 fn check_gw_rate_limit(g $&Gateway, now_ms int) int {
     if g.rate_limit_rpm <= 0 { << 0 }
+    if g.redis_enabled {
+        bucket := now_ms / 60000
+        elapsed_ms := now_ms % 60000
+        prev_weight := f64(60000 - elapsed_ms) / 60000.0
+        $found_prev := false
+        prev_s := gw_redis_get_str(g, g.redis_prefix + "rpm:" + str(bucket - 1), $&found_prev)
+        prev_cnt := gw_parse_int_or(&prev_s, 0)
+        cur_key := g.redis_prefix + "rpm:" + str(bucket)
+        cur_cnt := gw_redis_incr(g, "" + cur_key, 120)
+        eff := f64(prev_cnt) * prev_weight + f64(cur_cnt)
+        if eff > f64(g.rate_limit_rpm) {
+            gw_redis_decr(g, cur_key)
+            g.stats.failed_requests += 1
+            gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
+            >>> errors.new("gateway: rate limit exceeded")
+        }
+        << 0
+    }
     if now_ms - g.window_start_ms >= 60000 {
         g.window_start_ms = now_ms
         g.window_requests = 0
@@ -436,24 +872,32 @@ fn check_gw_rate_limit(g $&Gateway, now_ms int) int {
     << 0
 }
 
-fn try_route_at(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, tried $&int, last_err $&string) RouteAttempt {
+fn try_route_at(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, tried $&int, last_err $&string, pt_override &ProviderPassthrough) RouteAttempt {
     rt := $&g.routes[i]
     if !rt.enabled {
-        << RouteAttempt{ok: false, err_msg: "disabled", resp: openai.ChatResponse{id: "", model: "", content: "", reasoning_content: "", finish_reason: "", tool_calls: []openai.ToolCall{}, usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}}}
+        << RouteAttempt{ok: false, err_msg: "disabled", resp: empty_gw_chat_resp()}
     }
-    if rt.circuit_open_until_ms > now_ms {
+    if gw_is_circuit_open(g, rt, now_ms) {
         *last_err = rt.name + ": circuit open"
-        << RouteAttempt{ok: false, err_msg: "circuit open", resp: openai.ChatResponse{id: "", model: "", content: "", reasoning_content: "", finish_reason: "", tool_calls: []openai.ToolCall{}, usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}}}
+        << RouteAttempt{ok: false, err_msg: "circuit open", resp: empty_gw_chat_resp()}
     }
-    if *tried > 0 { g.stats.fallbacks += 1 }
+    if *tried > 0 {
+        g.stats.fallbacks += 1
+        gw_record_stats_req(g, false, true, false, 0, 0, 0.0)
+    }
     *tried += 1
-    att := try_route_dispatch(rt, req)
+    att := try_route_dispatch(rt, req, pt_override)
     if att.ok {
         rt.consecutive_failures = 0
         rt.circuit_open_until_ms = 0
-        g.stats.total_prompt_tokens += att.resp.usage.prompt_tokens
-        g.stats.total_completion_tokens += att.resp.usage.completion_tokens
-        g.stats.estimated_cost_usd += g.estimate_cost_usd(i, att.resp.usage.prompt_tokens, att.resp.usage.completion_tokens)
+        gw_redis_cb_success(g, &rt.name)
+        pt_u := att.resp.usage.prompt_tokens
+        ct_u := att.resp.usage.completion_tokens
+        cost := g.estimate_cost_usd(i, pt_u, ct_u)
+        g.stats.total_prompt_tokens += pt_u
+        g.stats.total_completion_tokens += ct_u
+        g.stats.estimated_cost_usd += cost
+        gw_record_stats_req(g, false, false, false, pt_u, ct_u, cost)
         << att
     }
     rt.consecutive_failures += 1
@@ -462,25 +906,33 @@ fn try_route_at(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, tried $
         if cd <= 0 { cd = 30000 }
         rt.circuit_open_until_ms = now_ms + cd
     }
+    gw_redis_cb_failure(g, &rt.name, g.fail_threshold, g.cooldown_ms, now_ms)
     *last_err = rt.name + ": " + att.err_msg
     << att
 }
 
-pub fn (g $&Gateway) chat_with_fallback(req &openai.ChatRequest) openai.ChatResponse {
+pub fn (g $&Gateway) chat_with_passthrough(req &openai.ChatRequest, pt &ProviderPassthrough) openai.ChatResponse {
     if g.routes.len == 0 {
         >>> errors.new("gateway: no provider routes configured")
     }
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
     g.stats.total_requests += 1
+    gw_record_stats_req(g, false, false, false, 0, 0, 0.0)
     $last_err := "gateway: all routes failed"
     $tried := 0
     for i in 0:g.routes.len {
-        att := try_route_at(g, req, i, now_ms, $&tried, $&last_err)
+        att := try_route_at(g, req, i, now_ms, $&tried, $&last_err, pt)
         if att.ok { << ~att.resp }
     }
     g.stats.failed_requests += 1
+    gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
     >>> errors.new(last_err)
+}
+
+pub fn (g $&Gateway) chat_with_fallback(req &openai.ChatRequest) openai.ChatResponse {
+    empty_pt := empty_passthrough()
+    << g.chat_with_passthrough(req, &empty_pt) >>>
 }
 
 pub fn (g $&Gateway) chat_weighted(req &openai.ChatRequest) openai.ChatResponse {
@@ -490,11 +942,12 @@ pub fn (g $&Gateway) chat_weighted(req &openai.ChatRequest) openai.ChatResponse 
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
     g.stats.total_requests += 1
+    gw_record_stats_req(g, false, false, false, 0, 0, 0.0)
 
     $total_w := 0
     for i in 0:g.routes.len {
         rt := &g.routes[i]
-        if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+        if rt.enabled && !gw_is_circuit_open(g, rt, now_ms) {
             $w := rt.weight
             if w <= 0 { w = 1 }
             total_w += w
@@ -507,7 +960,7 @@ pub fn (g $&Gateway) chat_weighted(req &openai.ChatRequest) openai.ChatResponse 
         $acc := 0
         for i in 0:g.routes.len {
             rt := &g.routes[i]
-            if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+            if rt.enabled && !gw_is_circuit_open(g, rt, now_ms) {
                 $w := rt.weight
                 if w <= 0 { w = 1 }
                 acc += w
@@ -521,12 +974,14 @@ pub fn (g $&Gateway) chat_weighted(req &openai.ChatRequest) openai.ChatResponse 
 
     $last_err := "gateway: all routes failed"
     $tried := 0
+    empty_pt := empty_passthrough()
     for off in 0:g.routes.len {
         idx := (start + off) % g.routes.len
-        att := try_route_at(g, req, idx, now_ms, $&tried, $&last_err)
+        att := try_route_at(g, req, idx, now_ms, $&tried, $&last_err, &empty_pt)
         if att.ok { << ~att.resp }
     }
     g.stats.failed_requests += 1
+    gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
     >>> errors.new(last_err)
 }
 
@@ -606,13 +1061,14 @@ fn gw_openai_stream_worker(c openai.Client, req openai.ChatRequest,
     rch <- GwOpenaiStreamOutcome{ok: true, err_msg: "", resp: ~resp}
 }
 
-fn record_route_failure(g &Gateway, rt $&ProviderRoute, now_ms int, err_msg string, last_err $&string) {
+fn record_route_failure(g $&Gateway, rt $&ProviderRoute, now_ms int, err_msg string, last_err $&string) {
     rt.consecutive_failures += 1
     if g.fail_threshold > 0 && rt.consecutive_failures >= g.fail_threshold {
         $cd := g.cooldown_ms
         if cd <= 0 { cd = 30000 }
         rt.circuit_open_until_ms = now_ms + cd
     }
+    gw_redis_cb_failure(g, &rt.name, g.fail_threshold, g.cooldown_ms, now_ms)
     *last_err = rt.name + ": " + err_msg
 }
 
@@ -658,15 +1114,20 @@ fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, t
     if !rt.enabled {
         << RouteAttempt{ok: false, err_msg: "disabled", resp: empty_gw_chat_resp()}
     }
-    if rt.circuit_open_until_ms > now_ms {
+    if gw_is_circuit_open(g, rt, now_ms) {
         *last_err = rt.name + ": circuit open"
         << RouteAttempt{ok: false, err_msg: "circuit open", resp: empty_gw_chat_resp()}
     }
-    if *tried > 0 { g.stats.fallbacks += 1 }
+    if *tried > 0 {
+        g.stats.fallbacks += 1
+        gw_record_stats_req(g, false, true, false, 0, 0, 0.0)
+    }
     *tried += 1
+    req_pt := parse_req_passthrough(req)
+    eff := gw_merge_passthrough(&rt.passthrough, &req_pt)
 
     if rt.provider == "anthropic" {
-        areq := openai_req_to_anthropic(req, rt.model + "")
+        areq := openai_req_to_anthropic_with(req, rt.model + "", &eff)
         c_copy := rt.anthropic_client.clone_client()
         ech := chan anthropic.StreamEvent{cap: 64}
         rch := chan GwAnthStreamOutcome{cap: 1}
@@ -694,9 +1155,12 @@ fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, t
             resp := anthropic_resp_to_openai(&outc.resp, rt.model + "")
             rt.consecutive_failures = 0
             rt.circuit_open_until_ms = 0
+            gw_redis_cb_success(g, &rt.name)
+            cost := g.estimate_cost_usd(i, resp.usage.prompt_tokens, resp.usage.completion_tokens)
             g.stats.total_prompt_tokens += resp.usage.prompt_tokens
             g.stats.total_completion_tokens += resp.usage.completion_tokens
-            g.stats.estimated_cost_usd += g.estimate_cost_usd(i, resp.usage.prompt_tokens, resp.usage.completion_tokens)
+            g.stats.estimated_cost_usd += cost
+            gw_record_stats_req(g, false, false, false, resp.usage.prompt_tokens, resp.usage.completion_tokens, cost)
             emit_gw_delta(openai.StreamDelta{
                 content: "", reasoning_content: "", finish_reason: resp.finish_reason + "",
                 tool_calls: []openai.ToolCall{}, has_usage: true, usage: resp.usage, done: true
@@ -708,7 +1172,7 @@ fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, t
     }
 
     if rt.provider == "gemini" {
-        greq := openai_req_to_gemini(req, rt.model + "")
+        greq := openai_req_to_gemini_with(req, rt.model + "", &eff)
         c_copy := rt.gemini_client.clone_client()
         ech := chan gemini.StreamChunk{cap: 64}
         rch := chan GwGemStreamOutcome{cap: 1}
@@ -739,9 +1203,12 @@ fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, t
             resp := gemini_resp_to_openai(&outc.resp, rt.model + "")
             rt.consecutive_failures = 0
             rt.circuit_open_until_ms = 0
+            gw_redis_cb_success(g, &rt.name)
+            cost := g.estimate_cost_usd(i, resp.usage.prompt_tokens, resp.usage.completion_tokens)
             g.stats.total_prompt_tokens += resp.usage.prompt_tokens
             g.stats.total_completion_tokens += resp.usage.completion_tokens
-            g.stats.estimated_cost_usd += g.estimate_cost_usd(i, resp.usage.prompt_tokens, resp.usage.completion_tokens)
+            g.stats.estimated_cost_usd += cost
+            gw_record_stats_req(g, false, false, false, resp.usage.prompt_tokens, resp.usage.completion_tokens, cost)
             emit_gw_delta(openai.StreamDelta{
                 content: "", reasoning_content: "", finish_reason: resp.finish_reason + "",
                 tool_calls: []openai.ToolCall{}, has_usage: true, usage: resp.usage, done: true
@@ -752,7 +1219,8 @@ fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, t
         << RouteAttempt{ok: false, err_msg: outc.err_msg + "", resp: empty_gw_chat_resp()}
     }
 
-    r_req := clone_gw_request(req, rt.model + "")
+    $r_req := clone_gw_request(req, rt.model + "")
+    if eff.openai_extra_body_json.len > 0 { r_req.extra_body_json = eff.openai_extra_body_json + "" }
     c_copy := rt.client.clone_client()
     dch := chan openai.StreamDelta{cap: 64}
     rch := chan GwOpenaiStreamOutcome{cap: 1}
@@ -780,9 +1248,12 @@ fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, t
     if outc.ok {
         rt.consecutive_failures = 0
         rt.circuit_open_until_ms = 0
+        gw_redis_cb_success(g, &rt.name)
+        cost := g.estimate_cost_usd(i, outc.resp.usage.prompt_tokens, outc.resp.usage.completion_tokens)
         g.stats.total_prompt_tokens += outc.resp.usage.prompt_tokens
         g.stats.total_completion_tokens += outc.resp.usage.completion_tokens
-        g.stats.estimated_cost_usd += g.estimate_cost_usd(i, outc.resp.usage.prompt_tokens, outc.resp.usage.completion_tokens)
+        g.stats.estimated_cost_usd += cost
+        gw_record_stats_req(g, false, false, false, outc.resp.usage.prompt_tokens, outc.resp.usage.completion_tokens, cost)
         emit_gw_delta(openai.StreamDelta{
             content: "", reasoning_content: "", finish_reason: outc.resp.finish_reason + "",
             tool_calls: []openai.ToolCall{}, has_usage: true, usage: outc.resp.usage, done: true
@@ -801,18 +1272,23 @@ fn chat_stream_fallback_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, 
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
     g.stats.total_requests += 1
+    gw_record_stats_req(g, false, false, false, 0, 0, 0.0)
     $last_err := "gateway: all routes failed"
     $tried := 0
+    empty_pt := empty_passthrough()
     for i in 0:g.routes.len {
         $emitted := false
         att := stream_route_at_ex(g, req, i, now_ms, $&tried, $&last_err, use_cb, on_delta, has_ch, delta_ch, $&emitted)
         if att.ok { << ~att.resp }
         if emitted {
             g.stats.failed_requests += 1
+            gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
             >>> errors.new(last_err)
         }
     }
+    _ := empty_pt
     g.stats.failed_requests += 1
+    gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
     >>> errors.new(last_err)
 }
 
@@ -833,11 +1309,12 @@ fn chat_stream_weighted_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, 
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
     g.stats.total_requests += 1
+    gw_record_stats_req(g, false, false, false, 0, 0, 0.0)
 
     $total_w := 0
     for i in 0:g.routes.len {
         rt := &g.routes[i]
-        if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+        if rt.enabled && !gw_is_circuit_open(g, rt, now_ms) {
             $w := rt.weight
             if w <= 0 { w = 1 }
             total_w += w
@@ -850,7 +1327,7 @@ fn chat_stream_weighted_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, 
         $acc := 0
         for i in 0:g.routes.len {
             rt := &g.routes[i]
-            if rt.enabled && rt.circuit_open_until_ms <= now_ms {
+            if rt.enabled && !gw_is_circuit_open(g, rt, now_ms) {
                 $w := rt.weight
                 if w <= 0 { w = 1 }
                 acc += w
@@ -871,10 +1348,12 @@ fn chat_stream_weighted_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, 
         if att.ok { << ~att.resp }
         if emitted {
             g.stats.failed_requests += 1
+            gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
             >>> errors.new(last_err)
         }
     }
     g.stats.failed_requests += 1
+    gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
     >>> errors.new(last_err)
 }
 
@@ -894,37 +1373,114 @@ fn copy_gw_f32(src &[]f32) []f32 {
     << out
 }
 
+fn encode_cache_entry_json(model &string, key_text &string, resp_content &string, emb &[]f32, expires_ms int) string {
+    $s := "{\"model\":" + json.quote(model) +
+          ",\"key_text\":" + json.quote(key_text) +
+          ",\"response_content\":" + json.quote(resp_content) +
+          ",\"expires_ms\":" + str(expires_ms) +
+          ",\"embedding\":["
+    for i in 0:emb.len {
+        if i > 0 { s = s + "," }
+        s = s + gw_fmt_f64(f64(emb[i]))
+    }
+    << s + "]}"
+}
+
 pub fn (g $&Gateway) chat_cached(req &openai.ChatRequest, query_emb &[]f32) openai.ChatResponse {
+    now_ms := time.now_time().unix_milli()
     if g.cache_enabled && query_emb.len > 0 {
-        $best_idx := -1
-        $best_sim := -2.0
-        for i in 0:g.cache.len {
-            ce := &g.cache[i]
-            if ce.embedding.len == query_emb.len {
-                sim := f64(tensor.cosine_similarity_f32(&ce.embedding, query_emb, query_emb.len))
+        if g.redis_enabled {
+            ckey := g.redis_prefix + "cache:entries"
+            raw_list := gw_redis_lrange(g, ckey, g.cache_max_entries - 1)
+            $best_sim := -2.0
+            $best_model := ""
+            $best_content := ""
+            for i in 0:raw_list.len {
+                ed := json.parse(&raw_list[i])
+                if !ed.ok() || !ed.is_dict(ed.root()) { -> }
+                er := ed.root()
+                exp := gw_doc_int(&ed, er, "expires_ms", 0)
+                if exp > 0 && exp <= now_ms { -> }
+                em_node := gw_doc_child(&ed, er, "embedding")
+                if em_node < 0 || !ed.is_list(em_node) || ed.count(em_node) != query_emb.len { -> }
+                $emb := []f32{}
+                emb.reserve(query_emb.len)
+                $valid_e := true
+                for j in 0:query_emb.len {
+                    en := ed.at(em_node, j) >>> (_) {
+                        valid_e = false
+                        <-
+                    }
+                    if !ed.is_number(en) {
+                        valid_e = false
+                        <-
+                    }
+                    fv := ed.as_f64(en) >>> (_) {
+                        valid_e = false
+                        <-
+                    }
+                    emb.push(f32(fv))
+                }
+                if !valid_e || emb.len != query_emb.len { -> }
+                sim := f64(tensor.cosine_similarity_f32(&emb, query_emb, query_emb.len))
                 if sim > best_sim {
                     best_sim = sim
-                    best_idx = i
+                    best_model = gw_doc_str(&ed, er, "model", "")
+                    best_content = gw_doc_str(&ed, er, "response_content", "")
                 }
             }
-        }
-        if best_idx >= 0 && best_sim >= g.cache_threshold {
-            g.stats.total_requests += 1
-            g.stats.cache_hits += 1
-            ce := &g.cache[best_idx]
-            << openai.ChatResponse{
-                id: "cache_hit",
-                model: ce.model + "",
-                content: ce.response_content + "",
-                reasoning_content: "",
-                finish_reason: "stop",
-                tool_calls: []openai.ToolCall{},
-                usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+            if best_sim >= g.cache_threshold {
+                g.stats.total_requests += 1
+                g.stats.cache_hits += 1
+                gw_record_stats_req(g, true, false, false, 0, 0, 0.0)
+                << openai.ChatResponse{
+                    id: "cache_hit",
+                    model: best_model,
+                    content: best_content,
+                    reasoning_content: "",
+                    finish_reason: "stop",
+                    tool_calls: []openai.ToolCall{},
+                    usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+                }
+            }
+        } else {
+            $best_idx := -1
+            $best_sim := -2.0
+            for i in 0:g.cache.len {
+                ce := &g.cache[i]
+                if ce.embedding.len == query_emb.len {
+                    sim := f64(tensor.cosine_similarity_f32(&ce.embedding, query_emb, query_emb.len))
+                    if sim > best_sim {
+                        best_sim = sim
+                        best_idx = i
+                    }
+                }
+            }
+            if best_idx >= 0 && best_sim >= g.cache_threshold {
+                g.stats.total_requests += 1
+                g.stats.cache_hits += 1
+                ce := &g.cache[best_idx]
+                << openai.ChatResponse{
+                    id: "cache_hit",
+                    model: ce.model + "",
+                    content: ce.response_content + "",
+                    reasoning_content: "",
+                    finish_reason: "stop",
+                    tool_calls: []openai.ToolCall{},
+                    usage: openai.Usage{prompt_tokens: 0, completion_tokens: 0, total_tokens: 0}
+                }
             }
         }
     }
     resp := g.chat_with_fallback(req) >>>
     if g.cache_enabled && query_emb.len > 0 {
+        $last_u := ""
+        if req.messages.len > 0 { last_u = req.messages[req.messages.len - 1].content + "" }
+        if g.redis_enabled {
+            exp_ms := now_ms + g.cache_ttl_sec * 1000
+            payload := encode_cache_entry_json(&resp.model, &last_u, &resp.content, query_emb, exp_ms)
+            gw_redis_lpush_trim_ex(g, g.redis_prefix + "cache:entries", payload, g.cache_max_entries, g.cache_ttl_sec)
+        }
         if g.cache.len >= g.cache_max_entries && g.cache.len > 0 {
             $next_c := []SemanticCacheEntry{}
             for i in 1:g.cache.len {
@@ -938,8 +1494,6 @@ pub fn (g $&Gateway) chat_cached(req &openai.ChatRequest, query_emb &[]f32) open
             }
             g.cache = ~next_c
         }
-        $last_u := ""
-        if req.messages.len > 0 { last_u = req.messages[req.messages.len - 1].content + "" }
         g.cache.push(SemanticCacheEntry{
             key_text: last_u,
             embedding: copy_gw_f32(query_emb),
@@ -951,6 +1505,30 @@ pub fn (g $&Gateway) chat_cached(req &openai.ChatRequest, query_emb &[]f32) open
 }
 
 pub fn (g &Gateway) get_stats() GatewayStats {
+    if g.redis_enabled {
+        kvs := gw_redis_hgetall_str(g, g.redis_prefix + "stats")
+        if kvs.len >= 2 {
+            $st := GatewayStats{
+                total_requests: 0, cache_hits: 0, fallbacks: 0, failed_requests: 0,
+                total_prompt_tokens: 0, total_completion_tokens: 0, estimated_cost_usd: 0.0
+            }
+            $i := 0
+            while i + 1 < kvs.len {
+                k := kvs[i]
+                val_idx := i + 1
+                v := gw_parse_int_or(&kvs[val_idx], 0)
+                if k == "total_requests" { st.total_requests = v }
+                else if k == "cache_hits" { st.cache_hits = v }
+                else if k == "fallbacks" { st.fallbacks = v }
+                else if k == "failed_requests" { st.failed_requests = v }
+                else if k == "total_prompt_tokens" { st.total_prompt_tokens = v }
+                else if k == "total_completion_tokens" { st.total_completion_tokens = v }
+                else if k == "estimated_cost_micro_usd" { st.estimated_cost_usd = f64(v) / 1000000.0 }
+                i += 2
+            }
+            << st
+        }
+    }
     << g.stats
 }
 
@@ -959,19 +1537,20 @@ fn gw_fmt_f64(v f64) string {
 }
 
 pub fn (g &Gateway) format_metrics_prometheus() string {
-    cost_s := gw_fmt_f64(g.stats.estimated_cost_usd)
+    st := g.get_stats()
+    cost_s := gw_fmt_f64(st.estimated_cost_usd)
     << "# TYPE xu_gateway_requests_total counter\n" +
-       "xu_gateway_requests_total " + str(g.stats.total_requests) + "\n" +
+       "xu_gateway_requests_total " + str(st.total_requests) + "\n" +
        "# TYPE xu_gateway_cache_hits_total counter\n" +
-       "xu_gateway_cache_hits_total " + str(g.stats.cache_hits) + "\n" +
+       "xu_gateway_cache_hits_total " + str(st.cache_hits) + "\n" +
        "# TYPE xu_gateway_fallbacks_total counter\n" +
-       "xu_gateway_fallbacks_total " + str(g.stats.fallbacks) + "\n" +
+       "xu_gateway_fallbacks_total " + str(st.fallbacks) + "\n" +
        "# TYPE xu_gateway_failed_total counter\n" +
-       "xu_gateway_failed_total " + str(g.stats.failed_requests) + "\n" +
+       "xu_gateway_failed_total " + str(st.failed_requests) + "\n" +
        "# TYPE xu_gateway_prompt_tokens_total counter\n" +
-       "xu_gateway_prompt_tokens_total " + str(g.stats.total_prompt_tokens) + "\n" +
+       "xu_gateway_prompt_tokens_total " + str(st.total_prompt_tokens) + "\n" +
        "# TYPE xu_gateway_completion_tokens_total counter\n" +
-       "xu_gateway_completion_tokens_total " + str(g.stats.total_completion_tokens) + "\n" +
+       "xu_gateway_completion_tokens_total " + str(st.total_completion_tokens) + "\n" +
        "# TYPE xu_gateway_estimated_cost_usd gauge\n" +
        "xu_gateway_estimated_cost_usd " + cost_s + "\n"
 }

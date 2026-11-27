@@ -56,6 +56,8 @@ pub struct GenerateRequest {
     pub response_mime_type string
     pub response_schema_json string
     pub thinking_budget int
+    pub safety_settings_json string
+    pub extra_body_json string
 }
 
 pub struct FunctionCall {
@@ -196,7 +198,9 @@ pub fn generate_request(model string, contents []Content) GenerateRequest {
         stop_sequences: []string{},
         response_mime_type: "",
         response_schema_json: "",
-        thinking_budget: -1
+        thinking_budget: -1,
+        safety_settings_json: "",
+        extra_body_json: ""
     }
 }
 
@@ -332,6 +336,13 @@ fn encode_generate_body(req &GenerateRequest) string {
             gcnt += 1
         }
         s = s + "}"
+    }
+    if req.safety_settings_json.len > 0 {
+        s = s + ",\"safetySettings\":" + req.safety_settings_json
+    }
+    if req.extra_body_json.len > 2 && req.extra_body_json[0] == 123 && req.extra_body_json[req.extra_body_json.len - 1] == 125 {
+        inner := req.extra_body_json[1:(req.extra_body_json.len - 1)]
+        if inner.len > 0 { s = s + "," + inner }
     }
     << s + "}"
 }

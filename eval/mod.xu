@@ -548,6 +548,410 @@ pub struct SchemaCheckResult {
     pub type_mismatches []string
 }
 
+pub struct RawSchemaResult {
+    pub valid bool
+    pub errors []string
+}
+
+fn eval_utf8_len(s &string) int {
+    $n := 0
+    for i in 0:s.len {
+        b := (*s)[i] & 255
+        if (b & 192) != 128 { n += 1 }
+    }
+    << n
+}
+
+fn eval_doc_at_or(doc &json.Doc, arr int, idx int) int {
+    << doc.at(arr, idx) >>> (_) { << -1 }
+}
+
+fn eval_str_in(xs &[]string, target &string) bool {
+    for i in 0:xs.len {
+        if xs[i] == *target { << true }
+    }
+    << false
+}
+
+fn eval_json_nodes_equal(a_doc &json.Doc, a int, b_doc &json.Doc, b int, depth int) bool {
+    if depth > 32 { << false }
+    if a_doc.is_null(a) { << b_doc.is_null(b) }
+    if a_doc.is_bool(a) {
+        if !b_doc.is_bool(b) { << false }
+        ba := a_doc.as_bool(a) >>> (_) { << false }
+        bb := b_doc.as_bool(b) >>> (_) { << false }
+        << ba == bb
+    }
+    if a_doc.is_number(a) {
+        if !b_doc.is_number(b) { << false }
+        fa := a_doc.as_f64(a) >>> (_) { << false }
+        fb := b_doc.as_f64(b) >>> (_) { << false }
+        << fa == fb
+    }
+    if a_doc.is_string(a) {
+        if !b_doc.is_string(b) { << false }
+        sa := a_doc.as_string(a) >>> (_) { << false }
+        sb := b_doc.as_string(b) >>> (_) { << false }
+        << sa == sb
+    }
+    if a_doc.is_list(a) {
+        if !b_doc.is_list(b) { << false }
+        ca := a_doc.count(a)
+        cb := b_doc.count(b)
+        if ca != cb { << false }
+        for i in 0:ca {
+            ia := eval_doc_at_or(a_doc, a, i)
+            ib := eval_doc_at_or(b_doc, b, i)
+            if ia < 0 || ib < 0 || !eval_json_nodes_equal(a_doc, ia, b_doc, ib, depth + 1) { << false }
+        }
+        << true
+    }
+    if a_doc.is_dict(a) {
+        if !b_doc.is_dict(b) { << false }
+        ka := a_doc.dict_keys(a)
+        kb := b_doc.dict_keys(b)
+        if ka.len != kb.len { << false }
+        for i in 0:ka.len {
+            k := &ka[i]
+            if !b_doc.has(b, (*k) + "") { << false }
+            va := eval_doc_get_or(a_doc, a, (*k) + "")
+            vb := eval_doc_get_or(b_doc, b, (*k) + "")
+            if va < 0 || vb < 0 || !eval_json_nodes_equal(a_doc, va, b_doc, vb, depth + 1) { << false }
+        }
+        << true
+    }
+    << false
+}
+
+fn eval_unescape_ptr(seg &string) string {
+    $out := ""
+    $i := 0
+    while i < seg.len {
+        ch := (*seg)[i] & 255
+        if ch == 126 && i + 1 < seg.len {
+            nx := (*seg)[i + 1] & 255
+            if nx == 48 {
+                out.push_str("~")
+                i += 2
+                ->
+            }
+            if nx == 49 {
+                out.push_str("/")
+                i += 2
+                ->
+            }
+        }
+        out.push_str(string_from_byte(ch))
+        i += 1
+    }
+    << out
+}
+
+fn resolve_schema_ref(sch_doc &json.Doc, sroot int, ref_str &string) int {
+    if !strings.has_prefix(ref_str, "#/") { << -1 }
+    tail := (*ref_str)[2:ref_str.len]
+    parts := strings.split(&tail, "/")
+    $cur := sroot
+    for i in 0:parts.len {
+        key := eval_unescape_ptr(&parts[i])
+        if !sch_doc.is_dict(cur) || !sch_doc.has(cur, key + "") { << -1 }
+        cur = eval_doc_get_or(sch_doc, cur, key + "")
+        if cur < 0 { << -1 }
+    }
+    << cur
+}
+
+fn eval_node_as_bool(doc &json.Doc, n int, def bool) bool {
+    << doc.as_bool(n) >>> (_) { << def }
+}
+fn eval_single_schema_type(doc &json.Doc, vnode int, ty &string) bool {
+    if *ty == "string" { << doc.is_string(vnode) }
+    if *ty == "number" { << doc.is_number(vnode) }
+    if *ty == "integer" || *ty == "int" {
+        if !doc.is_number(vnode) { << false }
+        fv := doc.as_f64(vnode) >>> (_) { << false }
+        << fv == math.floor(fv)
+    }
+    if *ty == "boolean" || *ty == "bool" { << doc.is_bool(vnode) }
+    if *ty == "array" || *ty == "list" { << doc.is_list(vnode) }
+    if *ty == "object" || *ty == "dict" { << doc.is_dict(vnode) }
+    if *ty == "null" { << doc.is_null(vnode) }
+    << true
+}
+
+fn validate_schema_node(val_doc &json.Doc, vnode int, sch_doc &json.Doc, sroot int, snode int,
+                        path string, depth int, errs $&[]string) {
+    if depth > 48 {
+        errs.push(path + ": schema recursion depth exceeded")
+        <<
+    }
+    if snode < 0 || !sch_doc.is_dict(snode) { << }
+
+    // $ref
+    if sch_doc.has(snode, "$$ref") {
+        ref_str := eval_json_str_or(sch_doc, snode, "$$ref", "")
+        target := resolve_schema_ref(sch_doc, sroot, &ref_str)
+        if target < 0 {
+            errs.push(path + ": unresolved $$ref " + ref_str)
+            <<
+        }
+        validate_schema_node(val_doc, vnode, sch_doc, sroot, target, path, depth + 1, errs)
+    }
+
+    // allOf / anyOf / oneOf
+    if sch_doc.has(snode, "allOf") {
+        an := eval_doc_get_or(sch_doc, snode, "allOf")
+        if an >= 0 && sch_doc.is_list(an) {
+            cnt := sch_doc.count(an)
+            for i in 0:cnt {
+                sub := eval_doc_at_or(sch_doc, an, i)
+                if sub >= 0 { validate_schema_node(val_doc, vnode, sch_doc, sroot, sub, path, depth + 1, errs) }
+            }
+        }
+    }
+    if sch_doc.has(snode, "anyOf") {
+        an := eval_doc_get_or(sch_doc, snode, "anyOf")
+        if an >= 0 && sch_doc.is_list(an) {
+            cnt := sch_doc.count(an)
+            $matched := false
+            for i in 0:cnt {
+                sub := eval_doc_at_or(sch_doc, an, i)
+                $sub_errs := []string{}
+                validate_schema_node(val_doc, vnode, sch_doc, sroot, sub, path, depth + 1, $&sub_errs)
+                if sub_errs.len == 0 {
+                    matched = true
+                    <-
+                }
+            }
+            if !matched { errs.push(path + ": failed all anyOf branches") }
+        }
+    }
+    if sch_doc.has(snode, "oneOf") {
+        an := eval_doc_get_or(sch_doc, snode, "oneOf")
+        if an >= 0 && sch_doc.is_list(an) {
+            cnt := sch_doc.count(an)
+            $match_cnt := 0
+            for i in 0:cnt {
+                sub := eval_doc_at_or(sch_doc, an, i)
+                $sub_errs := []string{}
+                validate_schema_node(val_doc, vnode, sch_doc, sroot, sub, path, depth + 1, $&sub_errs)
+                if sub_errs.len == 0 { match_cnt += 1 }
+            }
+            if match_cnt != 1 { errs.push(path + ": matched " + str(match_cnt) + " oneOf branches (expected 1)") }
+        }
+    }
+
+    // const / enum
+    if sch_doc.has(snode, "const") {
+        cn := eval_doc_get_or(sch_doc, snode, "const")
+        if cn >= 0 && !eval_json_nodes_equal(val_doc, vnode, sch_doc, cn, 0) {
+            errs.push(path + ": const mismatch")
+        }
+    }
+    if sch_doc.has(snode, "enum") {
+        en := eval_doc_get_or(sch_doc, snode, "enum")
+        if en >= 0 && sch_doc.is_list(en) {
+            cnt := sch_doc.count(en)
+            $ok := false
+            for i in 0:cnt {
+                item := eval_doc_at_or(sch_doc, en, i)
+                if item >= 0 && eval_json_nodes_equal(val_doc, vnode, sch_doc, item, 0) {
+                    ok = true
+                    <-
+                }
+            }
+            if !ok { errs.push(path + ": value not in enum") }
+        }
+    }
+
+    // type (string or array of strings)
+    if sch_doc.has(snode, "type") {
+        tn := eval_doc_get_or(sch_doc, snode, "type")
+        if tn >= 0 && sch_doc.is_string(tn) {
+            ty := sch_doc.as_string(tn) >>> (_) { << }
+            if !eval_single_schema_type(val_doc, vnode, &ty) {
+                errs.push(path + ": expected type " + ty)
+            }
+        } else if tn >= 0 && sch_doc.is_list(tn) {
+            cnt := sch_doc.count(tn)
+            $ok := false
+            for i in 0:cnt {
+                it := eval_doc_at_or(sch_doc, tn, i)
+                if it >= 0 && sch_doc.is_string(it) {
+                    ty := sch_doc.as_string(it) >>> (_) { << }
+                    if eval_single_schema_type(val_doc, vnode, &ty) {
+                        ok = true
+                        <-
+                    }
+                }
+            }
+            if !ok { errs.push(path + ": value matches none of allowed types") }
+        }
+    }
+
+    // String constraints
+    if val_doc.is_string(vnode) {
+        sv := val_doc.as_string(vnode) >>> (_) { << }
+        ulen := eval_utf8_len(&sv)
+        if sch_doc.has(snode, "minLength") {
+            mn := eval_doc_get_or(sch_doc, snode, "minLength")
+            if mn >= 0 && sch_doc.is_number(mn) {
+                mv := sch_doc.as_int(mn) >>> (_) { << }
+                if ulen < mv { errs.push(path + ": string length " + str(ulen) + " < minLength " + str(mv)) }
+            }
+        }
+        if sch_doc.has(snode, "maxLength") {
+            mx := eval_doc_get_or(sch_doc, snode, "maxLength")
+            if mx >= 0 && sch_doc.is_number(mx) {
+                mv := sch_doc.as_int(mx) >>> (_) { << }
+                if ulen > mv { errs.push(path + ": string length " + str(ulen) + " > maxLength " + str(mv)) }
+            }
+        }
+    }
+
+    // Number constraints
+    if val_doc.is_number(vnode) {
+        fv := val_doc.as_f64(vnode) >>> (_) { << }
+        if sch_doc.has(snode, "minimum") {
+            mn := eval_doc_get_or(sch_doc, snode, "minimum")
+            if mn >= 0 && sch_doc.is_number(mn) {
+                mv := sch_doc.as_f64(mn) >>> (_) { << }
+                if fv < mv { errs.push(path + ": value < minimum") }
+            }
+        }
+        if sch_doc.has(snode, "maximum") {
+            mx := eval_doc_get_or(sch_doc, snode, "maximum")
+            if mx >= 0 && sch_doc.is_number(mx) {
+                mv := sch_doc.as_f64(mx) >>> (_) { << }
+                if fv > mv { errs.push(path + ": value > maximum") }
+            }
+        }
+        if sch_doc.has(snode, "exclusiveMinimum") {
+            emn := eval_doc_get_or(sch_doc, snode, "exclusiveMinimum")
+            if emn >= 0 && sch_doc.is_number(emn) {
+                mv := sch_doc.as_f64(emn) >>> (_) { << }
+                if fv <= mv { errs.push(path + ": value <= exclusiveMinimum") }
+            }
+        }
+        if sch_doc.has(snode, "exclusiveMaximum") {
+            emx := eval_doc_get_or(sch_doc, snode, "exclusiveMaximum")
+            if emx >= 0 && sch_doc.is_number(emx) {
+                mv := sch_doc.as_f64(emx) >>> (_) { << }
+                if fv >= mv { errs.push(path + ": value >= exclusiveMaximum") }
+            }
+        }
+    }
+
+    // Array constraints
+    if val_doc.is_list(vnode) {
+        cnt := val_doc.count(vnode)
+        if sch_doc.has(snode, "minItems") {
+            mn := eval_doc_get_or(sch_doc, snode, "minItems")
+            if mn >= 0 && sch_doc.is_number(mn) {
+                mv := sch_doc.as_int(mn) >>> (_) { << }
+                if cnt < mv { errs.push(path + ": array len " + str(cnt) + " < minItems " + str(mv)) }
+            }
+        }
+        if sch_doc.has(snode, "maxItems") {
+            mx := eval_doc_get_or(sch_doc, snode, "maxItems")
+            if mx >= 0 && sch_doc.is_number(mx) {
+                mv := sch_doc.as_int(mx) >>> (_) { << }
+                if cnt > mv { errs.push(path + ": array len " + str(cnt) + " > maxItems " + str(mv)) }
+            }
+        }
+        if sch_doc.has(snode, "items") {
+            item_sch := eval_doc_get_or(sch_doc, snode, "items")
+            if item_sch >= 0 && sch_doc.is_dict(item_sch) {
+                for i in 0:cnt {
+                    elem := eval_doc_at_or(val_doc, vnode, i)
+                    if elem >= 0 {
+                        validate_schema_node(val_doc, elem, sch_doc, sroot, item_sch, path + "[" + str(i) + "]", depth + 1, errs)
+                    }
+                }
+            }
+        }
+    }
+
+    // Object constraints
+    if val_doc.is_dict(vnode) {
+        if sch_doc.has(snode, "required") {
+            rn := eval_doc_get_or(sch_doc, snode, "required")
+            if rn >= 0 && sch_doc.is_list(rn) {
+                rcnt := sch_doc.count(rn)
+                for i in 0:rcnt {
+                    kn := eval_doc_at_or(sch_doc, rn, i)
+                    if kn >= 0 && sch_doc.is_string(kn) {
+                        req_k := sch_doc.as_string(kn) >>> (_) { << }
+                        if !val_doc.has(vnode, req_k + "") {
+                            errs.push(path + ": missing required key '" + req_k + "'")
+                        }
+                    }
+                }
+            }
+        }
+        $prop_keys := []string{}
+        $props_node := -1
+        if sch_doc.has(snode, "properties") {
+            props_node = eval_doc_get_or(sch_doc, snode, "properties")
+            if props_node >= 0 && sch_doc.is_dict(props_node) {
+                prop_keys = sch_doc.dict_keys(props_node)
+                for i in 0:prop_keys.len {
+                    pk := &prop_keys[i]
+                    if val_doc.has(vnode, (*pk) + "") {
+                        child_v := eval_doc_get_or(val_doc, vnode, (*pk) + "")
+                        child_s := eval_doc_get_or(sch_doc, props_node, (*pk) + "")
+                        if child_v >= 0 && child_s >= 0 {
+                            validate_schema_node(val_doc, child_v, sch_doc, sroot, child_s, path + "." + (*pk), depth + 1, errs)
+                        }
+                    }
+                }
+            }
+        }
+        if sch_doc.has(snode, "additionalProperties") {
+            ap := eval_doc_get_or(sch_doc, snode, "additionalProperties")
+            if ap >= 0 {
+                vkeys := val_doc.dict_keys(vnode)
+                if sch_doc.is_bool(ap) {
+                    allow_extra := eval_node_as_bool(sch_doc, ap, true)
+                    if !allow_extra {
+                        for vi in 0:vkeys.len {
+                            vk := &vkeys[vi]
+                            if !eval_str_in(&prop_keys, vk) {
+                                errs.push(path + ": additional property not allowed: " + (*vk))
+                            }
+                        }
+                    }
+                } else if sch_doc.is_dict(ap) {
+                    for vi in 0:vkeys.len {
+                        vk := &vkeys[vi]
+                        if !eval_str_in(&prop_keys, vk) {
+                            child_v := eval_doc_get_or(val_doc, vnode, (*vk) + "")
+                            if child_v >= 0 {
+                                validate_schema_node(val_doc, child_v, sch_doc, sroot, ap, path + "." + (*vk), depth + 1, errs)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn evaluate_json_schema_raw(output &string, schema_json &string) RawSchemaResult {
+    raw := eval_strip_json_fence(output)
+    val_doc := json.parse(&raw)
+    if !val_doc.ok() {
+        << RawSchemaResult{valid: false, errors: ["output is not valid JSON: " + val_doc.error()]}
+    }
+    sch_doc := json.parse(schema_json)
+    if !sch_doc.ok() || !sch_doc.is_dict(sch_doc.root()) {
+        << RawSchemaResult{valid: false, errors: ["invalid JSON Schema document"]}
+    }
+    $errs := []string{}
+    validate_schema_node(&val_doc, val_doc.root(), &sch_doc, sch_doc.root(), sch_doc.root(), "$$", 0, $&errs)
+    << RawSchemaResult{valid: errs.len == 0, errors: ~errs}
+}
+
 fn eval_type_matches(doc &json.Doc, node int, expected &string) bool {
     if *expected == "string" { << doc.is_string(node) }
     if *expected == "number" { << doc.is_number(node) }

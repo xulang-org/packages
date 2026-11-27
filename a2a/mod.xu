@@ -1,11 +1,14 @@
 @"github.com/xulang-org/packages/a2a"
 
 #crypto/tls
+#database/sql/driver
 #encoding/json
 #errors
 #net
 #net/http
 #strings
+#time
+sqlite #github.com/xulang-org/packages/sqlite
 transport #github.com/xulang-org/packages/transport
 
 pub struct AgentSkill {
@@ -53,6 +56,12 @@ fn default_stream_handler(tid &string, inp &string, ch chan StreamChunk) string 
     << ""
 }
 
+fn default_auth_hook(req_path &string, auth_header &string) bool {
+    _ := req_path
+    _ := auth_header
+    << true
+}
+
 pub struct Server {
     pub card AgentCard
     handler fn(&string, &string) string
@@ -60,6 +69,10 @@ pub struct Server {
     has_stream_handler bool
     tasks []Task
     next_id int
+    sqlite_path string
+    api_key string
+    auth_hook fn(&string, &string) bool
+    has_auth_hook bool
 }
 
 pub struct Client {
@@ -156,13 +169,84 @@ pub fn new_server(card AgentCard, handler fn(&string, &string) string) Server {
         stream_handler: default_stream_handler,
         has_stream_handler: false,
         tasks: []Task{},
-        next_id: 1
+        next_id: 1,
+        sqlite_path: "",
+        api_key: "",
+        auth_hook: default_auth_hook,
+        has_auth_hook: false
     }
 }
 
 pub fn (s $&Server) set_stream_handler(handler fn(&string, &string, chan StreamChunk) string) {
     s.stream_handler = handler
     s.has_stream_handler = true
+}
+
+pub fn (s $&Server) set_api_key(token string) {
+    s.api_key = token + ""
+}
+
+pub fn (s $&Server) set_auth_hook(hook fn(&string, &string) bool) {
+    s.auth_hook = hook
+    s.has_auth_hook = true
+}
+
+fn a2a_strip_cell(cell &string) string {
+    if cell.len >= 2 && (*cell)[1] == 58 {
+        if (*cell)[0] == 110 { << "" }
+        << (*cell)[2:cell.len]
+    }
+    << (*cell) + ""
+}
+
+fn a2a_persist_task(sqlite_path &string, t &Task) {
+    if sqlite_path.len == 0 { << }
+    conn := sqlite.open((*sqlite_path) + "")
+    tj := task_to_json(t)
+    now := time.now()
+    args := [driver.NamedValue{name: "", ordinal: 1, value: t.id + ""}, driver.NamedValue{name: "", ordinal: 2, value: t.state + ""}, driver.NamedValue{name: "", ordinal: 3, value: tj}, driver.NamedValue{name: "", ordinal: 4, value: now}]
+    _ := conn.exec("INSERT OR REPLACE INTO a2a_tasks (id, state, task_json, updated_at) VALUES (?, ?, ?, ?)", args)
+    _ := conn.close()
+}
+
+fn a2a_parse_int_or(s string, def int) int {
+    << parse_int(s) >>> (_) { << def }
+}
+
+pub fn (s $&Server) set_sqlite_store(path string) int {
+    conn := sqlite.open(path + "")
+    _ := conn.exec("PRAGMA journal_mode=WAL", []driver.NamedValue{})
+    res := conn.exec("CREATE TABLE IF NOT EXISTS a2a_tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL, task_json TEXT NOT NULL, updated_at INTEGER NOT NULL)", []driver.NamedValue{})
+    if res.err.len > 0 {
+        _ := conn.close()
+        >>> errors.new("a2a: sqlite init failed: " + res.err)
+    }
+    rows := conn.query("SELECT task_json FROM a2a_tasks ORDER BY updated_at ASC", []driver.NamedValue{})
+    if rows.err.len > 0 {
+        _ := conn.close()
+        >>> errors.new("a2a: sqlite load failed: " + rows.err)
+    }
+    s.tasks = []Task{}
+    $max_num := 0
+    for i in 0:rows.cells.len {
+        raw := a2a_strip_cell(&rows.cells[i])
+        doc := json.parse(&raw)
+        if doc.ok() && doc.is_dict(doc.root()) {
+            t := parse_task_json(&doc, doc.root())
+            if strings.has_prefix(&t.id, "task_") {
+                suf := t.id[5:t.id.len]
+                n := a2a_parse_int_or(suf, 0)
+                if n > max_num { max_num = n }
+            }
+            s.tasks.push(t)
+        }
+    }
+    if max_num >= s.next_id {
+        s.next_id = max_num + 1
+    }
+    _ := conn.close()
+    s.sqlite_path = path + ""
+    << s.tasks.len
 }
 
 fn copy_history(src &[]TaskMessage) []TaskMessage {
@@ -365,6 +449,7 @@ pub fn (s $&Server) handle_rpc(body &string) string {
         } else {
             s.tasks.push(copy_task(&t))
         }
+        a2a_persist_task(&s.sqlite_path, &t)
         tjson := task_to_json(&t)
         << rpc_ok(&id_json, &tjson)
     }
@@ -386,6 +471,7 @@ pub fn (s $&Server) handle_rpc(body &string) string {
         }
         if method == "tasks/cancel" {
             s.tasks[found].state = "canceled"
+            a2a_persist_task(&s.sqlite_path, &s.tasks[found])
         }
         tf := &s.tasks[found]
         tjson := task_to_json(tf)
@@ -456,6 +542,7 @@ fn copy_tasks_slice(src &[]Task) []Task {
 struct StoreState {
     tasks []Task
     next_id int
+    sqlite_path string
 }
 
 fn store_alloc_id(store_ch chan StoreState, req_tid string) string {
@@ -483,6 +570,7 @@ fn store_upsert(store_ch chan StoreState, t Task) {
     } else {
         st.tasks.push(copy_task(&t))
     }
+    a2a_persist_task(&st.sqlite_path, &t)
     store_ch <- st
 }
 
@@ -510,6 +598,7 @@ fn store_cancel_task(store_ch chan StoreState, tid &string, found_out $&bool) Ta
             st.tasks[i].state = "canceled"
             *found_out = true
             res = copy_task(&st.tasks[i])
+            a2a_persist_task(&st.sqlite_path, &res)
             <-
         }
     }
@@ -606,10 +695,29 @@ fn handle_rpc_concurrent(body &string, handler fn(&string, &string) string, stor
     << rpc_err(&id_json, -32601, "method not found: " + method)
 }
 
+fn check_http_auth(api_key &string, has_hook bool, hook fn(&string, &string) bool,
+                   req_path &string, hreq &http.Request) bool {
+    auth_hdr := hreq.header("Authorization")
+    if api_key.len > 0 {
+        xkey := hreq.header("X-API-Key")
+        expected := "Bearer " + (*api_key)
+        if auth_hdr != expected && xkey != *api_key {
+            << false
+        }
+    }
+    if has_hook {
+        if !hook(req_path, &auth_hdr) {
+            << false
+        }
+    }
+    << true
+}
+
 fn a2a_conn_worker(fd int, card AgentCard, handler fn(&string, &string) string,
                    stream_handler fn(&string, &string, chan StreamChunk) string,
-                   has_stream_handler bool, store_ch chan StoreState) {
-    cors := "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\n"
+                   has_stream_handler bool, store_ch chan StoreState,
+                   api_key string, auth_hook fn(&string, &string) bool, has_auth_hook bool) {
+    cors := "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n"
     $hreq := http.new_request()
     if !read_http_req(fd, $&hreq) {
         _ := conn_close_quiet(fd)
@@ -626,6 +734,12 @@ fn a2a_conn_worker(fd int, card AgentCard, handler fn(&string, &string) string,
     if method == "GET" && (req_path == "/.well-known/agent.json" || req_path == "/.well-known/agent-card.json") {
         card_json := format_agent_card_json(&card)
         _ := write_http_raw(fd, "HTTP/1.1 200 OK", cors, "application/json", &card_json)
+        _ := conn_close_quiet(fd)
+        <<
+    }
+    if !check_http_auth(&api_key, has_auth_hook, auth_hook, &req_path, &hreq) {
+        unauth := "{\"error\":\"unauthorized\"}"
+        _ := write_http_raw(fd, "HTTP/1.1 401 Unauthorized", cors + "WWW-Authenticate: Bearer\r\n", "application/json", &unauth)
         _ := conn_close_quiet(fd)
         <<
     }
@@ -708,12 +822,12 @@ pub fn (s $&Server) serve_http_server(srv $&http.Server) int {
         >>> errors.new("a2a: HTTP server is not listening")
     }
     store_ch := chan StoreState{cap: 1}
-    store_ch <- StoreState{tasks: copy_tasks_slice(&s.tasks), next_id: s.next_id}
+    store_ch <- StoreState{tasks: copy_tasks_slice(&s.tasks), next_id: s.next_id, sqlite_path: s.sqlite_path + ""}
     for {
         fd := accept_fd_or(srv.lfd)
         if fd < 0 { <- }
         card_copy := copy_agent_card(&s.card)
-        xu a2a_conn_worker(fd, card_copy, s.handler, s.stream_handler, s.has_stream_handler, store_ch)
+        xu a2a_conn_worker(fd, card_copy, s.handler, s.stream_handler, s.has_stream_handler, store_ch, s.api_key + "", s.auth_hook, s.has_auth_hook)
     }
     << 0
 }

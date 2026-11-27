@@ -72,6 +72,7 @@ pub struct MessagesRequest {
     pub stop_sequences []string
     pub thinking_budget_tokens int
     pub tool_choice_json string
+    pub extra_body_json string
 }
 
 pub struct MessagesResponse {
@@ -213,7 +214,8 @@ pub fn messages_request(model string, messages []Message, max_tokens int) Messag
         has_top_p: false,
         stop_sequences: []string{},
         thinking_budget_tokens: 0,
-        tool_choice_json: ""
+        tool_choice_json: "",
+        extra_body_json: ""
     }
 }
 
@@ -351,6 +353,10 @@ fn encode_messages_body(req &MessagesRequest, stream bool) string {
     }
     if stream {
         s = s + ",\"stream\":true"
+    }
+    if req.extra_body_json.len > 2 && req.extra_body_json[0] == 123 && req.extra_body_json[req.extra_body_json.len - 1] == 125 {
+        inner := req.extra_body_json[1:(req.extra_body_json.len - 1)]
+        if inner.len > 0 { s = s + "," + inner }
     }
     << s + "}"
 }
