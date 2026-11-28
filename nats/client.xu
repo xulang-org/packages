@@ -60,10 +60,10 @@ fn parse_int_or(s string, def int) int {
 
 fn (c $&Client) fill() int {
     chunk := net.conn_read(c.fd, 4096) >>> (err) {
-        >>> errors.new("nats: read error: " + err.msg())
+        >> errors.new("nats: read error: " + err.msg())
     }
     if chunk.len == 0 {
-        >>> errors.new("nats: connection closed")
+        >> errors.new("nats: connection closed")
     }
     c.buf = c.buf + chunk
     << chunk.len
@@ -107,10 +107,10 @@ pub fn (c $&Client) write_raw(data string) int {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) >>> (err) {
-            >>> errors.new("nats: write failed: " + err.msg())
+            >> errors.new("nats: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("nats: connection closed")
+            >> errors.new("nats: connection closed")
         }
         off = off + n
     }
@@ -131,7 +131,7 @@ pub fn connect(addr string) Client {
 
 pub fn connect_auth(addr string, user string, pass string) Client {
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("nats: dial failed: " + err.msg())
+        >> errors.new("nats: dial failed: " + err.msg())
     }
     $c := Client{
         fd: fd,
@@ -157,7 +157,7 @@ pub fn connect_auth(addr string, user string, pass string) Client {
     pong_line := c.read_line() >>>
     if pong_line != "PONG" {
         safe_close(c.fd)
-        >>> errors.new("nats: unexpected handshake response: " + pong_line)
+        >> errors.new("nats: unexpected handshake response: " + pong_line)
     }
     << c
 }
@@ -230,7 +230,7 @@ pub fn (c $&Client) next_msg() Message {
             << new_msg(subj, sid, reply_to, body)
         }
         if line.len >= 4 && line[0:4] == "-ERR" {
-            >>> errors.new("nats error: " + line)
+            >> errors.new("nats error: " + line)
         }
     }
     << new_msg("", "", "", "")

@@ -58,11 +58,11 @@ pub fn (p &DnsPool) put_conn(fd int) {
 pub fn (p &DnsPool) resolve_a(domain string) []string {
     fd := p.get_conn()
     if fd < 0 {
-        >>> errors.new("dns pool failed to acquire connection")
+        >> errors.new("dns pool failed to acquire connection")
     }
     ips := p.client.resolve_a_on_fd(fd, domain) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << ips

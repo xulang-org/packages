@@ -174,11 +174,11 @@ pub fn (c $&Client) request(sql_query string) Response {
         << Response{status_code: resp.status_code, body: resp.body}
     }
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) >>> (err) { >>> err }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { >> err }
     $reusable := false
     result := c.request_on_fd(fd, sql_query, $&reusable) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << result
@@ -207,15 +207,15 @@ fn (c $&Client) request_on_fd(fd int, sql_query string, reusable $&bool) Respons
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("clickhouse: write failed: " + err.msg())
+            >> errors.new("clickhouse: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("clickhouse: connection closed during write") }
+            >> errors.new("clickhouse: connection closed during write") }
         off = off + n
     }
 
     resp := http.read_response(fd, "POST") >>> (err) {
-        >>> err
+        >> err
     }
     *reusable = resp.reusable("POST") && resp.status_code >= 200 && resp.status_code < 300
     << Response{status_code: resp.status_code, body: resp.body}

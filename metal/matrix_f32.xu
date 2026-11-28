@@ -62,7 +62,7 @@ fn (m $&F32Matrix) drop() {
 
 pub fn (s &F32Snapshot) bits() []int {
     bytes := checked(metal_native.snapshot_len(s.handle)) >>>
-    if (bytes & 3) != 0 { >>> errors.code(BOUNDS, "metal: snapshot is not a binary32 matrix") }
+    if (bytes & 3) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not a binary32 matrix") }
     $out := []int{}
     for i in 0:bytes/4 { out.push(0) }
     s.copy_bits($&out) >>>

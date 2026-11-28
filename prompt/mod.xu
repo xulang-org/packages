@@ -56,7 +56,7 @@ pub fn render_template(tpl &string, vars &map[string]string, required &[]string)
     for ri in 0:required.len {
         rk := required[ri] + ""
         if vars.get_or(rk, missing_sentinel) == missing_sentinel {
-            >>> errors.new("prompt: missing required variable: " + rk)
+            >> errors.new("prompt: missing required variable: " + rk)
         }
     }
     $out := ""
@@ -108,7 +108,7 @@ pub fn (r &PromptRegistry) get(name &string, version &string) PromptTemplate {
         }
     }
     if found < 0 {
-        >>> errors.new("prompt: template not found: " + (*name))
+        >> errors.new("prompt: template not found: " + (*name))
     }
     << copy_tpl(&r.templates[found])
 }
@@ -247,5 +247,5 @@ pub fn extract_json_block(raw &string) string {
             j += 1
         }
     }
-    >>> errors.new("prompt: no valid JSON object or array found")
+    >> errors.new("prompt: no valid JSON object or array found")
 }

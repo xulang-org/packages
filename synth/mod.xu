@@ -161,7 +161,7 @@ pub fn parse_sft_jsonl(jsonl &string) []SftExample {
         if ln.len == 0 { -> }
         doc := json.parse(&ln)
         if !doc.ok() || !doc.is_dict(doc.root()) {
-            >>> errors.new("synth: invalid JSONL line " + str(i + 1))
+            >> errors.new("synth: invalid JSONL line " + str(i + 1))
         }
         root := doc.root()
         $sys := ""
@@ -314,14 +314,14 @@ pub fn generate_sft_openai(client &openai.Client, model string, topic string, co
     raw := strip_code_fences(&resp.content)
     doc := json.parse(&raw)
     if !doc.ok() {
-        >>> errors.new("synth: invalid JSON response from SFT generator")
+        >> errors.new("synth: invalid JSON response from SFT generator")
     }
     $arr := doc.root()
     if doc.is_dict(arr) && doc.has(arr, "examples") {
         arr = doc.get(arr, "examples") >>>
     }
     if !doc.is_list(arr) {
-        >>> errors.new("synth: expected JSON array of SftExample")
+        >> errors.new("synth: expected JSON array of SftExample")
     }
     $out := []SftExample{}
     cnt := doc.count(arr)

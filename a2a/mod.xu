@@ -134,7 +134,7 @@ pub fn format_agent_card_json(c &AgentCard) string {
 pub fn parse_agent_card_json(raw &string) AgentCard {
     doc := json.parse(raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("a2a: invalid AgentCard JSON")
+        >> errors.new("a2a: invalid AgentCard JSON")
     }
     root := doc.root()
     $card := new_agent_card(
@@ -219,12 +219,12 @@ pub fn (s $&Server) set_sqlite_store(path string) int {
     res := conn.exec("CREATE TABLE IF NOT EXISTS a2a_tasks (id TEXT PRIMARY KEY, state TEXT NOT NULL, task_json TEXT NOT NULL, updated_at INTEGER NOT NULL)", []driver.NamedValue{})
     if res.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("a2a: sqlite init failed: " + res.err)
+        >> errors.new("a2a: sqlite init failed: " + res.err)
     }
     rows := conn.query("SELECT task_json FROM a2a_tasks ORDER BY updated_at ASC", []driver.NamedValue{})
     if rows.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("a2a: sqlite load failed: " + rows.err)
+        >> errors.new("a2a: sqlite load failed: " + rows.err)
     }
     s.tasks = []Task{}
     $max_num := 0
@@ -819,7 +819,7 @@ fn a2a_conn_worker(fd int, card AgentCard, handler fn(&string, &string) string,
 
 pub fn (s $&Server) serve_http_server(srv $&http.Server) int {
     if srv.lfd < 0 {
-        >>> errors.new("a2a: HTTP server is not listening")
+        >> errors.new("a2a: HTTP server is not listening")
     }
     store_ch := chan StoreState{cap: 1}
     store_ch <- StoreState{tasks: copy_tasks_slice(&s.tasks), next_id: s.next_id, sqlite_path: s.sqlite_path + ""}
@@ -873,7 +873,7 @@ fn a2a_http_call(c &Client, method string, suffix string, body &string) http.Res
     cfg := tls.new_config(ep.host + "")
     resp := transport.request_raw(ep, cfg, raw, method) >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, "a2a: HTTP " + str(resp.status_code))
+        >> errors.code(resp.status_code, "a2a: HTTP " + str(resp.status_code))
     }
     << resp
 }
@@ -889,19 +889,19 @@ fn client_rpc_task(c &Client, method string, params_json &string) Task {
     resp := a2a_http_call(c, "POST", "/", &rpc) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("a2a: invalid JSON-RPC response")
+        >> errors.new("a2a: invalid JSON-RPC response")
     }
     root := doc.root()
     if doc.has(root, "error") {
         en := doc_get_or(&doc, root, "error")
         if en >= 0 && doc.is_dict(en) {
             emsg := json_str_or(&doc, en, "message", "a2a RPC error")
-            >>> errors.new(emsg)
+            >> errors.new(emsg)
         }
     }
     res := doc_get_or(&doc, root, "result")
     if res < 0 || !doc.is_dict(res) {
-        >>> errors.new("a2a: missing JSON-RPC result")
+        >> errors.new("a2a: missing JSON-RPC result")
     }
     << parse_task_json(&doc, res)
 }
@@ -973,7 +973,7 @@ fn a2a_send_stream_impl(c &Client, id string, text string, use_cb bool, on_event
     $conn := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) >>>
     _ := conn.write_all(raw) >>> (err) {
         _ := a2a_close_conn($&conn)
-        >>> err
+        >> err
     }
 
     $hdr_buf := ""
@@ -981,7 +981,7 @@ fn a2a_send_stream_impl(c &Client, id string, text string, use_cb bool, on_event
     while hdr_end < 0 {
         chunk := conn.read(4096) >>> (err) {
             _ := a2a_close_conn($&conn)
-            >>> err
+            >> err
         }
         if chunk.len == 0 { <- }
         hdr_buf = hdr_buf + chunk
@@ -989,13 +989,13 @@ fn a2a_send_stream_impl(c &Client, id string, text string, use_cb bool, on_event
     }
     if hdr_end < 0 {
         _ := a2a_close_conn($&conn)
-        >>> errors.new("a2a: incomplete HTTP headers in stream response")
+        >> errors.new("a2a: incomplete HTTP headers in stream response")
     }
     head := hdr_buf[0:hdr_end]
     status := a2a_parse_status(&head)
     if status < 200 || status >= 300 {
         _ := a2a_close_conn($&conn)
-        >>> errors.code(status, "a2a: HTTP " + str(status))
+        >> errors.code(status, "a2a: HTTP " + str(status))
     }
 
     $line_buf := hdr_buf[(hdr_end + 4):hdr_buf.len]

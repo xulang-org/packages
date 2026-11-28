@@ -41,7 +41,7 @@ pub fn vector_encode_f64(v &[]f64) string {
 pub fn vector_decode(raw &string) []f32 {
     trimmed := strings.trim_space(raw)
     if trimmed.len < 2 || (trimmed[0] & 255) != 91 || (trimmed[trimmed.len - 1] & 255) != 93 {
-        >>> errors.new("postgres: invalid pgvector literal")
+        >> errors.new("postgres: invalid pgvector literal")
     }
     inner := strings.trim_space(&trimmed[1:trimmed.len - 1])
     $out := []f32{}
@@ -52,9 +52,9 @@ pub fn vector_decode(raw &string) []f32 {
         if !is_end { is_end = (inner[i] & 255) == 44 }
         if is_end {
             tok := strings.trim_space(&inner[start:i])
-            if tok.len == 0 { >>> errors.new("postgres: empty element in pgvector literal") }
+            if tok.len == 0 { >> errors.new("postgres: empty element in pgvector literal") }
             doc := strconv.parse_float(&tok) >>> (_) {
-                >>> errors.new("postgres: invalid float in pgvector literal: " + tok)
+                >> errors.new("postgres: invalid float in pgvector literal: " + tok)
             }
             out.push(f32(doc))
             start = i + 1
@@ -67,14 +67,14 @@ pub fn pgvector_distance_op(metric string) string {
     if metric == "cosine" { << "<=>" }
     if metric == "l2" { << "<->" }
     if metric == "ip" { << "<#>" }
-    >>> errors.new("postgres: unsupported pgvector metric: " + metric)
+    >> errors.new("postgres: unsupported pgvector metric: " + metric)
 }
 
 fn pgvector_ops_class(metric string) string {
     if metric == "cosine" { << "vector_cosine_ops" }
     if metric == "l2" { << "vector_l2_ops" }
     if metric == "ip" { << "vector_ip_ops" }
-    >>> errors.new("postgres: unsupported pgvector metric: " + metric)
+    >> errors.new("postgres: unsupported pgvector metric: " + metric)
 }
 
 pub fn pgvector_create_extension_sql() string {
@@ -84,10 +84,10 @@ pub fn pgvector_create_extension_sql() string {
 pub fn pgvector_create_index_sql(table string, column string, index_name string,
                                  method string, metric string) string {
     if !is_valid_pg_ident(&table) || !is_valid_pg_ident(&column) || !is_valid_pg_ident(&index_name) {
-        >>> errors.new("postgres: invalid SQL identifier for pgvector index")
+        >> errors.new("postgres: invalid SQL identifier for pgvector index")
     }
     if method != "hnsw" && method != "ivfflat" {
-        >>> errors.new("postgres: unsupported pgvector index method: " + method)
+        >> errors.new("postgres: unsupported pgvector index method: " + method)
     }
     ops := pgvector_ops_class(metric) >>>
     << "CREATE INDEX IF NOT EXISTS " + index_name + " ON " + table +
@@ -98,10 +98,10 @@ pub fn pgvector_search_sql(table string, id_col string, text_col string,
                            vec_col string, metric string, limit int) string {
     if !is_valid_pg_ident(&table) || !is_valid_pg_ident(&id_col) ||
        !is_valid_pg_ident(&text_col) || !is_valid_pg_ident(&vec_col) {
-        >>> errors.new("postgres: invalid SQL identifier for pgvector search")
+        >> errors.new("postgres: invalid SQL identifier for pgvector search")
     }
     if limit <= 0 {
-        >>> errors.new("postgres: pgvector limit must be positive")
+        >> errors.new("postgres: pgvector limit must be positive")
     }
     op := pgvector_distance_op(metric) >>>
     << "SELECT " + id_col + ", " + text_col + ", (" + vec_col + " " + op + " $$1::vector) AS distance FROM " +

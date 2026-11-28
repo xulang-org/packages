@@ -58,7 +58,7 @@ pub fn new_client(endpoint string) Client {
 pub fn (c Client) exec_4lw(cmd string) string {
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("zookeeper dial failed: " + err.msg())
+        >> errors.new("zookeeper dial failed: " + err.msg())
     }
 
     $cmd_payload := cmd
@@ -71,7 +71,7 @@ pub fn (c Client) exec_4lw(cmd string) string {
         part := cmd_payload[off:cmd_payload.len]
         n := net.conn_write(fd, &part) >>> (err) {
             safe_close(fd)
-            >>> errors.new("zookeeper write failed: " + err.msg())
+            >> errors.new("zookeeper write failed: " + err.msg())
         }
         if n <= 0 {
             <-

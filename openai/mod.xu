@@ -470,7 +470,7 @@ fn extract_http_error_msg(status int, body &string) string {
 fn check_http_error(status int, body &string) int {
     if status >= 200 && status < 300 { << 0 }
     msg := extract_http_error_msg(status, body)
-    >>> errors.code(status, msg)
+    >> errors.code(status, msg)
 }
 
 fn sleep_retry_backoff(attempt int) {
@@ -516,7 +516,7 @@ fn request_raw_ct_retry(c &Client, method string, suffix string, content_type st
                 attempt += 1
                 ->
             }
-            >>> errors.new(err_msg)
+            >> errors.new(err_msg)
         }
         sc := resp.status_code
         if (sc == 429 || sc >= 500) && attempt < max_r {
@@ -768,7 +768,7 @@ pub fn (c &Client) list_models() []ModelInfo {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $out := []ModelInfo{}
@@ -796,7 +796,7 @@ pub fn (c &Client) chat(req &ChatRequest) ChatResponse {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $out := ChatResponse{
@@ -973,11 +973,11 @@ fn open_stream_retry_suffix(c &Client, suffix string, body &string, rest_out $&s
             ->
         }
         if err_code != 0 {
-            >>> errors.code(err_code, err_msg)
+            >> errors.code(err_code, err_msg)
         }
-        >>> errors.new(err_msg)
+        >> errors.new(err_msg)
     }
-    >>> errors.new("openai: stream failed")
+    >> errors.new("openai: stream failed")
 }
 
 fn open_stream_retry(c &Client, req &ChatRequest, rest_out $&string) transport.Conn {
@@ -1186,7 +1186,7 @@ pub fn (c &Client) images_generate(model string, prompt string, size string, n i
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $out := []ImageGenResult{}
@@ -1229,7 +1229,7 @@ pub fn (c &Client) rerank(model string, query string, documents &[]string, top_n
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $out := []RerankResult{}
@@ -1274,7 +1274,7 @@ pub fn (c &Client) embeddings(req &EmbedRequest) EmbedResponse {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $embs := [][]f64{}
@@ -1341,7 +1341,7 @@ pub fn (c &Client) completions(req &CompletionRequest) CompletionResponse {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $out := CompletionResponse{
@@ -1493,7 +1493,7 @@ pub fn (c &Client) responses(req &ResponsesRequest) ResponsesResponse {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     << parse_responses_doc(&doc, doc.root(), &req.model)
 }
@@ -1716,7 +1716,7 @@ pub fn (c &Client) upload_file(filename string, purpose string, content &string)
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     << parse_file_obj(&doc, doc.root())
 }
@@ -1727,7 +1727,7 @@ pub fn (c &Client) get_file(file_id string) FileObject {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     << parse_file_obj(&doc, doc.root())
 }
@@ -1740,7 +1740,7 @@ pub fn (c &Client) list_files(purpose string) []FileObject {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $out := []FileObject{}
@@ -1791,7 +1791,7 @@ pub fn (c &Client) create_batch(input_file_id string, endpoint string, completio
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     << parse_batch_obj(&doc, doc.root())
 }
@@ -1802,7 +1802,7 @@ pub fn (c &Client) get_batch(batch_id string) BatchObject {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     << parse_batch_obj(&doc, doc.root())
 }
@@ -1813,7 +1813,7 @@ pub fn (c &Client) cancel_batch(batch_id string) BatchObject {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     << parse_batch_obj(&doc, doc.root())
 }
@@ -1826,7 +1826,7 @@ pub fn (c &Client) list_batches(limit int) []BatchObject {
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("openai: invalid JSON response")
+        >> errors.new("openai: invalid JSON response")
     }
     root := doc.root()
     $out := []BatchObject{}

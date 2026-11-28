@@ -25,10 +25,10 @@ pub fn (c $&Client) write_exact(data string) int {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) >>> (err) {
-            >>> errors.new("kafka: write failed: " + err.msg())
+            >> errors.new("kafka: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("kafka: connection closed")
+            >> errors.new("kafka: connection closed")
         }
         off = off + n
     }
@@ -39,10 +39,10 @@ pub fn (c $&Client) read_exact(n int) string {
     $res := ""
     while res.len < n {
         chunk := net.conn_read(c.fd, n - res.len) >>> (err) {
-            >>> errors.new("kafka: read failed: " + err.msg())
+            >> errors.new("kafka: read failed: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("kafka: connection closed")
+            >> errors.new("kafka: connection closed")
         }
         res = res + chunk
     }
@@ -56,7 +56,7 @@ pub fn (c $&Client) round_trip(req_bytes string) string {
     len_hdr := c.read_exact(4) >>>
     resp_len := decode_i32(&len_hdr, 0)
     if resp_len <= 0 || resp_len > 67108864 { // max 64MB
-        >>> errors.new("kafka: invalid response length: " + str(resp_len))
+        >> errors.new("kafka: invalid response length: " + str(resp_len))
     }
 
     body := c.read_exact(resp_len) >>>
@@ -69,7 +69,7 @@ pub fn connect(broker string, client_id string) Client {
         cid = "xu-kafka-client"
     }
     fd := net.dial(strings.clone(&broker)) >>> (err) {
-        >>> errors.new("kafka: dial failed: " + err.msg())
+        >> errors.new("kafka: dial failed: " + err.msg())
     }
     $c := Client{
         fd: fd,
@@ -126,11 +126,11 @@ pub fn (c $&Client) produce_key_value(topic string, partition int, key string, v
                 c.metadata(topic + "")
                 <-
             }
-            >>> err
+            >> err
         }
         << offset
     }
-    >>> errors.new("kafka: produce failed after retries: " + last_err)
+    >> errors.new("kafka: produce failed after retries: " + last_err)
 }
 
 pub fn (c $&Client) fetch(topic string, partition int, offset int) []string {

@@ -37,7 +37,7 @@ fn (c Client) get_instances_at(fd int, service string, group string, reusable $&
     path := "/nacos/v1/ns/instance/list?serviceName=" + service + "&groupName=" + g
     resp := c.request_at(fd, "GET", path, "", reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("nacos: failed to get instances (status " + str(resp.status_code) + ")")
+        >> errors.new("nacos: failed to get instances (status " + str(resp.status_code) + ")")
     }
     << resp.body
 }

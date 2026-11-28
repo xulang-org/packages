@@ -22,10 +22,10 @@ fn read_exact(fd int, need int) string {
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) >>> (err) {
-            >>> errors.new("dns read error: " + err.msg())
+            >> errors.new("dns read error: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("dns read unexpected EOF")
+            >> errors.new("dns read unexpected EOF")
         }
         buf = buf + chunk
     }
@@ -37,7 +37,7 @@ fn write_all(fd int, data string) bool {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("dns write error: " + err.msg())
+            >> errors.new("dns write error: " + err.msg())
         }
         if n <= 0 {
             <-
@@ -76,7 +76,7 @@ pub fn new_client(endpoint string) DnsClient {
 pub fn (c DnsClient) connect() int {
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("dns dial failed: " + err.msg())
+        >> errors.new("dns dial failed: " + err.msg())
     }
     << fd
 }
@@ -103,7 +103,7 @@ pub fn (c DnsClient) resolve_a(domain string) []string {
     fd := c.connect() >>>
     ips := c.resolve_a_on_fd(fd, domain) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << ips

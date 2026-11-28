@@ -13,19 +13,19 @@ pub struct Client {
 
 pub fn dial(addr string) Client {
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("redis: dial failed: " + err.msg())
+        >> errors.new("redis: dial failed: " + err.msg())
     }
     << Client{fd: fd, buf: "", addr: addr}
 }
 
 fn (c $&Client) fill() int {
     chunk := net.conn_read(c.fd, 4096) >>> (err) {
-        >>> errors.new("redis: read error: " + err.msg())
+        >> errors.new("redis: read error: " + err.msg())
     }
     if chunk.len == 0 {
-        >>> errors.new("redis: connection closed")
+        >> errors.new("redis: connection closed")
     }
-    if c.buf.len + chunk.len > 16777216 { >>> errors.new("redis: response size limit exceeded") }
+    if c.buf.len + chunk.len > 16777216 { >> errors.new("redis: response size limit exceeded") }
     c.buf = c.buf + chunk
     << chunk.len
 }
@@ -68,9 +68,9 @@ pub fn (c $&Client) read_value() Value {
 }
 
 fn (c $&Client) read_value_depth(depth int) Value {
-    if depth > 64 { >>> errors.new("redis: response nesting limit exceeded") }
+    if depth > 64 { >> errors.new("redis: response nesting limit exceeded") }
     line := c.read_line() >>>
-    if line.len == 0 { >>> errors.new("redis: empty response") }
+    if line.len == 0 { >> errors.new("redis: empty response") }
     prefix := line[0] & 255
     $v := nil_value()
     $raw := line + "\r\n"
@@ -81,21 +81,21 @@ fn (c $&Client) read_value_depth(depth int) Value {
     else if prefix == 36 || prefix == 33 || prefix == 61 {
         n := parse_int(text) >>>
         if n == -1 && prefix == 36 { << nil_value() }
-        if n < 0 || n > 16777216 { >>> errors.new("redis: invalid bulk length") }
+        if n < 0 || n > 16777216 { >> errors.new("redis: invalid bulk length") }
         data := c.read_bytes(n) >>>
         tail := c.read_bytes(2) >>>
-        if tail != "\r\n" { >>> errors.new("redis: bad bulk CRLF") }
+        if tail != "\r\n" { >> errors.new("redis: bad bulk CRLF") }
         raw = raw + data + tail
         if prefix == 33 { v = err_value(data) }
         else if prefix == 61 {
-            if data.len < 4 || (data[3] & 255) != 58 { >>> errors.new("redis: invalid verbatim string") }
+            if data.len < 4 || (data[3] & 255) != 58 { >> errors.new("redis: invalid verbatim string") }
             v = str_value(data)
             v.typ = TYPE_VERBATIM
         } else { v = str_value(data) }
     } else if prefix == 42 || prefix == 37 || prefix == 126 || prefix == 62 {
         count := parse_int(text) >>>
         if count == -1 && prefix == 42 { << nil_value() }
-        if count < 0 || count > 100000 { >>> errors.new("redis: invalid aggregate count") }
+        if count < 0 || count > 100000 { >> errors.new("redis: invalid aggregate count") }
         $typ := TYPE_ARR
         $total := count
         if prefix == 37 { typ = TYPE_MAP
@@ -106,15 +106,15 @@ fn (c $&Client) read_value_depth(depth int) Value {
         for i in 0:total {
             elem := c.read_value_depth(depth + 1) >>>
             raw = raw + elem.raw
-            if raw.len > 16777216 { >>> errors.new("redis: response size limit exceeded") }
+            if raw.len > 16777216 { >> errors.new("redis: response size limit exceeded") }
             if elem.typ == TYPE_STR { strings_only.push(elem.str_val + "") }
         }
         v = arr_value(strings_only)
         v.typ = typ
     } else if prefix == 95 {
-        if line != "_" { >>> errors.new("redis: malformed null") }
+        if line != "_" { >> errors.new("redis: malformed null") }
     } else if prefix == 35 {
-        if text != "t" && text != "f" { >>> errors.new("redis: malformed bool") }
+        if text != "t" && text != "f" { >> errors.new("redis: malformed bool") }
         v = bool_value(text == "t")
     } else if prefix == 44 {
         if text != "inf" && text != "-inf" && text != "nan" {
@@ -125,13 +125,13 @@ fn (c $&Client) read_value_depth(depth int) Value {
     } else if prefix == 40 {
         $start := 0
         if text.len > 0 && (text[0] & 255) == 45 { start = 1 }
-        if start == text.len { >>> errors.new("redis: malformed big number") }
+        if start == text.len { >> errors.new("redis: malformed big number") }
         for i in start:text.len {
-            if (text[i] & 255) < 48 || (text[i] & 255) > 57 { >>> errors.new("redis: malformed big number") }
+            if (text[i] & 255) < 48 || (text[i] & 255) > 57 { >> errors.new("redis: malformed big number") }
         }
         v = str_value(text)
         v.typ = TYPE_BIG_NUMBER
-    } else { >>> errors.new("redis: unsupported response prefix: " + str(prefix)) }
+    } else { >> errors.new("redis: unsupported response prefix: " + str(prefix)) }
     v.raw = raw
     << v
 }
@@ -141,10 +141,10 @@ pub fn (c $&Client) write_raw(data string) int {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) >>> (err) {
-            >>> errors.new("redis: write failed: " + err.msg())
+            >> errors.new("redis: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("redis: connection closed")
+            >> errors.new("redis: connection closed")
         }
         off = off + n
     }
@@ -153,7 +153,7 @@ pub fn (c $&Client) write_raw(data string) int {
 
 pub fn (c $&Client) do(args []string) Value {
     if c.fd < 0 {
-        >>> errors.new("redis: client closed")
+        >> errors.new("redis: client closed")
     }
     raw := encode_cmd(args)
     c.write_raw(raw) >>>

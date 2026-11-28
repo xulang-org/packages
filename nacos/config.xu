@@ -34,7 +34,7 @@ fn (c Client) get_config_at(fd int, data_id string, group string, reusable $&boo
     path := "/nacos/v1/cs/configs?dataId=" + data_id + "&group=" + g
     resp := c.request_at(fd, "GET", path, "", reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("nacos: config not found (status " + str(resp.status_code) + ")")
+        >> errors.new("nacos: config not found (status " + str(resp.status_code) + ")")
     }
     << resp.body
 }

@@ -35,7 +35,7 @@ pub fn (c $&Client) get_service(name string) string {
 fn (c $&Client) get_service_at(fd int, name string, reusable $&bool) string {
     resp := c.request_at(fd, "GET", "/v1/catalog/service/" + name, "", reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("consul: get_service failed with status " + str(resp.status_code))
+        >> errors.new("consul: get_service failed with status " + str(resp.status_code))
     }
     << resp.body
 }

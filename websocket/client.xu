@@ -20,10 +20,10 @@ fn read_exact(fd int, need int) string {
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) >>> (err) {
-            >>> errors.new("ws read error: " + err.msg())
+            >> errors.new("ws read error: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("ws read unexpected EOF")
+            >> errors.new("ws read unexpected EOF")
         }
         buf = buf + chunk
     }
@@ -35,7 +35,7 @@ fn write_all(fd int, data string) bool {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("ws write error: " + err.msg())
+            >> errors.new("ws write error: " + err.msg())
         }
         if n <= 0 {
             <-
@@ -109,7 +109,7 @@ fn read_exact_secure(c $&transport.Conn, need int) string {
     $buf := ""
     while buf.len < need {
         chunk := c.read(need - buf.len) >>>
-        if chunk.len == 0 { >>> errors.new("wss read unexpected EOF") }
+        if chunk.len == 0 { >> errors.new("wss read unexpected EOF") }
         buf = buf + chunk
     }
     << buf
@@ -120,7 +120,7 @@ fn write_secure(c $&transport.Conn, data string) int {
 }
 
 pub fn (c WsClient) connect_secure() transport.Conn {
-    if !c.secure { >>> errors.new("ws: endpoint is not wss") }
+    if !c.secure { >> errors.new("ws: endpoint is not wss") }
     ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: c.path + "", secure: true}
     cfg := tls.new_config(c.host + "")
     $tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) >>>
@@ -129,28 +129,28 @@ pub fn (c WsClient) connect_secure() transport.Conn {
     req := build_handshake_request(c.host, c.port, c.path, key + "")
     write_secure($&tc, req) >>> (err) {
         tc.close()
-        >>> err
+        >> err
     }
     $resp := ""
     while strings.index_of(&resp, "\r\n\r\n") < 0 {
         chunk := tc.read(256) >>> (err) {
             tc.close()
-            >>> err
+            >> err
         }
         if chunk.len == 0 {
             tc.close()
-            >>> errors.new("wss handshake unexpected EOF")
+            >> errors.new("wss handshake unexpected EOF")
         }
         resp = resp + chunk
     }
     parsed := parse_handshake_response(resp)
     if parsed.status_code != 101 {
         tc.close()
-        >>> errors.new("wss handshake rejected")
+        >> errors.new("wss handshake rejected")
     }
     if parsed.accept_key != compute_accept_key(key) {
         tc.close()
-        >>> errors.new("wss handshake accept mismatch")
+        >> errors.new("wss handshake accept mismatch")
     }
     << tc
 }
@@ -204,7 +204,7 @@ pub fn (c WsClient) read_text_secure(tc $&transport.Conn) string {
     while true {
         f := c.read_frame_secure(tc) >>>
         if f.opcode == OPCODE_TEXT { << f.payload }
-        if f.opcode == OPCODE_CLOSE { >>> errors.new("wss connection closed by peer") }
+        if f.opcode == OPCODE_CLOSE { >> errors.new("wss connection closed by peer") }
     }
     << ""
 }
@@ -215,10 +215,10 @@ pub fn (c WsClient) close_secure(tc $&transport.Conn) {
 }
 
 pub fn (c WsClient) connect() int {
-    if c.secure { >>> errors.new("ws: use connect_secure for wss endpoint") }
+    if c.secure { >> errors.new("ws: use connect_secure for wss endpoint") }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("ws dial failed: " + err.msg())
+        >> errors.new("ws dial failed: " + err.msg())
     }
 
     nonce := rand.read(16) >>>
@@ -226,7 +226,7 @@ pub fn (c WsClient) connect() int {
     req := build_handshake_request(c.host, c.port, c.path, client_key + "")
     write_all(fd, req) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // Read HTTP response headers until "\r\n\r\n"
@@ -235,11 +235,11 @@ pub fn (c WsClient) connect() int {
     while !found_header_end {
         chunk := net.conn_read(fd, 256) >>> (err) {
             safe_close(fd)
-            >>> errors.new("ws handshake read error: " + err.msg())
+            >> errors.new("ws handshake read error: " + err.msg())
         }
         if chunk.len == 0 {
             safe_close(fd)
-            >>> errors.new("ws handshake unexpected EOF")
+            >> errors.new("ws handshake unexpected EOF")
         }
         resp = resp + chunk
         if strings.index_of(&resp, "\r\n\r\n") >= 0 {
@@ -250,13 +250,13 @@ pub fn (c WsClient) connect() int {
     res := parse_handshake_response(resp)
     if res.status_code != 101 {
         safe_close(fd)
-        >>> errors.new("ws handshake rejected, status: " + str(res.status_code))
+        >> errors.new("ws handshake rejected, status: " + str(res.status_code))
     }
 
     expected_accept := compute_accept_key(client_key)
     if res.accept_key != expected_accept {
         safe_close(fd)
-        >>> errors.new("ws handshake Sec-WebSocket-Accept mismatch: expected " + expected_accept + ", got " + res.accept_key)
+        >> errors.new("ws handshake Sec-WebSocket-Accept mismatch: expected " + expected_accept + ", got " + res.accept_key)
     }
 
     << fd
@@ -364,7 +364,7 @@ pub fn (c WsClient) read_text(fd int) string {
             << f.payload
         }
         if f.opcode == OPCODE_CLOSE {
-            >>> errors.new("ws connection closed by peer")
+            >> errors.new("ws connection closed by peer")
         }
     }
     << ""

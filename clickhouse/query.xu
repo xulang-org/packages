@@ -10,7 +10,7 @@ pub fn (c $&Client) exec(sql_query string) int {
 fn (c $&Client) exec_at(fd int, sql_query string, reusable $&bool) int {
     resp := c.request_at(fd, sql_query, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("clickhouse: exec failed (status " + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("clickhouse: exec failed (status " + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }
@@ -23,7 +23,7 @@ pub fn (c $&Client) query(sql_query string) string {
 fn (c $&Client) query_at(fd int, sql_query string, reusable $&bool) string {
     resp := c.request_at(fd, sql_query, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("clickhouse: query failed (status " + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("clickhouse: query failed (status " + str(resp.status_code) + "): " + resp.body)
     }
     << resp.body
 }

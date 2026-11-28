@@ -43,7 +43,7 @@ fn (c $&Client) put_at(fd int, key string, value string, reusable $&bool) int {
     body := "{\"key\":\"" + k_b64 + "\",\"value\":\"" + v_b64 + "\"}"
     resp := c.request_at(fd, "/v3/kv/put", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("etcd: put failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("etcd: put failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }
@@ -59,7 +59,7 @@ fn (c $&Client) put_with_lease_at(fd int, key string, value string, lease_id int
     body := "{\"key\":\"" + k_b64 + "\",\"value\":\"" + v_b64 + "\",\"lease\":\"" + str(lease_id) + "\"}"
     resp := c.request_at(fd, "/v3/kv/put", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("etcd: put_with_lease failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("etcd: put_with_lease failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }
@@ -86,17 +86,17 @@ fn (c $&Client) get_at(fd int, key string, reusable $&bool) string {
     body := "{\"key\":\"" + k_b64 + "\"}"
     resp := c.request_at(fd, "/v3/kv/range", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("etcd: get failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("etcd: get failed (" + str(resp.status_code) + "): " + resp.body)
     }
     if !contains_kvs(resp.body) {
-        >>> errors.new("etcd: key not found")
+        >> errors.new("etcd: key not found")
     }
     v_b64 := extract_json_value(resp.body, "value")
     if v_b64.len == 0 {
         << ""
     }
     raw := base64.decode_string(v_b64) >>> (err) {
-        >>> errors.new("etcd: base64 decode failed: " + err.msg())
+        >> errors.new("etcd: base64 decode failed: " + err.msg())
     }
     << raw
 }
@@ -128,7 +128,7 @@ fn (c $&Client) delete_at(fd int, key string, reusable $&bool) int {
     body := "{\"key\":\"" + k_b64 + "\"}"
     resp := c.request_at(fd, "/v3/kv/deleterange", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("etcd: delete failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("etcd: delete failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }

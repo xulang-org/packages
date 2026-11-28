@@ -61,22 +61,22 @@ fn (c $&Client) search_at(fd int, collection string, vector []string, limit int,
 
     resp := c.request_at(fd, "POST", "/collections/" + collection + "/points/search", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("qdrant: search failed (status " + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("qdrant: search failed (status " + str(resp.status_code) + "): " + resp.body)
     }
 
     raw := resp.body
     d := json.parse(&raw)
-    if !d.ok() { >>> errors.new("qdrant: invalid JSON: " + d.error()) }
+    if !d.ok() { >> errors.new("qdrant: invalid JSON: " + d.error()) }
     nodes := d.get(d.root(), "result")
-    if nodes < 0 || !d.is_list(nodes) { >>> errors.new("qdrant: missing result array") }
+    if nodes < 0 || !d.is_list(nodes) { >> errors.new("qdrant: missing result array") }
     $results := []ScoredPoint{}
     for i in 0:d.count(nodes) {
         hit := d.at(nodes, i)
-        if !d.is_dict(hit) { >>> errors.new("qdrant: invalid scored point") }
+        if !d.is_dict(hit) { >> errors.new("qdrant: invalid scored point") }
         id := d.get(hit, "id")
         score := d.get(hit, "score")
-        if id < 0 || !d.is_number(id) { >>> errors.new("qdrant: this API requires integer ids") }
-        if score < 0 || !d.is_number(score) { >>> errors.new("qdrant: missing score") }
+        if id < 0 || !d.is_number(id) { >> errors.new("qdrant: this API requires integer ids") }
+        if score < 0 || !d.is_number(score) { >> errors.new("qdrant: missing score") }
         text := d.text(id)
         value := strconv.atoi(&text) >>>
         payload := d.get(hit, "payload")

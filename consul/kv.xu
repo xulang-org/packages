@@ -30,7 +30,7 @@ fn (c $&Client) get_kv_at(fd int, key string, reusable $&bool) string {
     }
     resp := c.request_at(fd, "GET", "/v1/kv/" + k + "?raw", "", reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("consul: kv not found (status " + str(resp.status_code) + ")")
+        >> errors.new("consul: kv not found (status " + str(resp.status_code) + ")")
     }
     << resp.body
 }

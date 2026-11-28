@@ -112,7 +112,7 @@ pub fn (p &Pool) declare_queue(queue_name string, durable bool) int {
     fd := c.fd
     res := c.declare_queue(queue_name, durable) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res
@@ -123,7 +123,7 @@ pub fn (p &Pool) publish(exchange_name string, routing_key string, body string) 
     fd := c.fd
     res := c.publish(exchange_name, routing_key, body) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res
@@ -137,7 +137,7 @@ pub fn (p &Pool) get_message(queue_name string, auto_ack bool) string {
         fd := c.fd
         res := c.get(queue_name, auto_ack) >>> (err) {
             p.put_conn(fd)
-            >>> err
+            >> err
         }
         p.put_conn(fd)
         if res.len > 0 {

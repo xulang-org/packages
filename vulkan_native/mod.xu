@@ -272,7 +272,7 @@ fn ensure() bool {
 }
 
 fn vk_err(op string, rc int) int {
-    >>> errors.code(rc, "vulkan_native: " + op + " failed (code=" + str(rc) + ")")
+    >> errors.code(rc, "vulkan_native: " + op + " failed (code=" + str(rc) + ")")
 }
 
 fn create_vk_instance() c_ptr {
@@ -286,7 +286,7 @@ fn create_vk_instance() c_ptr {
             if !ffi.is_null(ici) { ffi.free(ici) }
             if !ffi.is_null(inst_box) { ffi.free(inst_box) }
             if !ffi.is_null(name) { ffi.free(name) }
-            >>> errors.new("vulkan_native: host alloc failed")
+            >> errors.new("vulkan_native: host alloc failed")
         }
         ffi.write_u32(app, 0, u32(0)) // VK_STRUCTURE_TYPE_APPLICATION_INFO
         ffi.write_ptr(app, 16, name)
@@ -334,7 +334,7 @@ pub fn device_count() int {
 }
 
 pub fn open(ordinal int) VulkanDevice {
-    if !ensure() { >>> errors.new("vulkan_native: Vulkan loader unavailable") }
+    if !ensure() { >> errors.new("vulkan_native: Vulkan loader unavailable") }
     unsafe {
         inst := create_vk_instance() >>>
         cnt_box := ffi.calloc(8)
@@ -343,7 +343,7 @@ pub fn open(ordinal int) VulkanDevice {
         if rc1 != 0 || cnt <= 0 || ordinal < 0 || ordinal >= cnt {
             ffi.free(cnt_box)
             xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
-            >>> errors.new("vulkan_native: no matching physical device")
+            >> errors.new("vulkan_native: no matching physical device")
         }
         devs := ffi.calloc(cnt * 8)
         rc2 := int(xv_vk_enum_phys_devices(sym(SYM_VK_ENUM_PHYS_DEVICES), inst, cnt_box, devs))
@@ -385,7 +385,7 @@ pub fn open(ordinal int) VulkanDevice {
         ffi.free(mem_props)
         if host_mt < 0 {
             xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
-            >>> errors.new("vulkan_native: no host-visible memory type")
+            >> errors.new("vulkan_native: no host-visible memory type")
         }
 
         qcnt_box := ffi.calloc(8)
@@ -407,7 +407,7 @@ pub fn open(ordinal int) VulkanDevice {
         ffi.free(qcnt_box)
         if qfam < 0 {
             xv_vk_destroy_instance(sym(SYM_VK_DESTROY_INSTANCE), inst, ffi.null())
-            >>> errors.new("vulkan_native: no compute queue family")
+            >> errors.new("vulkan_native: no compute queue family")
         }
 
         prio := ffi.calloc(4)
@@ -535,8 +535,8 @@ pub fn (d $&VulkanDevice) close() int {
 }
 
 pub fn (d &VulkanDevice) create_buffer(byte_len int) VulkanBuffer {
-    if d.closed { >>> errors.new("vulkan_native: device closed") }
-    if byte_len < 0 { >>> errors.new("vulkan_native: negative allocation size") }
+    if d.closed { >> errors.new("vulkan_native: device closed") }
+    if byte_len < 0 { >> errors.new("vulkan_native: negative allocation size") }
     $sz := byte_len
     if sz == 0 { sz = 16 }
     unsafe {
@@ -605,8 +605,8 @@ pub fn (d &VulkanDevice) create_f32_buffer(elements int) VulkanBuffer {
 }
 
 pub fn (b $&VulkanBuffer) write_bytes(data &string) int {
-    if b.closed { >>> errors.new("vulkan_native: buffer closed") }
-    if data.len != b.byte_len { >>> errors.new("vulkan_native: write_bytes length mismatch") }
+    if b.closed { >> errors.new("vulkan_native: buffer closed") }
+    if data.len != b.byte_len { >> errors.new("vulkan_native: write_bytes length mismatch") }
     if data.len == 0 { << 0 }
     unsafe {
         for i in 0:data.len {
@@ -617,8 +617,8 @@ pub fn (b $&VulkanBuffer) write_bytes(data &string) int {
 }
 
 pub fn (b $&VulkanBuffer) write_f32_bits(bits &[]int) int {
-    if b.closed { >>> errors.new("vulkan_native: buffer closed") }
-    if bits.len * 4 != b.byte_len { >>> errors.new("vulkan_native: write_f32_bits length mismatch") }
+    if b.closed { >> errors.new("vulkan_native: buffer closed") }
+    if bits.len * 4 != b.byte_len { >> errors.new("vulkan_native: write_f32_bits length mismatch") }
     unsafe {
         for i in 0:bits.len {
             ffi.write_u32(b.mapped, i * 4, u32(bits[i]))
@@ -628,9 +628,9 @@ pub fn (b $&VulkanBuffer) write_f32_bits(bits &[]int) int {
 }
 
 pub fn (b &VulkanBuffer) copy_f32_bits(out $&[]int) int {
-    if b.closed { >>> errors.new("vulkan_native: buffer closed") }
+    if b.closed { >> errors.new("vulkan_native: buffer closed") }
     n := b.byte_len / 4
-    if out.len != n { >>> errors.new("vulkan_native: copy_f32_bits length mismatch") }
+    if out.len != n { >> errors.new("vulkan_native: copy_f32_bits length mismatch") }
     unsafe {
         for i in 0:n {
             out[i] = int(ffi.read_u32(b.mapped, i * 4))
@@ -669,8 +669,8 @@ pub fn (b $&VulkanBuffer) close() int {
 }
 
 pub fn (d &VulkanDevice) create_pipeline(spirv_words &[]int, num_bindings int, push_bytes int) VulkanPipeline {
-    if d.closed { >>> errors.new("vulkan_native: device closed") }
-    if !validate_spirv(spirv_words) { >>> errors.new("vulkan_native: invalid SPIR-V module") }
+    if d.closed { >> errors.new("vulkan_native: device closed") }
+    if !validate_spirv(spirv_words) { >> errors.new("vulkan_native: invalid SPIR-V module") }
     unsafe {
         code := ffi.calloc(spirv_words.len * 4)
         for i in 0:spirv_words.len {
@@ -778,7 +778,7 @@ pub fn (d &VulkanDevice) create_pipeline(spirv_words &[]int, num_bindings int, p
 }
 
 pub fn (d &VulkanDevice) dispatch(p &VulkanPipeline, bufs &[]int, sizes &[]int, push_words &[]int, gx int, gy int, gz int) int {
-    if d.closed || p.closed { >>> errors.new("vulkan_native: closed handle") }
+    if d.closed || p.closed { >> errors.new("vulkan_native: closed handle") }
     unsafe {
         dl_arr := ffi.calloc(8)
         ffi.write_u64(dl_arr, 0, p.desc_layout)

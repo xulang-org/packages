@@ -87,11 +87,11 @@ pub fn (p &Pool) create_collection(name string) string {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("chroma: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
     $reusable := false
     result := p.client.create_collection_at(fd, name, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -121,11 +121,11 @@ pub fn (p &Pool) query(col_id string, query_embeddings_json string, n_results in
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("chroma: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("chroma: pool closed or dial failed") }
     $reusable := false
     result := p.client.query_at(fd, col_id, query_embeddings_json, n_results, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result

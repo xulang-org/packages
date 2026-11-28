@@ -37,13 +37,13 @@ fn parse_int_or(s string, def int) int {
 
 fn validate_key(key &string) bool {
     if key.len == 0 || key.len > 250 {
-        >>> errors.new("memcached: invalid key length (must be 1-250 bytes)")
+        >> errors.new("memcached: invalid key length (must be 1-250 bytes)")
     }
     $i := 0
     while i < key.len {
         c := key[i] & 255
         if c <= 32 || c == 127 {
-            >>> errors.new("memcached: key contains invalid character (space, newline or control char)")
+            >> errors.new("memcached: key contains invalid character (space, newline or control char)")
         }
         i = i + 1
     }
@@ -52,15 +52,15 @@ fn validate_key(key &string) bool {
 
 fn check_error_line(line &string) bool {
     if *line == "ERROR" {
-        >>> errors.new("memcached: server error")
+        >> errors.new("memcached: server error")
     }
     prefix_c := "CLIENT_ERROR "
     if line.len >= prefix_c.len && line[0:prefix_c.len] == prefix_c {
-        >>> errors.new(*line)
+        >> errors.new(*line)
     }
     prefix_s := "SERVER_ERROR "
     if line.len >= prefix_s.len && line[0:prefix_s.len] == prefix_s {
-        >>> errors.new(*line)
+        >> errors.new(*line)
     }
     << true
 }
@@ -132,7 +132,7 @@ pub fn (c $&Client) get(key string) string {
         }
     }
     if !found {
-        >>> errors.new("memcached: key not found: " + key)
+        >> errors.new("memcached: key not found: " + key)
     }
     << result
 }
@@ -187,7 +187,7 @@ pub fn (c $&Client) incr(key string, delta int) int {
     line := c.read_line() >>>
     check_error_line(&line) >>>
     if line == "NOT_FOUND" {
-        >>> errors.new("memcached: key not found for incr: " + key)
+        >> errors.new("memcached: key not found for incr: " + key)
     }
     << parse_int(line) >>>
 }
@@ -199,7 +199,7 @@ pub fn (c $&Client) decr(key string, delta int) int {
     line := c.read_line() >>>
     check_error_line(&line) >>>
     if line == "NOT_FOUND" {
-        >>> errors.new("memcached: key not found for decr: " + key)
+        >> errors.new("memcached: key not found for decr: " + key)
     }
     << parse_int(line) >>>
 }

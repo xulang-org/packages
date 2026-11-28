@@ -502,7 +502,7 @@ fn request_retry(c &Client, suffix string, body &string) http.Response {
                 attempt += 1
                 ->
             }
-            >>> errors.new(err_msg)
+            >> errors.new(err_msg)
         }
         if is_retriable_status(resp.status_code) && attempt < max_r {
             sleep_retry_backoff(attempt)
@@ -529,11 +529,11 @@ pub fn (c &Client) generate(req &GenerateRequest) GenerateResponse {
     suffix := "/v1beta/models/" + mname + ":generateContent"
     resp := request_retry(c, suffix, &body) >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+        >> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
     }
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("gemini: invalid JSON response")
+        >> errors.new("gemini: invalid JSON response")
     }
     root := doc.root()
     $txt := ""
@@ -553,11 +553,11 @@ pub fn (c &Client) embed(model string, text string) []f64 {
     suffix := "/v1beta/models/" + mname + ":embedContent"
     resp := request_retry(c, suffix, &body) >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+        >> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
     }
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("gemini: invalid embedding JSON response")
+        >> errors.new("gemini: invalid embedding JSON response")
     }
     root := doc.root()
     $out := []f64{}
@@ -593,11 +593,11 @@ pub fn (c &Client) batch_embed(model string, texts &[]string) [][]f64 {
     suffix := "/v1beta/models/" + mname + ":batchEmbedContents"
     resp := request_retry(c, suffix, &body) >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+        >> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
     }
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("gemini: invalid batch embedding JSON response")
+        >> errors.new("gemini: invalid batch embedding JSON response")
     }
     root := doc.root()
     $out := [][]f64{}
@@ -767,11 +767,11 @@ fn open_stream_retry(c &Client, req &GenerateRequest, rest_out $&string) transpo
             ->
         }
         if err_code != 0 {
-            >>> errors.code(err_code, err_msg)
+            >> errors.code(err_code, err_msg)
         }
-        >>> errors.new(err_msg)
+        >> errors.new(err_msg)
     }
-    >>> errors.new("gemini: stream failed")
+    >> errors.new("gemini: stream failed")
 }
 
 fn copy_stream_chunk(sc &StreamChunk) StreamChunk {

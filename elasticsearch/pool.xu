@@ -68,12 +68,12 @@ pub fn (p &Pool) discard_conn(fd int) {
 
 pub fn (p &Pool) search(index string, query_dsl string) SearchResult {
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("elasticsearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
     result := c.search_at(fd, index, query_dsl, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -81,12 +81,12 @@ pub fn (p &Pool) search(index string, query_dsl string) SearchResult {
 
 pub fn (p &Pool) search_match(index string, field string, query_text string) SearchResult {
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("elasticsearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
     result := c.search_match_at(fd, index, field, query_text, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -99,12 +99,12 @@ pub fn (p &Pool) get_doc(index string, id string) string {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("elasticsearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
     result := c.get_doc_at(fd, index, id, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -117,12 +117,12 @@ pub fn (p &Pool) index_doc(index string, id string, doc_json string) string {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("elasticsearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
     result := c.index_doc_at(fd, index, id, doc_json, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -135,12 +135,12 @@ pub fn (p &Pool) delete_doc(index string, id string) bool {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("elasticsearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("elasticsearch: pool closed or dial failed") }
     $reusable := false
     $c := p.get()
     result := c.delete_doc_at(fd, index, id, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable && result { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
