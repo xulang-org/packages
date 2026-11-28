@@ -122,7 +122,7 @@ fn batch_linear(b $&metal.Batch, dst $&metal.F32Matrix, x &metal.F32Matrix, w &G
     if w.kind == WT_Q6_K {
         << b.gemv_q6_k_f32(dst, x, &m.q6k_mats[wi]) >>>
     }
-    >>> errors.new("llm_metal: unsupported weight kind " + str(w.kind))
+    >> errors.new("llm_metal: unsupported weight kind " + str(w.kind))
 }
 
 fn close_f32_list(mats $&[]metal.F32Matrix) {
@@ -176,12 +176,12 @@ pub fn new_kv_cache(m &MetalModel, max_seq_req int) MetalKVCache {
     for _ in 0:m.cfg.n_layers {
         $km := m.dev.matrix_f16(ms, kv_dim) >>> (err) {
             mqclose_kv($&kv)
-            >>> err
+            >> err
         }
         $vm := m.dev.matrix_f16(ms, kv_dim) >>> (err) {
             mqclose_f16($&km)
             mqclose_kv($&kv)
-            >>> err
+            >> err
         }
         kv.k_caches.push(km)
         kv.v_caches.push(vm)
@@ -229,7 +229,7 @@ fn encode_rope(b $&metal.Batch, dst $&metal.F32Matrix, src &metal.F32Matrix, pos
 }
 
 fn encode_decode_layers(b $&metal.Batch, m &MetalModel, kv $&MetalKVCache, token int) int {
-    if kv.pos >= kv.max_seq { >>> errors.new("llm_metal: KV cache full") }
+    if kv.pos >= kv.max_seq { >> errors.new("llm_metal: KV cache full") }
     ids := [token]
     scale := 1.0 / math.sqrt(f64(m.cfg.head_dim))
     _ := b.embedding_f32($&kv.x, &m.embed_table, &ids) >>>
@@ -303,16 +303,16 @@ pub fn forward_token_argmax(m &MetalModel, kv $&MetalKVCache, token int) int {
     $b := m.dev.begin_batch() >>>
     _ := encode_decode_layers($&b, m, kv, token) >>> (err) {
         mqclose_batch($&b)
-        >>> err
+        >> err
     }
     _ := b.argmax_f32($&kv.idx_mat, &kv.logits) >>> (err) {
         mqclose_batch($&b)
-        >>> err
+        >> err
     }
     $f := b.commit() >>>
     _ := f.wait() >>> (err) {
         mqclose_fence($&f)
-        >>> err
+        >> err
     }
     mqclose_fence($&f)
     kv.pos += 1
@@ -324,12 +324,12 @@ pub fn forward_token_logits(m &MetalModel, kv $&MetalKVCache, token int) []f32 {
     $b := m.dev.begin_batch() >>>
     _ := encode_decode_layers($&b, m, kv, token) >>> (err) {
         mqclose_batch($&b)
-        >>> err
+        >> err
     }
     $f := b.commit() >>>
     _ := f.wait() >>> (err) {
         mqclose_fence($&f)
-        >>> err
+        >> err
     }
     mqclose_fence($&f)
     kv.pos += 1
@@ -343,7 +343,7 @@ pub fn forward_token_logits(m &MetalModel, kv $&MetalKVCache, token int) []f32 {
 }
 
 pub fn prefill_tokens(m &MetalModel, kv $&MetalKVCache, tokens &[]int) int {
-    if tokens.len == 0 { >>> errors.new("llm_metal: empty prompt") }
+    if tokens.len == 0 { >> errors.new("llm_metal: empty prompt") }
     if tokens.len == 1 {
         << forward_token_argmax(m, kv, tokens[0]) >>>
     }
@@ -437,7 +437,7 @@ pub fn prefill_tokens(m &MetalModel, kv $&MetalKVCache, tokens &[]int) int {
     _ := b.argmax_f32($&pidx, &plog) >>>
     $f := b.commit() >>>
     _ := f.wait() >>> (err) { _ := f.close()
-    >>> err }
+    >> err }
     _ := f.close() >>>
     kv.pos = p
     bits := pidx.bits() >>>
@@ -469,11 +469,11 @@ pub fn generate(m &MetalModel, prompt_ids &[]int, max_gen int) []int {
     $kv := new_kv_cache(m, prompt_ids.len + max_gen + 2) >>>
     $out := []int{}
     $tok := prefill_tokens(m, $&kv, prompt_ids) >>> (err) { _ := kv.close()
-    >>> err }
+    >> err }
     out.push(tok)
     for _ in 1:max_gen {
         tok = forward_token_argmax(m, $&kv, tok) >>> (err) { _ := kv.close()
-        >>> err }
+        >> err }
         out.push(tok)
     }
     mqclose_kv($&kv)
@@ -514,7 +514,7 @@ pub fn new_paged_kv_cache(m &MetalModel, max_seq_req int, block_size_req int) Me
     }
     _ := bt.write_bits(&bt_bits) >>> (err) {
         mqclose_f32($&bt)
-        >>> err
+        >> err
     }
     $pkv := MetalPagedKVCache{
         max_seq: ms, block_size: bs, max_blocks: max_blocks, pos: 0,
@@ -544,12 +544,12 @@ pub fn new_paged_kv_cache(m &MetalModel, max_seq_req int, block_size_req int) Me
     for _ in 0:m.cfg.n_layers {
         $km := m.dev.matrix_f16(max_blocks * bs, kv_dim) >>> (err) {
             mqclose_pkv($&pkv)
-            >>> err
+            >> err
         }
         $vm := m.dev.matrix_f16(max_blocks * bs, kv_dim) >>> (err) {
             mqclose_f16($&km)
             mqclose_pkv($&pkv)
-            >>> err
+            >> err
         }
         pkv.k_pages.push(km)
         pkv.v_pages.push(vm)
@@ -587,7 +587,7 @@ pub fn (kv $&MetalPagedKVCache) close() int {
 }
 
 pub fn forward_token_paged_argmax(m &MetalModel, kv $&MetalPagedKVCache, token int) int {
-    if kv.pos >= kv.max_seq { >>> errors.new("llm_metal: paged KV cache full") }
+    if kv.pos >= kv.max_seq { >> errors.new("llm_metal: paged KV cache full") }
     ids := [token]
     scale := 1.0 / math.sqrt(f64(m.cfg.head_dim))
     $b := m.dev.begin_batch() >>>
@@ -619,7 +619,7 @@ pub fn forward_token_paged_argmax(m &MetalModel, kv $&MetalPagedKVCache, token i
     _ := b.argmax_f32($&kv.idx_mat, &kv.logits) >>>
     $f := b.commit() >>>
     _ := f.wait() >>> (err) { _ := f.close()
-    >>> err }
+    >> err }
     _ := f.close() >>>
     kv.pos += 1
     bits := kv.idx_mat.bits() >>>
@@ -633,7 +633,7 @@ pub fn generate_paged(m &MetalModel, prompt_ids &[]int, max_gen int, block_size 
     for i in 0:prompt_ids.len {
         tok = forward_token_paged_argmax(m, $&kv, prompt_ids[i]) >>> (err) {
             mqclose_pkv($&kv)
-            >>> err
+            >> err
         }
     }
     $out := []int{}
@@ -641,7 +641,7 @@ pub fn generate_paged(m &MetalModel, prompt_ids &[]int, max_gen int, block_size 
     for _ in 1:max_gen {
         tok = forward_token_paged_argmax(m, $&kv, tok) >>> (err) {
             mqclose_pkv($&kv)
-            >>> err
+            >> err
         }
         out.push(tok)
     }
@@ -669,25 +669,25 @@ pub fn new_lora(m &MetalModel, rank_req int, alpha_req f64) MetalLoRA {
     _ := a_mat.write_bits(&a_bits) >>> (err) {
         mqclose_f32($&a_mat)
         mqclose_f32($&b_mat)
-        >>> err
+        >> err
     }
     $m_a := m.dev.matrix_f32(rk, dim) >>> (err) {
         mqclose_f32($&a_mat)
         mqclose_f32($&b_mat)
-        >>> err
+        >> err
     }
     $v_a := m.dev.matrix_f32(rk, dim) >>> (err) {
         mqclose_f32($&a_mat)
         mqclose_f32($&b_mat)
         mqclose_f32($&m_a)
-        >>> err
+        >> err
     }
     $m_b := m.dev.matrix_f32(voc, rk) >>> (err) {
         mqclose_f32($&a_mat)
         mqclose_f32($&b_mat)
         mqclose_f32($&m_a)
         mqclose_f32($&v_a)
-        >>> err
+        >> err
     }
     $v_b := m.dev.matrix_f32(voc, rk) >>> (err) {
         mqclose_f32($&a_mat)
@@ -695,7 +695,7 @@ pub fn new_lora(m &MetalModel, rank_req int, alpha_req f64) MetalLoRA {
         mqclose_f32($&m_a)
         mqclose_f32($&v_a)
         mqclose_f32($&m_b)
-        >>> err
+        >> err
     }
     << MetalLoRA{
         rank: rk, alpha: al, scale: al / f64(rk), step: 0,
@@ -721,20 +721,20 @@ pub fn forward_token_lora_argmax(m &MetalModel, kv $&MetalKVCache, lora &MetalLo
     $b := m.dev.begin_batch() >>>
     _ := encode_decode_layers($&b, m, kv, token) >>> (err) {
         mqclose_batch($&b)
-        >>> err
+        >> err
     }
     _ := b.lora_add_f32($&kv.logits, &kv.norm1, &lora.a_mat, &lora.b_mat, lora.scale) >>> (err) {
         mqclose_batch($&b)
-        >>> err
+        >> err
     }
     _ := b.argmax_f32($&kv.idx_mat, &kv.logits) >>> (err) {
         mqclose_batch($&b)
-        >>> err
+        >> err
     }
     $f := b.commit() >>>
     _ := f.wait() >>> (err) {
         mqclose_fence($&f)
-        >>> err
+        >> err
     }
     mqclose_fence($&f)
     kv.pos += 1
@@ -745,7 +745,7 @@ pub fn forward_token_lora_argmax(m &MetalModel, kv $&MetalKVCache, lora &MetalLo
 pub fn train_lora_step(m &MetalModel, lora $&MetalLoRA, input_ids &[]int, target_ids &[]int,
                        lr f64, weight_decay f64) f64 {
     t := input_ids.len
-    if t <= 0 || target_ids.len != t { >>> errors.new("llm_metal.lora: input/target length mismatch") }
+    if t <= 0 || target_ids.len != t { >> errors.new("llm_metal.lora: input/target length mismatch") }
     dim := m.cfg.dim
     kv_dim := m.cfg.kv_dim
     hid := m.cfg.hidden_dim
@@ -826,7 +826,7 @@ pub fn train_lora_step(m &MetalModel, lora $&MetalLoRA, input_ids &[]int, target
     _ := b.adamw_step_f32($&lora.a_mat, &da, $&lora.m_a, $&lora.v_a, lr, 0.9, 0.999, 1e-8, weight_decay, lora.step) >>>
     $f := b.commit() >>>
     _ := f.wait() >>> (err) { _ := f.close()
-    >>> err }
+    >> err }
     _ := f.close() >>>
 
     lbits := losses.bits() >>>

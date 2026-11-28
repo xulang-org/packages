@@ -77,7 +77,7 @@ pub fn (p &Pool) publish(subject string, data string) int {
     fd := c.fd
     res := c.publish(subject + "", data + "") >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res

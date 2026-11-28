@@ -124,7 +124,7 @@ pub fn open_auto() Device {
 pub fn open_backend(name string) Device {
     if name == "auto" { << open_auto() >>> }
     if name == "metal" {
-        if !metal.available() { >>> errors.new("gpu: Metal backend unavailable") }
+        if !metal.available() { >> errors.new("gpu: Metal backend unavailable") }
         $md := metal.open() >>>
         dn := md.name() >>>
         $marr := []metal.Device{}
@@ -139,7 +139,7 @@ pub fn open_backend(name string) Device {
         }
     }
     if name == "cuda" {
-        if !cuda.available() { >>> errors.new("gpu: CUDA backend unavailable") }
+        if !cuda.available() { >> errors.new("gpu: CUDA backend unavailable") }
         $cd := cuda.open(0) >>>
         dn := cd.name() >>>
         $carr := []cuda.CudaDevice{}
@@ -154,7 +154,7 @@ pub fn open_backend(name string) Device {
         }
     }
     if name == "vulkan" {
-        if !vulkan.available() { >>> errors.new("gpu: Vulkan backend unavailable") }
+        if !vulkan.available() { >> errors.new("gpu: Vulkan backend unavailable") }
         $vd := vulkan.open(0) >>>
         dn := vd.name()
         $varr := []vulkan.VulkanDevice{}
@@ -178,7 +178,7 @@ pub fn open_backend(name string) Device {
             closed: false
         }
     }
-    >>> errors.new("gpu: unknown backend '" + name + "'")
+    >> errors.new("gpu: unknown backend '" + name + "'")
 }
 
 pub fn (d &Device) name() string { << d.dev_name }
@@ -194,8 +194,8 @@ pub fn (d $&Device) close() int {
 }
 
 pub fn (d &Device) matrix_f32(rows int, columns int) F32Matrix {
-    if d.closed { >>> errors.new("gpu: device closed") }
-    if rows < 0 || columns < 0 { >>> errors.new("gpu: negative dimensions") }
+    if d.closed { >> errors.new("gpu: device closed") }
+    if rows < 0 || columns < 0 { >> errors.new("gpu: negative dimensions") }
     n := rows * columns
     if d.backend == BACKEND_METAL {
         mm := d.metal_dev[0].matrix_f32(rows, columns) >>>
@@ -241,8 +241,8 @@ pub fn (m &F32Matrix) rows() int { << m.n_rows }
 pub fn (m &F32Matrix) columns() int { << m.n_cols }
 
 pub fn (m $&F32Matrix) write_bits(values &[]int) int {
-    if m.closed { >>> errors.new("gpu: matrix closed") }
-    if values.len != m.n_rows * m.n_cols { >>> errors.new("gpu: write_bits length mismatch") }
+    if m.closed { >> errors.new("gpu: matrix closed") }
+    if values.len != m.n_rows * m.n_cols { >> errors.new("gpu: write_bits length mismatch") }
     if m.backend == BACKEND_METAL {
         el := $&m.metal_mat[0]
         << el.write_bits(values) >>>
@@ -267,9 +267,9 @@ pub fn (m $&F32Matrix) write_f32(values &[]f32) int {
 }
 
 pub fn (m &F32Matrix) copy_bits(out $&[]int) int {
-    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.closed { >> errors.new("gpu: matrix closed") }
     n := m.n_rows * m.n_cols
-    if out.len != n { >>> errors.new("gpu: copy_bits length mismatch") }
+    if out.len != n { >> errors.new("gpu: copy_bits length mismatch") }
     if m.backend == BACKEND_METAL { << m.metal_mat[0].copy_bits(out) >>> }
     if m.backend == BACKEND_CUDA { << m.cuda_buf[0].copy_f32_bits(out) >>> }
     if m.backend == BACKEND_VULKAN { << m.vk_buf[0].copy_f32_bits(out) >>> }
@@ -305,7 +305,7 @@ pub fn (m $&F32Matrix) close() int {
 }
 
 pub fn (d &Device) matrix_q4_0(rows int, columns int) Q4Matrix {
-    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.closed { >> errors.new("gpu: device closed") }
     if d.backend == BACKEND_METAL {
         $arr := []metal.Q4Matrix{}
         arr.push(d.metal_dev[0].matrix_q4_0(rows, columns) >>>)
@@ -322,7 +322,7 @@ pub fn (d &Device) matrix_q4_0(rows int, columns int) Q4Matrix {
 pub fn (m &Q4Matrix) rows() int { << m.n_rows }
 pub fn (m &Q4Matrix) columns() int { << m.n_cols }
 pub fn (m $&Q4Matrix) write_bytes(bytes &string) int {
-    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.closed { >> errors.new("gpu: matrix closed") }
     if m.backend == BACKEND_METAL {
         el := $&m.metal_mat[0]
         << el.write_bytes(bytes) >>>
@@ -344,7 +344,7 @@ pub fn (m $&Q4Matrix) close() int {
 }
 
 pub fn (d &Device) matrix_q8_0(rows int, columns int) Q8Matrix {
-    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.closed { >> errors.new("gpu: device closed") }
     if d.backend == BACKEND_METAL {
         $arr := []metal.Q8Matrix{}
         arr.push(d.metal_dev[0].matrix_q8_0(rows, columns) >>>)
@@ -361,7 +361,7 @@ pub fn (d &Device) matrix_q8_0(rows int, columns int) Q8Matrix {
 pub fn (m &Q8Matrix) rows() int { << m.n_rows }
 pub fn (m &Q8Matrix) columns() int { << m.n_cols }
 pub fn (m $&Q8Matrix) write_bytes(bytes &string) int {
-    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.closed { >> errors.new("gpu: matrix closed") }
     if m.backend == BACKEND_METAL {
         el := $&m.metal_mat[0]
         << el.write_bytes(bytes) >>>
@@ -383,7 +383,7 @@ pub fn (m $&Q8Matrix) close() int {
 }
 
 pub fn (d &Device) matrix_q4_k(rows int, columns int) Q4KMatrix {
-    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.closed { >> errors.new("gpu: device closed") }
     if d.backend == BACKEND_METAL {
         $arr := []metal.Q4KMatrix{}
         arr.push(d.metal_dev[0].matrix_q4_k(rows, columns) >>>)
@@ -400,7 +400,7 @@ pub fn (d &Device) matrix_q4_k(rows int, columns int) Q4KMatrix {
 pub fn (m &Q4KMatrix) rows() int { << m.n_rows }
 pub fn (m &Q4KMatrix) columns() int { << m.n_cols }
 pub fn (m $&Q4KMatrix) write_bytes(bytes &string) int {
-    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.closed { >> errors.new("gpu: matrix closed") }
     if m.backend == BACKEND_METAL {
         el := $&m.metal_mat[0]
         << el.write_bytes(bytes) >>>
@@ -422,7 +422,7 @@ pub fn (m $&Q4KMatrix) close() int {
 }
 
 pub fn (d &Device) matrix_q5_k(rows int, columns int) Q5KMatrix {
-    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.closed { >> errors.new("gpu: device closed") }
     if d.backend == BACKEND_METAL {
         $arr := []metal.Q5KMatrix{}
         arr.push(d.metal_dev[0].matrix_q5_k(rows, columns) >>>)
@@ -439,7 +439,7 @@ pub fn (d &Device) matrix_q5_k(rows int, columns int) Q5KMatrix {
 pub fn (m &Q5KMatrix) rows() int { << m.n_rows }
 pub fn (m &Q5KMatrix) columns() int { << m.n_cols }
 pub fn (m $&Q5KMatrix) write_bytes(bytes &string) int {
-    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.closed { >> errors.new("gpu: matrix closed") }
     if m.backend == BACKEND_METAL {
         el := $&m.metal_mat[0]
         << el.write_bytes(bytes) >>>
@@ -461,7 +461,7 @@ pub fn (m $&Q5KMatrix) close() int {
 }
 
 pub fn (d &Device) matrix_q6_k(rows int, columns int) Q6KMatrix {
-    if d.closed { >>> errors.new("gpu: device closed") }
+    if d.closed { >> errors.new("gpu: device closed") }
     if d.backend == BACKEND_METAL {
         $arr := []metal.Q6KMatrix{}
         arr.push(d.metal_dev[0].matrix_q6_k(rows, columns) >>>)
@@ -478,7 +478,7 @@ pub fn (d &Device) matrix_q6_k(rows int, columns int) Q6KMatrix {
 pub fn (m &Q6KMatrix) rows() int { << m.n_rows }
 pub fn (m &Q6KMatrix) columns() int { << m.n_cols }
 pub fn (m $&Q6KMatrix) write_bytes(bytes &string) int {
-    if m.closed { >>> errors.new("gpu: matrix closed") }
+    if m.closed { >> errors.new("gpu: matrix closed") }
     if m.backend == BACKEND_METAL {
         el := $&m.metal_mat[0]
         << el.write_bytes(bytes) >>>
@@ -506,9 +506,9 @@ fn wait_metal(f $&metal.Fence) int {
 }
 
 fn check_same_backend(dev &Device, a int, b int) int {
-    if dev.closed { >>> errors.new("gpu: device closed") }
+    if dev.closed { >> errors.new("gpu: device closed") }
     if a != dev.backend || b != dev.backend {
-        >>> errors.new("gpu: matrix belongs to a different backend")
+        >> errors.new("gpu: matrix belongs to a different backend")
     }
     << 0
 }
@@ -734,7 +734,7 @@ pub fn rope_f32(dev $&Device, dst $&F32Matrix, x &F32Matrix, pos_offset int, hea
         $f := metal.rope_f32(dm, &x.metal_mat[0], pos_offset, head_dim, theta) >>>
         << wait_metal($&f) >>>
     }
-    if head_dim <= 0 { >>> errors.new("gpu: invalid head_dim") }
+    if head_dim <= 0 { >> errors.new("gpu: invalid head_dim") }
     n_heads := x.n_cols / head_dim
     if dev.backend == BACKEND_CUDA {
         cd := $&dev.cuda_dev[0]

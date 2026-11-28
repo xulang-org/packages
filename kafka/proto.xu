@@ -295,13 +295,13 @@ pub fn build_apiversions_request(correlation_id int, client_id string) string {
 // Parse Produce Response v3
 pub fn parse_produce_response(resp string) int {
     if resp.len < 8 {
-        >>> errors.new("kafka: response too short")
+        >> errors.new("kafka: response too short")
     }
     $off := 4 // skip correlation_id
     num_topics := decode_i32(&resp, off)
     off = off + 4
     if num_topics <= 0 {
-        >>> errors.new("kafka: no topics in produce response")
+        >> errors.new("kafka: no topics in produce response")
     }
 
     // Read topic name
@@ -314,7 +314,7 @@ pub fn parse_produce_response(resp string) int {
     num_parts := decode_i32(&resp, off)
     off = off + 4
     if num_parts <= 0 {
-        >>> errors.new("kafka: no partitions in produce response")
+        >> errors.new("kafka: no partitions in produce response")
     }
 
     _ := decode_i32(&resp, off) // partition
@@ -322,7 +322,7 @@ pub fn parse_produce_response(resp string) int {
     err_code := decode_i16(&resp, off)
     off = off + 2
     if err_code != 0 {
-        >>> errors.new("kafka: produce error code " + str(err_code))
+        >> errors.new("kafka: produce error code " + str(err_code))
     }
 
     base_offset := decode_i64(&resp, off)
@@ -363,7 +363,7 @@ pub fn parse_fetch_response(resp string) []string {
     err_code := decode_i16(&resp, off)
     off = off + 2
     if err_code != 0 {
-        >>> errors.new("kafka: fetch error code " + str(err_code))
+        >> errors.new("kafka: fetch error code " + str(err_code))
     }
 
     _hw := decode_i64(&resp, off) // high_watermark

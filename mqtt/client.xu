@@ -30,10 +30,10 @@ fn (c $&Client) write_raw(data string) int {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) >>> (err) {
-            >>> errors.new("mqtt: write failed: " + err.msg())
+            >> errors.new("mqtt: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("mqtt: connection closed")
+            >> errors.new("mqtt: connection closed")
         }
         off = off + n
     }
@@ -44,10 +44,10 @@ fn (c $&Client) read_exact(n int) string {
     $res := ""
     while res.len < n {
         chunk := net.conn_read(c.fd, n - res.len) >>> (err) {
-            >>> errors.new("mqtt: read error: " + err.msg())
+            >> errors.new("mqtt: read error: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("mqtt: connection closed")
+            >> errors.new("mqtt: connection closed")
         }
         res = res + chunk
     }
@@ -56,7 +56,7 @@ fn (c $&Client) read_exact(n int) string {
 
 pub fn connect_opts(addr string, client_id string, username string, password string, clean_session bool, keepalive int) Client {
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("mqtt: dial failed: " + err.msg())
+        >> errors.new("mqtt: dial failed: " + err.msg())
     }
     $c := Client{
         fd: fd,
@@ -99,11 +99,11 @@ pub fn connect_opts(addr string, client_id string, username string, password str
     // Read CONNACK response (4 bytes: 0x20 0x02 SessionPresent ReturnCode)
     ack := c.read_exact(4) >>>
     if (ack[0] & 255) != 32 || (ack[1] & 255) != 2 {
-        >>> errors.new("mqtt: invalid CONNACK header")
+        >> errors.new("mqtt: invalid CONNACK header")
     }
     ret_code := ack[3] & 255
     if ret_code != 0 {
-        >>> errors.new("mqtt: connection rejected with code " + str(ret_code))
+        >> errors.new("mqtt: connection rejected with code " + str(ret_code))
     }
     << c
 }
@@ -196,7 +196,7 @@ pub fn (c $&Client) subscribe(topic string, qos int) int {
     // Read SUBACK (5 bytes: 0x90 0x03 pid_msb pid_lsb return_code)
     ack := c.read_exact(5) >>>
     if (ack[0] & 255) != 144 {
-        >>> errors.new("mqtt: expected SUBACK")
+        >> errors.new("mqtt: expected SUBACK")
     }
     << 0
 }

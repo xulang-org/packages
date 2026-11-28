@@ -12,17 +12,17 @@ pub struct Client {
 
 pub fn dial(addr string) Client {
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("memcached: dial failed: " + err.msg())
+        >> errors.new("memcached: dial failed: " + err.msg())
     }
     << Client{fd: fd, buf: "", addr: addr}
 }
 
 fn (c $&Client) fill() int {
     chunk := net.conn_read(c.fd, 4096) >>> (err) {
-        >>> errors.new("memcached: read error: " + err.msg())
+        >> errors.new("memcached: read error: " + err.msg())
     }
     if chunk.len == 0 {
-        >>> errors.new("memcached: connection closed")
+        >> errors.new("memcached: connection closed")
     }
     c.buf = c.buf + chunk
     << chunk.len
@@ -80,10 +80,10 @@ pub fn (c $&Client) write_raw(data string) int {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) >>> (err) {
-            >>> errors.new("memcached: write failed: " + err.msg())
+            >> errors.new("memcached: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("memcached: connection closed")
+            >> errors.new("memcached: connection closed")
         }
         off = off + n
     }

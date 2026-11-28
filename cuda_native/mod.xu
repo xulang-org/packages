@@ -358,11 +358,11 @@ pub fn device_count() int {
 }
 
 fn cu_err(op string, rc int) int {
-    >>> errors.code(rc, "cuda_native: " + op + " failed (code=" + str(rc) + ")")
+    >> errors.code(rc, "cuda_native: " + op + " failed (code=" + str(rc) + ")")
 }
 
 pub fn open(ordinal int) CudaDevice {
-    if !ensure() { >>> errors.new("cuda_native: CUDA driver library unavailable") }
+    if !ensure() { >> errors.new("cuda_native: CUDA driver library unavailable") }
     unsafe {
         dev_box := ffi.calloc(8)
         ctx_box := ffi.calloc(8)
@@ -373,7 +373,7 @@ pub fn open(ordinal int) CudaDevice {
             if !ffi.is_null(ctx_box) { ffi.free(ctx_box) }
             if !ffi.is_null(st_box) { ffi.free(st_box) }
             if !ffi.is_null(cb_box) { ffi.free(cb_box) }
-            >>> errors.new("cuda_native: host allocation failed")
+            >> errors.new("cuda_native: host allocation failed")
         }
         rc1 := int(xc_cu_device_get(sym(SYM_CU_DEVICE_GET), dev_box, i32(ordinal)))
         dev_handle := int(ffi.read_i32(dev_box, 0))
@@ -443,7 +443,7 @@ pub fn open(ordinal int) CudaDevice {
 }
 
 pub fn (d &CudaDevice) make_current() int {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
     unsafe {
         rc := int(xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), d.ctx))
         if rc != 0 { _ := cu_err("cuCtxSetCurrent", rc) >>> }
@@ -452,10 +452,10 @@ pub fn (d &CudaDevice) make_current() int {
 }
 
 pub fn (d &CudaDevice) name() string {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
     unsafe {
         buf := ffi.calloc(256)
-        if ffi.is_null(buf) { >>> errors.new("cuda_native: host alloc failed") }
+        if ffi.is_null(buf) { >> errors.new("cuda_native: host alloc failed") }
         rc := int(xc_cu_device_get_name(sym(SYM_CU_DEVICE_GET_NAME), buf, i32(256), i32(d.handle)))
         if rc != 0 {
             ffi.free(buf)
@@ -468,10 +468,10 @@ pub fn (d &CudaDevice) name() string {
 }
 
 pub fn (d &CudaDevice) total_mem() int {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
     unsafe {
         out := ffi.calloc(8)
-        if ffi.is_null(out) { >>> errors.new("cuda_native: host alloc failed") }
+        if ffi.is_null(out) { >> errors.new("cuda_native: host alloc failed") }
         rc := int(xc_cu_device_total_mem(sym(SYM_CU_DEVICE_TOTAL_MEM), out, i32(d.handle)))
         sz := ffi.read_i64(out, 0)
         ffi.free(out)
@@ -481,10 +481,10 @@ pub fn (d &CudaDevice) total_mem() int {
 }
 
 fn (d &CudaDevice) attr(a int) int {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
     unsafe {
         out := ffi.calloc(8)
-        if ffi.is_null(out) { >>> errors.new("cuda_native: host alloc failed") }
+        if ffi.is_null(out) { >> errors.new("cuda_native: host alloc failed") }
         rc := int(xc_cu_device_get_attr(sym(SYM_CU_DEVICE_GET_ATTR), out, i32(a), i32(d.handle)))
         v := int(ffi.read_i32(out, 0))
         ffi.free(out)
@@ -498,7 +498,7 @@ pub fn (d &CudaDevice) cc_major() int { << d.attr(CU_ATTR_COMPUTE_CAPABILITY_MAJ
 pub fn (d &CudaDevice) cc_minor() int { << d.attr(CU_ATTR_COMPUTE_CAPABILITY_MINOR) >>> }
 
 pub fn (d &CudaDevice) sync() int {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
     unsafe {
         d.make_current() >>>
         if !ffi.is_null(d.stream) {
@@ -537,14 +537,14 @@ pub fn (d $&CudaDevice) close() int {
 }
 
 pub fn (d &CudaDevice) alloc_bytes(byte_len int) CudaBuffer {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
-    if byte_len < 0 { >>> errors.new("cuda_native: negative allocation size") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
+    if byte_len < 0 { >> errors.new("cuda_native: negative allocation size") }
     unsafe {
         d.make_current() >>>
         $sz := byte_len
         if sz == 0 { sz = 16 }
         out := ffi.calloc(8)
-        if ffi.is_null(out) { >>> errors.new("cuda_native: host alloc failed") }
+        if ffi.is_null(out) { >> errors.new("cuda_native: host alloc failed") }
         rc := int(xc_cu_mem_alloc(sym(SYM_CU_MEM_ALLOC), out, u64(sz)))
         dptr := ffi.read_u64(out, 0)
         ffi.free(out)
@@ -558,9 +558,9 @@ pub fn (d &CudaDevice) alloc_f32(elements int) CudaBuffer {
 }
 
 pub fn (b $&CudaBuffer) write_bytes(data &string) int {
-    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    if b.closed { >> errors.new("cuda_native: buffer closed") }
     if data.len != b.byte_len {
-        >>> errors.new("cuda_native: write_bytes length mismatch")
+        >> errors.new("cuda_native: write_bytes length mismatch")
     }
     if data.len == 0 { << 0 }
     unsafe {
@@ -576,16 +576,16 @@ pub fn (b $&CudaBuffer) write_bytes(data &string) int {
 }
 
 pub fn (b $&CudaBuffer) write_f32_bits(bits &[]int) int {
-    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    if b.closed { >> errors.new("cuda_native: buffer closed") }
     n := bits.len
     if n * 4 != b.byte_len {
-        >>> errors.new("cuda_native: write_f32_bits length mismatch")
+        >> errors.new("cuda_native: write_f32_bits length mismatch")
     }
     if n == 0 { << 0 }
     unsafe {
         _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
         tmp := ffi.calloc(n * 4)
-        if ffi.is_null(tmp) { >>> errors.new("cuda_native: host alloc failed") }
+        if ffi.is_null(tmp) { >> errors.new("cuda_native: host alloc failed") }
         for i in 0:n {
             ffi.write_u32(tmp, i * 4, u32(bits[i]))
         }
@@ -597,16 +597,16 @@ pub fn (b $&CudaBuffer) write_f32_bits(bits &[]int) int {
 }
 
 pub fn (b &CudaBuffer) copy_f32_bits(out $&[]int) int {
-    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    if b.closed { >> errors.new("cuda_native: buffer closed") }
     n := b.byte_len / 4
     if out.len != n {
-        >>> errors.new("cuda_native: copy_f32_bits length mismatch")
+        >> errors.new("cuda_native: copy_f32_bits length mismatch")
     }
     if n == 0 { << 0 }
     unsafe {
         _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
         tmp := ffi.calloc(b.byte_len)
-        if ffi.is_null(tmp) { >>> errors.new("cuda_native: host alloc failed") }
+        if ffi.is_null(tmp) { >> errors.new("cuda_native: host alloc failed") }
         rc := int(xc_cu_memcpy_dtoh(sym(SYM_CU_MEMCPY_DTOH), tmp, b.dptr, u64(b.byte_len)))
         if rc != 0 {
             ffi.free(tmp)
@@ -630,8 +630,8 @@ pub fn (b &CudaBuffer) read_f32_bits() []int {
 }
 
 pub fn (b $&CudaBuffer) copy_from(src &CudaBuffer) int {
-    if b.closed || src.closed { >>> errors.new("cuda_native: buffer closed") }
-    if b.byte_len != src.byte_len { >>> errors.new("cuda_native: copy_from size mismatch") }
+    if b.closed || src.closed { >> errors.new("cuda_native: buffer closed") }
+    if b.byte_len != src.byte_len { >> errors.new("cuda_native: copy_from size mismatch") }
     if b.byte_len == 0 { << 0 }
     unsafe {
         _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
@@ -642,7 +642,7 @@ pub fn (b $&CudaBuffer) copy_from(src &CudaBuffer) int {
 }
 
 pub fn (b $&CudaBuffer) zero() int {
-    if b.closed { >>> errors.new("cuda_native: buffer closed") }
+    if b.closed { >> errors.new("cuda_native: buffer closed") }
     if b.byte_len == 0 { << 0 }
     unsafe {
         _ := xc_cu_ctx_set_current(sym(SYM_CU_CTX_SET_CURRENT), b.ctx)
@@ -666,14 +666,14 @@ pub fn (b $&CudaBuffer) close() int {
 }
 
 pub fn compile_ptx(src string, name string, arch_opt string) string {
-    if !has_nvrtc() { >>> errors.new("cuda_native: libnvrtc unavailable") }
+    if !has_nvrtc() { >> errors.new("cuda_native: libnvrtc unavailable") }
     unsafe {
         prog_box := ffi.calloc(8)
         sz_box := ffi.calloc(8)
         if ffi.is_null(prog_box) || ffi.is_null(sz_box) {
             if !ffi.is_null(prog_box) { ffi.free(prog_box) }
             if !ffi.is_null(sz_box) { ffi.free(sz_box) }
-            >>> errors.new("cuda_native: host alloc failed")
+            >> errors.new("cuda_native: host alloc failed")
         }
         c_src := ffi.cstring(&src)
         c_name := ffi.cstring(&name)
@@ -714,7 +714,7 @@ pub fn compile_ptx(src string, name string, arch_opt string) string {
             _ := xc_nvrtc_destroy_program(sym(SYM_NVRTC_DESTROY_PROGRAM), prog_box)
             ffi.free(prog_box)
             ffi.free(sz_box)
-            >>> errors.new("cuda_native: nvrtcCompileProgram failed: " + log_msg)
+            >> errors.new("cuda_native: nvrtcCompileProgram failed: " + log_msg)
         }
 
         rc3 := int(xc_nvrtc_get_ptx_size(sym(SYM_NVRTC_GET_PTX_SIZE), prog, sz_box))
@@ -738,7 +738,7 @@ pub fn compile_ptx(src string, name string, arch_opt string) string {
 }
 
 pub fn (d &CudaDevice) load_module_ptx(ptx string) CudaModule {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
     unsafe {
         d.make_current() >>>
         mod_box := ffi.calloc(8)
@@ -753,7 +753,7 @@ pub fn (d &CudaDevice) load_module_ptx(ptx string) CudaModule {
 }
 
 pub fn (m &CudaModule) get_function(name string) CudaFunction {
-    if m.closed { >>> errors.new("cuda_native: module closed") }
+    if m.closed { >> errors.new("cuda_native: module closed") }
     unsafe {
         fn_box := ffi.calloc(8)
         c_name := ffi.cstring(&name)
@@ -792,7 +792,7 @@ fn load_fn_from_mod(hmod c_ptr, name string) c_ptr {
 }
 
 pub fn (d $&CudaDevice) ensure_llm_kernels() int {
-    if d.closed { >>> errors.new("cuda_native: device closed") }
+    if d.closed { >> errors.new("cuda_native: device closed") }
     unsafe {
         if !ffi.is_null(d.llm_mod) { << 0 }
         ptx := compile_ptx(llm_kernels_source(), "xu_llm_kernels.cu", "") >>>
@@ -826,7 +826,7 @@ fn (d &CudaDevice) launch_raw(hf c_ptr, gx int, gy int, gz int, bx int, by int, 
         if ffi.is_null(storage) || ffi.is_null(ptrs) {
             if !ffi.is_null(storage) { ffi.free(storage) }
             if !ffi.is_null(ptrs) { ffi.free(ptrs) }
-            >>> errors.new("cuda_native: host alloc failed")
+            >> errors.new("cuda_native: host alloc failed")
         }
         // kinds: 0 = u64 dptr, 1 = i32/u32 scalar bits
         for i in 0:n {
@@ -924,7 +924,7 @@ fn (d $&CudaDevice) cublas_gemm_raw(op_b int, op_a int, m int, n int, k int, b_d
         if ffi.is_null(alpha) || ffi.is_null(beta) {
             if !ffi.is_null(alpha) { ffi.free(alpha) }
             if !ffi.is_null(beta) { ffi.free(beta) }
-            >>> errors.new("cuda_native: host alloc failed")
+            >> errors.new("cuda_native: host alloc failed")
         }
         ffi.write_u32(alpha, 0, u32(math.float32_bits(1.0)))
         ffi.write_u32(beta, 0, u32(math.float32_bits(0.0)))

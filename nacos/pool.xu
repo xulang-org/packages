@@ -83,11 +83,11 @@ pub fn (p &Pool) get_instances(service string, group string) string {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("nacos: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
     $reusable := false
     result := p.client.get_instances_at(fd, service, group, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -128,11 +128,11 @@ pub fn (p &Pool) get_config(data_id string, group string) string {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("nacos: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("nacos: pool closed or dial failed") }
     $reusable := false
     result := p.client.get_config_at(fd, data_id, group, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result

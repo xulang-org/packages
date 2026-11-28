@@ -671,7 +671,7 @@ fn run_loop_history_impl(a &Agent, history $&[]openai.Message, use_http_mcp bool
     $last_finish := ""
     $limit := a.max_turns
     if limit <= 0 {
-        >>> errors.new("agent: max_turns must be positive")
+        >> errors.new("agent: max_turns must be positive")
     }
     trace_id := "tr_" + str(time.now_time().unix_nano())
     if a.has_guardrails {
@@ -682,7 +682,7 @@ fn run_loop_history_impl(a &Agent, history $&[]openai.Message, use_http_mcp bool
         if ui >= 0 {
             g_in := guardrails.check_input(&a.guard_policy, &history[ui].content)
             if !g_in.allowed {
-                >>> errors.new("agent guardrails input blocked: " + g_in.reason)
+                >> errors.new("agent guardrails input blocked: " + g_in.reason)
             }
             history[ui].content = g_in.sanitized_text + ""
         }
@@ -716,7 +716,7 @@ fn run_loop_history_impl(a &Agent, history $&[]openai.Message, use_http_mcp bool
                 if d.done { <- }
             }
             outc := <-rch
-            if !outc.ok { >>> errors.new(outc.err_msg) }
+            if !outc.ok { >> errors.new(outc.err_msg) }
             resp = ~outc.resp
         } else {
             resp = a.client.chat(&req) >>>
@@ -734,7 +734,7 @@ fn run_loop_history_impl(a &Agent, history $&[]openai.Message, use_http_mcp bool
             })
         }
         if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
-            >>> errors.new("agent: token budget exceeded")
+            >> errors.new("agent: token budget exceeded")
         }
         if resp.reasoning_content.len > 0 {
             if all_reasoning.len > 0 { all_reasoning = all_reasoning + "\n" }
@@ -746,7 +746,7 @@ fn run_loop_history_impl(a &Agent, history $&[]openai.Message, use_http_mcp bool
             if a.has_guardrails {
                 g_out := guardrails.check_output(&a.guard_policy, &last_content)
                 if !g_out.allowed {
-                    >>> errors.new("agent guardrails output blocked: " + g_out.reason)
+                    >> errors.new("agent guardrails output blocked: " + g_out.reason)
                 }
                 last_content = g_out.sanitized_text + ""
             }
@@ -1237,7 +1237,7 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
     $all_thinking := ""
     $last_stop := ""
     $limit := a.max_turns
-    if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+    if limit <= 0 { >> errors.new("agent: max_turns must be positive") }
     trace_id := "tr_" + str(time.now_time().unix_nano())
     $last_user_prompt := ""
     if a.has_guardrails || a.skills.len > 0 {
@@ -1250,7 +1250,7 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
             if a.has_guardrails {
                 g_in := guardrails.check_input(&a.guard_policy, &history[ui].content)
                 if !g_in.allowed {
-                    >>> errors.new("agent guardrails input blocked: " + g_in.reason)
+                    >> errors.new("agent guardrails input blocked: " + g_in.reason)
                 }
                 history[ui].content = g_in.sanitized_text + ""
                 last_user_prompt = history[ui].content + ""
@@ -1313,7 +1313,7 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
                 if ev.done { <- }
             }
             outc := <-rch
-            if !outc.ok { >>> errors.new(outc.err_msg) }
+            if !outc.ok { >> errors.new(outc.err_msg) }
             resp = ~outc.resp
         } else {
             resp = a.client.messages(&req) >>>
@@ -1330,7 +1330,7 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
             })
         }
         if a.max_total_tokens > 0 && (pt + ct) > a.max_total_tokens {
-            >>> errors.new("agent: token budget exceeded")
+            >> errors.new("agent: token budget exceeded")
         }
         if resp.thinking.len > 0 {
             if all_thinking.len > 0 { all_thinking = all_thinking + "\n" }
@@ -1342,7 +1342,7 @@ fn run_anth_loop_history_impl(a &AnthropicAgent, history $&[]anthropic.Message, 
             if a.has_guardrails {
                 g_out := guardrails.check_output(&a.guard_policy, &last_content)
                 if !g_out.allowed {
-                    >>> errors.new("agent guardrails output blocked: " + g_out.reason)
+                    >> errors.new("agent guardrails output blocked: " + g_out.reason)
                 }
                 last_content = g_out.sanitized_text + ""
             }
@@ -1796,7 +1796,7 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
     $all_thoughts := ""
     $last_finish := ""
     $limit := a.max_turns
-    if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+    if limit <= 0 { >> errors.new("agent: max_turns must be positive") }
     trace_id := "tr_" + str(time.now_time().unix_nano())
     $last_user_prompt := ""
     if a.has_guardrails || a.skills.len > 0 {
@@ -1811,7 +1811,7 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
             if a.has_guardrails {
                 g_in := guardrails.check_input(&a.guard_policy, &history[ui].parts[0].text)
                 if !g_in.allowed {
-                    >>> errors.new("agent guardrails input blocked: " + g_in.reason)
+                    >> errors.new("agent guardrails input blocked: " + g_in.reason)
                 }
                 history[ui].parts[0].text = g_in.sanitized_text + ""
                 last_user_prompt = history[ui].parts[0].text + ""
@@ -1877,7 +1877,7 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
                 if ev.done { <- }
             }
             outc := <-rch
-            if !outc.ok { >>> errors.new(outc.err_msg) }
+            if !outc.ok { >> errors.new(outc.err_msg) }
             resp = ~outc.resp
         } else {
             resp = a.client.generate(&req) >>>
@@ -1899,7 +1899,7 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
             })
         }
         if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
-            >>> errors.new("agent: token budget exceeded")
+            >> errors.new("agent: token budget exceeded")
         }
         if resp.thoughts.len > 0 {
             if all_thoughts.len > 0 { all_thoughts = all_thoughts + "\n" }
@@ -1911,7 +1911,7 @@ fn run_gem_loop_history_impl(a &GeminiAgent, history $&[]gemini.Content,
             if a.has_guardrails {
                 g_out := guardrails.check_output(&a.guard_policy, &last_content)
                 if !g_out.allowed {
-                    >>> errors.new("agent guardrails output blocked: " + g_out.reason)
+                    >> errors.new("agent guardrails output blocked: " + g_out.reason)
                 }
                 last_content = g_out.sanitized_text + ""
             }
@@ -2259,14 +2259,14 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
     $last_content := ""
     $last_status := ""
     $limit := a.max_turns
-    if limit <= 0 { >>> errors.new("agent: max_turns must be positive") }
+    if limit <= 0 { >> errors.new("agent: max_turns must be positive") }
     trace_id := "tr_" + str(time.now_time().unix_nano())
 
     $cur_input := user_prompt + ""
     if a.has_guardrails {
         g_in := guardrails.check_input(&a.guard_policy, &cur_input)
         if !g_in.allowed {
-            >>> errors.new("agent guardrails input blocked: " + g_in.reason)
+            >> errors.new("agent guardrails input blocked: " + g_in.reason)
         }
         cur_input = g_in.sanitized_text + ""
     }
@@ -2324,7 +2324,7 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
                 if ev.done { <- }
             }
             outc := <-rch
-            if !outc.ok { >>> errors.new(outc.err_msg) }
+            if !outc.ok { >> errors.new(outc.err_msg) }
             resp = ~outc.resp
         } else {
             resp = a.client.responses(&req) >>>
@@ -2343,7 +2343,7 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
             })
         }
         if a.max_total_tokens > 0 && ((pt + ct) > a.max_total_tokens || tt > a.max_total_tokens) {
-            >>> errors.new("agent: token budget exceeded")
+            >> errors.new("agent: token budget exceeded")
         }
         last_content = resp.output_text + ""
         last_status = resp.status + ""
@@ -2351,7 +2351,7 @@ fn run_resp_loop_impl(a &ResponsesAgent, prev_id_ref $&string, user_prompt strin
             if a.has_guardrails {
                 g_out := guardrails.check_output(&a.guard_policy, &last_content)
                 if !g_out.allowed {
-                    >>> errors.new("agent guardrails output blocked: " + g_out.reason)
+                    >> errors.new("agent guardrails output blocked: " + g_out.reason)
                 }
                 last_content = g_out.sanitized_text + ""
             }
@@ -2712,7 +2712,7 @@ pub fn (m $&AgentMemory) forget(id string) bool {
 
 pub fn (m $&AgentMemory) update(id string, text string, tag string, embedding &[]f64) bool {
     if embedding.len != m.store.dim {
-        >>> errors.new("agent: memory embedding dimension mismatch")
+        >> errors.new("agent: memory embedding dimension mismatch")
     }
     for i in 0:m.store.chunks.len {
         if m.store.chunks[i].id == id {
@@ -2758,12 +2758,12 @@ pub fn (m &AgentMemory) save_sqlite(path string) int {
     r1 := conn.exec("CREATE TABLE IF NOT EXISTS agent_memory (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL, metadata TEXT NOT NULL, embedding TEXT NOT NULL)", []driver.NamedValue{})
     if r1.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("agent: memory sqlite init failed: " + r1.err)
+        >> errors.new("agent: memory sqlite init failed: " + r1.err)
     }
     r2 := conn.exec("CREATE TABLE IF NOT EXISTS agent_memory_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)", []driver.NamedValue{})
     if r2.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("agent: memory sqlite meta init failed: " + r2.err)
+        >> errors.new("agent: memory sqlite meta init failed: " + r2.err)
     }
     tx := conn.begin()
     _ := conn.exec("DELETE FROM agent_memory", []driver.NamedValue{})
@@ -2777,14 +2777,14 @@ pub fn (m &AgentMemory) save_sqlite(path string) int {
         if ri.err.len > 0 {
             _ := tx.rollback()
             _ := conn.close()
-            >>> errors.new("agent: memory sqlite insert failed: " + ri.err)
+            >> errors.new("agent: memory sqlite insert failed: " + ri.err)
         }
     }
     _ := conn.exec("INSERT OR REPLACE INTO agent_memory_meta (k, v) VALUES ('dim', ?)", [driver.NamedValue{name: "", ordinal: 1, value: str(m.store.dim)}])
     _ := conn.exec("INSERT OR REPLACE INTO agent_memory_meta (k, v) VALUES ('next_id', ?)", [driver.NamedValue{name: "", ordinal: 1, value: str(m.next_id)}])
     ce := tx.commit()
     _ := conn.close()
-    if ce.len > 0 { >>> errors.new("agent: memory sqlite commit failed: " + ce) }
+    if ce.len > 0 { >> errors.new("agent: memory sqlite commit failed: " + ce) }
     << m.store.chunks.len
 }
 
@@ -2797,7 +2797,7 @@ pub fn load_memory_sqlite(path string) AgentMemory {
     rdim := conn.query("SELECT k, v FROM agent_memory_meta", []driver.NamedValue{})
     if rdim.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("agent: memory sqlite load meta failed: " + rdim.err)
+        >> errors.new("agent: memory sqlite load meta failed: " + rdim.err)
     }
     $dim := 0
     $nid := 1
@@ -2816,7 +2816,7 @@ pub fn load_memory_sqlite(path string) AgentMemory {
     rows := conn.query("SELECT id, doc_id, text, source, metadata, embedding FROM agent_memory", []driver.NamedValue{})
     if rows.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("agent: memory sqlite load chunks failed: " + rows.err)
+        >> errors.new("agent: memory sqlite load chunks failed: " + rows.err)
     }
     if rows.ncols >= 6 {
         nrows := rows.cells.len / rows.ncols
@@ -3001,7 +3001,7 @@ pub fn run_sequential_workflow(agents &[]Agent, names &[]string, initial_prompt 
 pub fn run_router_workflow(router &Agent, specialists &[]Agent, specialist_names &[]string,
                            user_prompt string) WorkflowStepResult {
     if specialists.len == 0 {
-        >>> errors.new("agent: router workflow needs at least one specialist")
+        >> errors.new("agent: router workflow needs at least one specialist")
     }
     $route_prompt := "Route this request to exactly one specialist name ("
     for i in 0:specialist_names.len {
@@ -3064,15 +3064,15 @@ fn session_to_checkpoint_json(s &Session) string {
 fn parse_session_checkpoint_str(agent Agent, raw &string) Session {
     doc := json.parse(raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("agent: invalid session checkpoint JSON")
+        >> errors.new("agent: invalid session checkpoint JSON")
     }
     root := doc.root()
     if !doc.has(root, "messages") {
-        >>> errors.new("agent: session checkpoint missing messages")
+        >> errors.new("agent: session checkpoint missing messages")
     }
     arr := doc.get(root, "messages") >>>
     if !doc.is_list(arr) {
-        >>> errors.new("agent: session checkpoint messages is not a list")
+        >> errors.new("agent: session checkpoint messages is not a list")
     }
     $msgs := []openai.Message{}
     cnt := doc.count(arr)
@@ -3131,7 +3131,7 @@ pub fn (s &Session) save_checkpoint_sqlite(path string, session_id string) int {
     r1 := conn.exec("CREATE TABLE IF NOT EXISTS agent_sessions (session_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at INTEGER NOT NULL)", []driver.NamedValue{})
     if r1.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("agent: session sqlite init failed: " + r1.err)
+        >> errors.new("agent: session sqlite init failed: " + r1.err)
     }
     tx := conn.begin()
     args := [driver.NamedValue{name: "", ordinal: 1, value: sid}, driver.NamedValue{name: "", ordinal: 2, value: out}, driver.NamedValue{name: "", ordinal: 3, value: time.now()}]
@@ -3139,11 +3139,11 @@ pub fn (s &Session) save_checkpoint_sqlite(path string, session_id string) int {
     if ri.err.len > 0 {
         _ := tx.rollback()
         _ := conn.close()
-        >>> errors.new("agent: session sqlite save failed: " + ri.err)
+        >> errors.new("agent: session sqlite save failed: " + ri.err)
     }
     ce := tx.commit()
     _ := conn.close()
-    if ce.len > 0 { >>> errors.new("agent: session sqlite commit failed: " + ce) }
+    if ce.len > 0 { >> errors.new("agent: session sqlite commit failed: " + ce) }
     << s.messages.len
 }
 
@@ -3153,8 +3153,8 @@ pub fn load_session_checkpoint_sqlite(agent Agent, path string, session_id strin
     conn := ag_open_sqlite_wal(&path)
     rows := conn.query("SELECT payload_json FROM agent_sessions WHERE session_id = ?", [driver.NamedValue{name: "", ordinal: 1, value: sid + ""}])
     _ := conn.close()
-    if rows.err.len > 0 { >>> errors.new("agent: session sqlite load failed: " + rows.err) }
-    if rows.cells.len == 0 { >>> errors.new("agent: session checkpoint not found in sqlite: " + sid) }
+    if rows.err.len > 0 { >> errors.new("agent: session sqlite load failed: " + rows.err) }
+    if rows.cells.len == 0 { >> errors.new("agent: session checkpoint not found in sqlite: " + sid) }
     raw := ag_strip_cell(&rows.cells[0])
     << parse_session_checkpoint_str(agent, &raw) >>>
 }
@@ -3276,7 +3276,7 @@ pub fn run_parallel_workflow(agents &[]Agent, names &[]string, prompts &[]string
         }
     }
     if first_err.len > 0 {
-        >>> errors.new(first_err)
+        >> errors.new(first_err)
     }
     << out
 }
@@ -3372,7 +3372,7 @@ pub fn (a &Agent) run_json_checked(user_prompt string, required_keys &[]string, 
         cur_prompt = user_prompt + "\n\nPrevious output failed schema check (" + last_err +
                      "). Return ONLY a valid JSON object containing all required keys."
     }
-    >>> errors.new("agent: run_json_checked failed (" + last_err + ")")
+    >> errors.new("agent: run_json_checked failed (" + last_err + ")")
 }
 
 fn split_nl_entries(raw &string) []string {
@@ -3697,7 +3697,7 @@ fn run_graph_from(g &StateGraph, start_node string, initial_state string,
         } else {
             fi := find_graph_fanout_idx(&g.fanout_nodes, &cur)
             if fi < 0 {
-                >>> errors.new("agent: unknown StateGraph node: " + cur)
+                >> errors.new("agent: unknown StateGraph node: " + cur)
             }
             fo := &g.fanout_nodes[fi]
             nb := fo.branches.len
@@ -3773,7 +3773,7 @@ fn run_graph_from(g &StateGraph, start_node string, initial_state string,
 
 pub fn (g &StateGraph) run(initial_state string, max_steps int) GraphRunResult {
     if g.entry.len == 0 {
-        >>> errors.new("agent: StateGraph entry node is empty")
+        >> errors.new("agent: StateGraph entry node is empty")
     }
     empty := []GraphStep{}
     << run_graph_from(g, g.entry + "", initial_state, &empty, "", max_steps, false) >>>
@@ -3808,7 +3808,7 @@ fn graph_checkpoint_to_json(ckpt &GraphCheckpoint) string {
 fn parse_graph_checkpoint_str(raw &string) GraphCheckpoint {
     doc := json.parse(raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("agent: invalid StateGraph checkpoint JSON")
+        >> errors.new("agent: invalid StateGraph checkpoint JSON")
     }
     root := doc.root()
     $steps := []GraphStep{}
@@ -3865,7 +3865,7 @@ pub fn save_graph_checkpoint_sqlite(ckpt &GraphCheckpoint, path string, thread_i
     r1 := conn.exec("CREATE TABLE IF NOT EXISTS agent_graph_checkpoints (thread_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at INTEGER NOT NULL)", []driver.NamedValue{})
     if r1.err.len > 0 {
         _ := conn.close()
-        >>> errors.new("agent: graph sqlite init failed: " + r1.err)
+        >> errors.new("agent: graph sqlite init failed: " + r1.err)
     }
     tx := conn.begin()
     args := [driver.NamedValue{name: "", ordinal: 1, value: tid}, driver.NamedValue{name: "", ordinal: 2, value: out}, driver.NamedValue{name: "", ordinal: 3, value: time.now()}]
@@ -3873,11 +3873,11 @@ pub fn save_graph_checkpoint_sqlite(ckpt &GraphCheckpoint, path string, thread_i
     if ri.err.len > 0 {
         _ := tx.rollback()
         _ := conn.close()
-        >>> errors.new("agent: graph sqlite save failed: " + ri.err)
+        >> errors.new("agent: graph sqlite save failed: " + ri.err)
     }
     ce := tx.commit()
     _ := conn.close()
-    if ce.len > 0 { >>> errors.new("agent: graph sqlite commit failed: " + ce) }
+    if ce.len > 0 { >> errors.new("agent: graph sqlite commit failed: " + ce) }
     << ckpt.steps.len
 }
 
@@ -3887,8 +3887,8 @@ pub fn load_graph_checkpoint_sqlite(path string, thread_id string) GraphCheckpoi
     conn := ag_open_sqlite_wal(&path)
     rows := conn.query("SELECT payload_json FROM agent_graph_checkpoints WHERE thread_id = ?", [driver.NamedValue{name: "", ordinal: 1, value: tid + ""}])
     _ := conn.close()
-    if rows.err.len > 0 { >>> errors.new("agent: graph sqlite load failed: " + rows.err) }
-    if rows.cells.len == 0 { >>> errors.new("agent: graph checkpoint not found in sqlite: " + tid) }
+    if rows.err.len > 0 { >> errors.new("agent: graph sqlite load failed: " + rows.err) }
+    if rows.cells.len == 0 { >> errors.new("agent: graph checkpoint not found in sqlite: " + tid) }
     raw := ag_strip_cell(&rows.cells[0])
     << parse_graph_checkpoint_str(&raw) >>>
 }
@@ -4032,7 +4032,7 @@ pub fn export_traces_otlp_http(endpoint string, service_name string, spans &[]Tr
     cfg := tls.new_config(ep.host + "")
     resp := transport.request_raw(ep, cfg, raw, "POST") >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, "agent: OTLP HTTP export status " + str(resp.status_code))
+        >> errors.code(resp.status_code, "agent: OTLP HTTP export status " + str(resp.status_code))
     }
     << resp.status_code
 }
@@ -4104,7 +4104,7 @@ fn parse_handoff_directive(text &string) []string {
 pub fn run_handoff_openai(team &HandoffTeam, client &openai.Client, model string,
                           user_prompt string, max_handoffs int) HandoffResult {
     if team.agents.len == 0 {
-        >>> errors.new("agent: HandoffTeam has no agents")
+        >> errors.new("agent: HandoffTeam has no agents")
     }
     $cur := team.entry + ""
     if cur.len == 0 { cur = team.agents[0].name + "" }
@@ -4126,7 +4126,7 @@ pub fn run_handoff_openai(team &HandoffTeam, client &openai.Client, model string
     while turns <= limit {
         idx := find_handoff_agent_idx(&team.agents, &cur)
         if idx < 0 {
-            >>> errors.new("agent: unknown HandoffAgent: " + cur)
+            >> errors.new("agent: unknown HandoffAgent: " + cur)
         }
         trace.push(cur + "")
         ag := &team.agents[idx]
@@ -4434,7 +4434,7 @@ fn swarm_call_provider_turn(mb &SwarmMember, sys &string, shared_msgs &[]openai.
 
 pub fn (s &AgentSwarm) run(user_prompt string, max_handoffs int) SwarmResult {
     if s.members.len == 0 {
-        >>> errors.new("agent: AgentSwarm has no members")
+        >> errors.new("agent: AgentSwarm has no members")
     }
     $cur := s.entry + ""
     if cur.len == 0 { cur = s.members[0].name + "" }
@@ -4450,7 +4450,7 @@ pub fn (s &AgentSwarm) run(user_prompt string, max_handoffs int) SwarmResult {
     $shared_msgs := [openai.message("user", user_prompt + "")]
     entry_idx := find_swarm_member_idx(&s.members, &cur)
     if entry_idx < 0 {
-        >>> errors.new("agent: unknown AgentSwarm entry member: " + cur)
+        >> errors.new("agent: unknown AgentSwarm entry member: " + cur)
     }
     emb := &s.members[entry_idx]
     $entry_has_guard := emb.agent.has_guardrails
@@ -4468,7 +4468,7 @@ pub fn (s &AgentSwarm) run(user_prompt string, max_handoffs int) SwarmResult {
     if entry_has_guard {
         g_in := guardrails.check_input(entry_guard, &shared_msgs[0].content)
         if !g_in.allowed {
-            >>> errors.new("agent swarm guardrails input blocked: " + g_in.reason)
+            >> errors.new("agent swarm guardrails input blocked: " + g_in.reason)
         }
         shared_msgs[0].content = g_in.sanitized_text + ""
     }
@@ -4485,7 +4485,7 @@ pub fn (s &AgentSwarm) run(user_prompt string, max_handoffs int) SwarmResult {
     while turns < max_loop {
         idx := find_swarm_member_idx(&s.members, &cur)
         if idx < 0 {
-            >>> errors.new("agent: unknown AgentSwarm member: " + cur)
+            >> errors.new("agent: unknown AgentSwarm member: " + cur)
         }
         mb := &s.members[idx]
         $model_name := mb.agent.model + ""
@@ -4568,7 +4568,7 @@ pub fn (s &AgentSwarm) run(user_prompt string, max_handoffs int) SwarmResult {
             })
         }
         if max_tot > 0 && tt > max_tot {
-            >>> errors.new("agent swarm: token budget exceeded")
+            >> errors.new("agent swarm: token budget exceeded")
         }
 
         if resp.tool_calls.len == 0 {
@@ -4586,7 +4586,7 @@ pub fn (s &AgentSwarm) run(user_prompt string, max_handoffs int) SwarmResult {
             if has_guard {
                 g_out := guardrails.check_output(guard_pol, &fin)
                 if !g_out.allowed {
-                    >>> errors.new("agent swarm guardrails output blocked: " + g_out.reason)
+                    >> errors.new("agent swarm guardrails output blocked: " + g_out.reason)
                 }
                 fin = g_out.sanitized_text + ""
             }

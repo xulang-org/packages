@@ -453,7 +453,7 @@ pub fn evaluate_rag_judge_openai(client &openai.Client, model string, question s
     raw := strings.trim_space(&resp.content)
     doc := json.parse(&raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("eval: judge returned non-JSON Ragas output")
+        >> errors.new("eval: judge returned non-JSON Ragas output")
     }
     root := doc.root()
     cp := eval_json_f64_or(&doc, root, "context_precision", 0.0)
@@ -502,7 +502,7 @@ pub fn compare_openai(client &openai.Client, model string, question string,
     }
     doc := json.parse(&raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("eval: pairwise judge returned non-JSON output")
+        >> errors.new("eval: pairwise judge returned non-JSON output")
     }
     root := doc.root()
     $w := strings.trim_space(&eval_json_str_or(&doc, root, "winner", "tie"))
@@ -521,7 +521,7 @@ pub fn load_cases_jsonl(path string) []EvalCase {
         if ln.len == 0 { -> }
         doc := json.parse(&ln)
         if !doc.ok() || !doc.is_dict(doc.root()) {
-            >>> errors.new("eval: invalid JSONL line " + str(i + 1))
+            >> errors.new("eval: invalid JSONL line " + str(i + 1))
         }
         root := doc.root()
         $cid := eval_json_str_or(&doc, root, "id", "")

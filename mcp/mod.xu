@@ -665,7 +665,7 @@ fn is_initialize_body(body &string) bool {
 // http.Server (so callers can bind 127.0.0.1:0 and inspect srv.addr() first).
 pub fn (s $&Server) serve_http_server(srv $&http.Server) int {
     if srv.lfd < 0 {
-        >>> errors.new("mcp: HTTP server is not listening")
+        >> errors.new("mcp: HTTP server is not listening")
     }
     $session_seq := 0
     for {
@@ -727,7 +727,7 @@ pub fn (s $&Server) serve_http(addr string) int {
     _ := srv.listen(addr) >>>
     rc := s.serve_http_server($&srv) >>> (err) {
         _ := srv.close()
-        >>> err
+        >> err
     }
     _ := srv.close()
     << rc
@@ -812,16 +812,16 @@ fn encode_rpc_request(id int, method &string, params_json &string, is_notif bool
 fn parse_rpc_response_json(payload &string) RpcResult {
     doc := json.parse(payload)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("mcp: invalid JSON-RPC response")
+        >> errors.new("mcp: invalid JSON-RPC response")
     }
     root := doc.root()
     if doc.has(root, "error") {
         en := doc.get(root, "error") >>>
         emsg := json_str_or(&doc, en, "message", "RPC error")
-        >>> errors.new("mcp: " + emsg)
+        >> errors.new("mcp: " + emsg)
     }
     if !doc.has(root, "result") {
-        >>> errors.new("mcp: missing result")
+        >> errors.new("mcp: missing result")
     }
     res_node := doc.get(root, "result") >>>
     << RpcResult{doc: ~doc, node: res_node}
@@ -1057,7 +1057,7 @@ fn (c $&Client) rpc_call(method string, params_json string, is_notif bool) RpcRe
     cfg := tls.new_config(ep.host + "")
     resp := transport.request_raw(ep, cfg, raw, "POST") >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, "mcp: HTTP " + str(resp.status_code) + " " + resp.body)
+        >> errors.code(resp.status_code, "mcp: HTTP " + str(resp.status_code) + " " + resp.body)
     }
     sid := resp.header("Mcp-Session-Id")
     if sid.len > 0 { c.session_id = sid }
@@ -1102,7 +1102,7 @@ pub fn (c $&Client) close_session() int {
     cfg := tls.new_config(ep.host + "")
     resp := transport.request_raw(ep, cfg, raw, "DELETE") >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, "mcp: DELETE HTTP " + str(resp.status_code))
+        >> errors.code(resp.status_code, "mcp: DELETE HTTP " + str(resp.status_code))
     }
     c.session_id = ""
     << 0
@@ -1198,17 +1198,17 @@ pub fn connect_stdio(command string, args []string) StdioClient {
     }
     $sin := cmd.stdin_pipe() >>> (err) {
         cmd.close_unstarted_pipes()
-        >>> err
+        >> err
     }
     $sout := cmd.stdout_pipe() >>> (err) {
         _ := close_file_quiet($&sin)
         cmd.close_unstarted_pipes()
-        >>> err
+        >> err
     }
     _ := cmd.start() >>> (err) {
         _ := close_file_quiet($&sin)
         _ := close_file_quiet($&sout)
-        >>> err
+        >> err
     }
     << StdioClient{
         server_name: "",
@@ -1227,7 +1227,7 @@ fn write_file_all(f $&os.File, data &string) int {
     while off < data.len {
         part := data[off:data.len]
         n := f.write(part) >>>
-        if n <= 0 { >>> errors.new("mcp: stdio pipe closed during write") }
+        if n <= 0 { >> errors.new("mcp: stdio pipe closed during write") }
         off += n
     }
     << 0
@@ -1257,7 +1257,7 @@ fn (c $&StdioClient) read_line_nonempty() string {
             rem := strings.trim_space(&c.buf)
             c.buf = ""
             if rem.len > 0 { << rem }
-            >>> errors.new("mcp: stdio server closed (EOF)")
+            >> errors.new("mcp: stdio server closed (EOF)")
         }
         c.buf = c.buf + chunk
     }
@@ -1266,7 +1266,7 @@ fn (c $&StdioClient) read_line_nonempty() string {
 
 fn (c $&StdioClient) rpc_call(method string, params_json string, is_notif bool) RpcResult {
     if c.closed {
-        >>> errors.new("mcp: stdio client is closed")
+        >> errors.new("mcp: stdio client is closed")
     }
     $id := 0
     if !is_notif {

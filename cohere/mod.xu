@@ -170,7 +170,7 @@ fn request_retry(c &Client, suffix string, body &string) http.Response {
                 attempt += 1
                 ->
             }
-            >>> errors.new(err_msg)
+            >> errors.new(err_msg)
         }
         if is_retriable_status(resp.status_code) && attempt < max_r {
             sleep_retry_backoff(attempt)
@@ -233,7 +233,7 @@ fn check_http_error(status int, body &string) int {
         emsg := json_str_or(&doc, doc.root(), "message", "")
         if emsg.len > 0 { msg = emsg }
     }
-    >>> errors.code(status, msg)
+    >> errors.code(status, msg)
 }
 
 pub fn (c &Client) chat(model string, messages &[]ChatMessage, max_tokens int, temperature f64) ChatResponse {
@@ -256,7 +256,7 @@ pub fn (c &Client) chat(model string, messages &[]ChatMessage, max_tokens int, t
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("cohere: invalid JSON chat response")
+        >> errors.new("cohere: invalid JSON chat response")
     }
     root := doc.root()
     $txt := ""
@@ -324,7 +324,7 @@ pub fn (c &Client) embed(model string, texts &[]string, input_type string) Embed
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("cohere: invalid JSON embed response")
+        >> errors.new("cohere: invalid JSON embed response")
     }
     root := doc.root()
     $vecs := [][]f64{}
@@ -374,7 +374,7 @@ pub fn (c &Client) rerank(model string, query string, documents &[]string, top_n
     _ := check_http_error(resp.status_code, &resp.body) >>>
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("cohere: invalid JSON rerank response")
+        >> errors.new("cohere: invalid JSON rerank response")
     }
     root := doc.root()
     $out := []RerankResult{}

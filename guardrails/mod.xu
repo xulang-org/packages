@@ -688,7 +688,7 @@ pub fn check_safety_openai(client &openai.Client, model string, text &string) Ch
     }
     doc := json.parse(&raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("guardrails: safety classifier returned non-JSON response")
+        >> errors.new("guardrails: safety classifier returned non-JSON response")
     }
     root := doc.root()
     is_safe := guard_json_bool_or(&doc, root, "safe", true)

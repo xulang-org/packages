@@ -71,7 +71,7 @@ pub fn (p &Pool) produce(topic string, partition int, message string) int {
     fd := c.fd
     res := c.produce(topic, partition, message) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res
@@ -82,7 +82,7 @@ pub fn (p &Pool) produce_key_value(topic string, partition int, key string, val 
     fd := c.fd
     res := c.produce_key_value(topic, partition, key, val) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res
@@ -93,7 +93,7 @@ pub fn (p &Pool) fetch(topic string, partition int, offset int) []string {
     fd := c.fd
     res := c.fetch(topic, partition, offset) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res

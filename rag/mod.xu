@@ -139,10 +139,10 @@ fn copy_chunk(c &Chunk) Chunk {
 pub fn (s $&MemoryStore) add_chunk(id string, doc_id string, text string, source string,
                                    metadata_json string, embedding &[]f64) int {
     if s.dim <= 0 {
-        >>> errors.new("rag: store dimension must be positive")
+        >> errors.new("rag: store dimension must be positive")
     }
     if embedding.len != s.dim {
-        >>> errors.new("rag: embedding dimension mismatch")
+        >> errors.new("rag: embedding dimension mismatch")
     }
     $vec := []f32{}
     vec.reserve(s.dim)
@@ -166,7 +166,7 @@ pub fn (s &MemoryStore) search(query_emb &[]f64, top_k int, filter_doc_id string
     $hits := []SearchHit{}
     if s.dim <= 0 || top_k <= 0 || s.chunks.len == 0 { << hits }
     if query_emb.len != s.dim {
-        >>> errors.new("rag: query embedding dimension mismatch")
+        >> errors.new("rag: query embedding dimension mismatch")
     }
     $matched := []int{}
     $corpus := []f32{}
@@ -252,7 +252,7 @@ pub fn load_json(path string) MemoryStore {
     raw := os.read(path) >>>
     doc := json.parse(&raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("rag: invalid JSON store file")
+        >> errors.new("rag: invalid JSON store file")
     }
     root := doc.root()
     $dim := 0
@@ -313,7 +313,7 @@ pub fn index_document(store $&MemoryStore, client &openai.Client, embed_model st
     req := openai.embed_request(embed_model, ~inputs)
     resp := client.embeddings(&req) >>>
     if resp.embeddings.len != pieces.len {
-        >>> errors.new("rag: embedding count mismatch")
+        >> errors.new("rag: embedding count mismatch")
     }
     for i in 0:pieces.len {
         cid := doc_id + "#" + str(i)
@@ -661,7 +661,7 @@ pub fn (s &MemoryStore) search_mmr(query_emb &[]f64, top_k int, lambda f64, filt
     $hits := []SearchHit{}
     if s.dim <= 0 || top_k <= 0 || s.chunks.len == 0 { << hits }
     if query_emb.len != s.dim {
-        >>> errors.new("rag: query embedding dimension mismatch")
+        >> errors.new("rag: query embedding dimension mismatch")
     }
     $lam := lambda
     if lam < 0.0 { lam = 0.0 }
@@ -752,7 +752,7 @@ pub fn (s &MemoryStore) search_by_meta(query_emb &[]f64, top_k int, filter_doc_i
     $hits := []SearchHit{}
     if s.dim <= 0 || top_k <= 0 || s.chunks.len == 0 { << hits }
     if query_emb.len != s.dim {
-        >>> errors.new("rag: query embedding dimension mismatch")
+        >> errors.new("rag: query embedding dimension mismatch")
     }
     $matched := []int{}
     $corpus := []f32{}
@@ -1125,10 +1125,10 @@ fn sql_quote_lit(s &string) string {
 
 pub fn new_pgvector_store(table string, dim int, metric string) PgVectorStore {
     if !rag_valid_pg_ident(&table) {
-        >>> errors.new("rag: invalid PostgreSQL table identifier: " + table)
+        >> errors.new("rag: invalid PostgreSQL table identifier: " + table)
     }
     if dim <= 0 {
-        >>> errors.new("rag: pgvector dimension must be positive")
+        >> errors.new("rag: pgvector dimension must be positive")
     }
     $met := metric + ""
     if met.len == 0 { met = "cosine" }
@@ -1148,7 +1148,7 @@ pub fn (s &PgVectorStore) create_index_sql(index_name string, method string) str
 
 pub fn (s &PgVectorStore) upsert_chunk_sql(c &Chunk) string {
     if c.embedding.len != s.dim {
-        >>> errors.new("rag: pgvector chunk embedding dimension mismatch")
+        >> errors.new("rag: pgvector chunk embedding dimension mismatch")
     }
     vec_lit := postgres.vector_encode(&c.embedding)
     $meta := c.metadata_json + ""
@@ -1161,10 +1161,10 @@ pub fn (s &PgVectorStore) upsert_chunk_sql(c &Chunk) string {
 
 pub fn (s &PgVectorStore) search_sql(query_emb &[]f64, top_k int, filter_doc_id string) string {
     if query_emb.len != s.dim {
-        >>> errors.new("rag: pgvector query embedding dimension mismatch")
+        >> errors.new("rag: pgvector query embedding dimension mismatch")
     }
     if top_k <= 0 {
-        >>> errors.new("rag: pgvector top_k must be positive")
+        >> errors.new("rag: pgvector top_k must be positive")
     }
     vec_lit := postgres.vector_encode_f64(query_emb)
     op := postgres.pgvector_distance_op(s.metric + "") >>>
@@ -1356,7 +1356,7 @@ pub fn load_knowledge_graph_json(path string) KnowledgeGraph {
     raw := os.read(path + "") >>>
     doc := json.parse(&raw)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("rag: invalid KnowledgeGraph JSON file")
+        >> errors.new("rag: invalid KnowledgeGraph JSON file")
     }
     root := doc.root()
     $kg := new_knowledge_graph()
@@ -1520,7 +1520,7 @@ fn pg_upsert_param_sql(table &string) string {
 
 fn pg_upsert_args(store &PgVectorStore, ch &Chunk) []driver.NamedValue {
     if ch.embedding.len != store.dim {
-        >>> errors.new("rag: pgvector chunk embedding dimension mismatch")
+        >> errors.new("rag: pgvector chunk embedding dimension mismatch")
     }
     vec_lit := postgres.vector_encode(&ch.embedding)
     $meta := ch.metadata_json + ""
@@ -1530,7 +1530,7 @@ fn pg_upsert_args(store &PgVectorStore, ch &Chunk) []driver.NamedValue {
 
 fn pg_search_param_sql(store &PgVectorStore, top_k int, has_filter bool) string {
     if top_k <= 0 {
-        >>> errors.new("rag: pgvector top_k must be positive")
+        >> errors.new("rag: pgvector top_k must be positive")
     }
     op := postgres.pgvector_distance_op(store.metric + "") >>>
     $where_clause := ""
@@ -1543,7 +1543,7 @@ fn pg_search_param_sql(store &PgVectorStore, top_k int, has_filter bool) string 
 
 fn pg_search_args(store &PgVectorStore, query_emb &[]f64, filter_doc_id &string) []driver.NamedValue {
     if query_emb.len != store.dim {
-        >>> errors.new("rag: pgvector query embedding dimension mismatch")
+        >> errors.new("rag: pgvector query embedding dimension mismatch")
     }
     vec_lit := postgres.vector_encode_f64(query_emb)
     if filter_doc_id.len > 0 {
@@ -1554,17 +1554,17 @@ fn pg_search_args(store &PgVectorStore, query_emb &[]f64, filter_doc_id &string)
 
 pub fn (c $&PgVectorClient) ensure_table() int {
     r1 := c.conn.exec(postgres.pgvector_create_extension_sql(), []driver.NamedValue{})
-    if r1.err.len > 0 { >>> errors.new("rag pgvector ensure extension failed: " + r1.err) }
+    if r1.err.len > 0 { >> errors.new("rag pgvector ensure extension failed: " + r1.err) }
     ddl := pg_table_ddl(&c.store.table, c.store.dim)
     r2 := c.conn.exec(ddl, []driver.NamedValue{})
-    if r2.err.len > 0 { >>> errors.new("rag pgvector ensure table failed: " + r2.err) }
+    if r2.err.len > 0 { >> errors.new("rag pgvector ensure table failed: " + r2.err) }
     << 0
 }
 
 pub fn (c $&PgVectorClient) ensure_index(index_name string, method string) int {
     sql_txt := c.store.create_index_sql(index_name, method) >>>
     res := c.conn.exec(sql_txt, []driver.NamedValue{})
-    if res.err.len > 0 { >>> errors.new("rag pgvector ensure index failed: " + res.err) }
+    if res.err.len > 0 { >> errors.new("rag pgvector ensure index failed: " + res.err) }
     << 0
 }
 
@@ -1572,7 +1572,7 @@ pub fn (c $&PgVectorClient) upsert_chunk(ch &Chunk) int {
     sql_txt := pg_upsert_param_sql(&c.store.table)
     args := pg_upsert_args(&c.store, ch) >>>
     res := c.conn.exec(sql_txt, args)
-    if res.err.len > 0 { >>> errors.new("rag pgvector upsert failed: " + res.err) }
+    if res.err.len > 0 { >> errors.new("rag pgvector upsert failed: " + res.err) }
     << res.rows_affected
 }
 
@@ -1580,7 +1580,7 @@ pub fn (c $&PgVectorClient) delete_doc(doc_id string) int {
     sql_txt := "DELETE FROM " + c.store.table + " WHERE doc_id = $$1"
     args := [driver.NamedValue{name: "", ordinal: 1, value: doc_id + ""}]
     res := c.conn.exec(sql_txt, args)
-    if res.err.len > 0 { >>> errors.new("rag pgvector delete failed: " + res.err) }
+    if res.err.len > 0 { >> errors.new("rag pgvector delete failed: " + res.err) }
     << res.rows_affected
 }
 
@@ -1588,7 +1588,7 @@ pub fn (c $&PgVectorClient) search(query_emb &[]f64, top_k int, filter_doc_id st
     sql_txt := pg_search_param_sql(&c.store, top_k, filter_doc_id.len > 0) >>>
     args := pg_search_args(&c.store, query_emb, &filter_doc_id) >>>
     rows := c.conn.query(sql_txt, args)
-    if rows.err.len > 0 { >>> errors.new("rag pgvector search failed: " + rows.err) }
+    if rows.err.len > 0 { >> errors.new("rag pgvector search failed: " + rows.err) }
     if rows.ncols < 6 { << []SearchHit{} }
     n_rows := rows.cells.len / rows.ncols
     $hits := []SearchHit{}
@@ -1625,7 +1625,7 @@ pub fn (c $&PgVectorClient) search(query_emb &[]f64, top_k int, filter_doc_id st
 
 pub fn (c $&PgVectorClient) close() int {
     e := c.conn.close()
-    if e.len > 0 { >>> errors.new("rag pgvector close failed: " + e) }
+    if e.len > 0 { >> errors.new("rag pgvector close failed: " + e) }
     << 0
 }
 
@@ -1659,7 +1659,7 @@ pub fn (p &PgVectorPool) ensure_index(index_name string, method string) int {
 
 pub fn (p &PgVectorPool) upsert_chunk(ch &Chunk) int {
     if ch.embedding.len != p.store.dim {
-        >>> errors.new("rag: pgvector chunk embedding dimension mismatch")
+        >> errors.new("rag: pgvector chunk embedding dimension mismatch")
     }
     sql_txt := pg_upsert_param_sql(&p.store.table)
     vec_lit := postgres.vector_encode(&ch.embedding)
@@ -1684,7 +1684,7 @@ fn decode_pg_pool_rows(rs $&sql.Rows, metric &string) []SearchHit {
     while rs.next() {
         raw := rs.take() >>> (err) {
             rs.close()
-            >>> err
+            >> err
         }
         vals := sql_temp_strings(raw)
         if vals.len >= 6 {
@@ -1713,7 +1713,7 @@ fn decode_pg_pool_rows(rs $&sql.Rows, metric &string) []SearchHit {
 
 pub fn (p &PgVectorPool) search(query_emb &[]f64, top_k int, filter_doc_id string) []SearchHit {
     if query_emb.len != p.store.dim {
-        >>> errors.new("rag: pgvector query embedding dimension mismatch")
+        >> errors.new("rag: pgvector query embedding dimension mismatch")
     }
     sql_txt := pg_search_param_sql(&p.store, top_k, filter_doc_id.len > 0) >>>
     vec_lit := postgres.vector_encode_f64(query_emb)
@@ -1746,7 +1746,7 @@ fn sqlite_load_rows_from_conn(conn driver.Conn, table &string, dim int, filter_d
         args = [driver.NamedValue{name: "", ordinal: 1, value: filter_doc_id + ""}]
     }
     rows := conn.query(sql_txt, args)
-    if rows.err.len > 0 { >>> errors.new("rag sqlite load failed: " + rows.err) }
+    if rows.err.len > 0 { >> errors.new("rag sqlite load failed: " + rows.err) }
     $ms := new_store(dim)
     if rows.ncols < 6 { << ms }
     n_rows := rows.cells.len / rows.ncols
@@ -1773,17 +1773,17 @@ fn sqlite_load_rows_from_conn(conn driver.Conn, table &string, dim int, filter_d
 
 pub fn new_sqlite_store(conn driver.Conn, table string, dim int) SqliteVectorStore {
     if !rag_valid_pg_ident(&table) {
-        >>> errors.new("rag: invalid SQLite table identifier: " + table)
+        >> errors.new("rag: invalid SQLite table identifier: " + table)
     }
     if dim <= 0 {
-        >>> errors.new("rag: sqlite store dimension must be positive")
+        >> errors.new("rag: sqlite store dimension must be positive")
     }
     _ := conn.exec("PRAGMA journal_mode=WAL", []driver.NamedValue{})
     ddl := "CREATE TABLE IF NOT EXISTS " + table +
            " (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL, metadata TEXT NOT NULL, embedding TEXT NOT NULL)"
     res := conn.exec(ddl, []driver.NamedValue{})
     if res.err.len > 0 {
-        >>> errors.new("rag sqlite init failed: " + res.err)
+        >> errors.new("rag sqlite init failed: " + res.err)
     }
     cache := sqlite_load_rows_from_conn(conn.dup(), &table, dim, "") >>>
     << SqliteVectorStore{table: table, dim: dim, conn: conn, cache: ~cache}
@@ -1796,7 +1796,7 @@ pub fn open_sqlite_store(path string, table string, dim int) SqliteVectorStore {
 
 pub fn (s $&SqliteVectorStore) upsert_chunk(c &Chunk) int {
     if c.embedding.len != s.dim {
-        >>> errors.new("rag: sqlite chunk embedding dimension mismatch")
+        >> errors.new("rag: sqlite chunk embedding dimension mismatch")
     }
     vec_lit := postgres.vector_encode(&c.embedding)
     $meta := c.metadata_json + ""
@@ -1804,7 +1804,7 @@ pub fn (s $&SqliteVectorStore) upsert_chunk(c &Chunk) int {
     sql_txt := "INSERT OR REPLACE INTO " + s.table + " (id, doc_id, text, source, metadata, embedding) VALUES (?, ?, ?, ?, ?, ?)"
     args := [driver.NamedValue{name: "", ordinal: 1, value: c.id + ""}, driver.NamedValue{name: "", ordinal: 2, value: c.doc_id + ""}, driver.NamedValue{name: "", ordinal: 3, value: c.text + ""}, driver.NamedValue{name: "", ordinal: 4, value: c.source + ""}, driver.NamedValue{name: "", ordinal: 5, value: meta + ""}, driver.NamedValue{name: "", ordinal: 6, value: vec_lit}]
     res := s.conn.exec(sql_txt, args)
-    if res.err.len > 0 { >>> errors.new("rag sqlite upsert failed: " + res.err) }
+    if res.err.len > 0 { >> errors.new("rag sqlite upsert failed: " + res.err) }
     $replaced := false
     for i in 0:s.cache.chunks.len {
         if s.cache.chunks[i].id == c.id {
@@ -1833,7 +1833,7 @@ pub fn (s $&SqliteVectorStore) upsert_chunk(c &Chunk) int {
 pub fn (s $&SqliteVectorStore) add_chunk(id string, doc_id string, text string, source string,
                                          metadata_json string, embedding &[]f64) int {
     if embedding.len != s.dim {
-        >>> errors.new("rag: sqlite embedding dimension mismatch")
+        >> errors.new("rag: sqlite embedding dimension mismatch")
     }
     $vec := []f32{}
     vec.reserve(s.dim)
@@ -1853,7 +1853,7 @@ pub fn (s $&SqliteVectorStore) delete_doc(doc_id string) int {
     sql_txt := "DELETE FROM " + s.table + " WHERE doc_id = ?"
     args := [driver.NamedValue{name: "", ordinal: 1, value: doc_id + ""}]
     res := s.conn.exec(sql_txt, args)
-    if res.err.len > 0 { >>> errors.new("rag sqlite delete failed: " + res.err) }
+    if res.err.len > 0 { >> errors.new("rag sqlite delete failed: " + res.err) }
     $kept := []Chunk{}
     for i in 0:s.cache.chunks.len {
         if s.cache.chunks[i].doc_id != doc_id {
@@ -1870,7 +1870,7 @@ pub fn (s &SqliteVectorStore) cached_len() int {
 
 pub fn (s $&SqliteVectorStore) refresh_cache() int {
     fresh := sqlite_load_rows_from_conn(s.conn.dup(), &s.table, s.dim, "") >>> (err) {
-        >>> err
+        >> err
     }
     s.cache = ~fresh
     << s.cache.len()
@@ -1879,7 +1879,7 @@ pub fn (s $&SqliteVectorStore) refresh_cache() int {
 pub fn (s &SqliteVectorStore) count() int {
     sql_txt := "SELECT COUNT(*) FROM " + s.table
     rows := s.conn.query(sql_txt, []driver.NamedValue{})
-    if rows.err.len > 0 { >>> errors.new("rag sqlite count failed: " + rows.err) }
+    if rows.err.len > 0 { >> errors.new("rag sqlite count failed: " + rows.err) }
     if rows.cells.len == 0 { << 0 }
     raw := strip_driver_cell(&rows.cells[0])
     << strconv.atoi(&raw) >>> (_) { << 0 }
@@ -1900,7 +1900,7 @@ pub fn (s &SqliteVectorStore) search_hybrid(query string, query_emb &[]f64, top_
 
 pub fn (s $&SqliteVectorStore) close() int {
     e := s.conn.close()
-    if e.len > 0 { >>> errors.new("rag sqlite close failed: " + e) }
+    if e.len > 0 { >> errors.new("rag sqlite close failed: " + e) }
     << 0
 }
 
@@ -1912,10 +1912,10 @@ pub struct QdrantVectorStore {
 
 pub fn new_qdrant_store(endpoint string, api_key string, collection string, dim int) QdrantVectorStore {
     if collection.len == 0 {
-        >>> errors.new("rag: qdrant collection must not be empty")
+        >> errors.new("rag: qdrant collection must not be empty")
     }
     if dim <= 0 {
-        >>> errors.new("rag: qdrant store dimension must be positive")
+        >> errors.new("rag: qdrant store dimension must be positive")
     }
     << QdrantVectorStore{
         client: qdrant.new_client(endpoint, api_key),
@@ -1931,7 +1931,7 @@ pub fn (s $&QdrantVectorStore) ensure_collection(distance string) bool {
 
 pub fn (s $&QdrantVectorStore) upsert_chunk(point_id int, c &Chunk) bool {
     if c.embedding.len != s.dim {
-        >>> errors.new("rag: qdrant chunk embedding dimension mismatch")
+        >> errors.new("rag: qdrant chunk embedding dimension mismatch")
     }
     $vec_s := []string{}
     vec_s.reserve(s.dim)
@@ -1968,7 +1968,7 @@ fn rag_parse_f64_or(s &string, def f64) f64 {
 pub fn (s $&QdrantVectorStore) search(query_emb &[]f64, top_k int) []SearchHit {
     if top_k <= 0 { << []SearchHit{} }
     if query_emb.len != s.dim {
-        >>> errors.new("rag: qdrant query embedding dimension mismatch")
+        >> errors.new("rag: qdrant query embedding dimension mismatch")
     }
     $vec_s := []string{}
     vec_s.reserve(s.dim)

@@ -76,11 +76,11 @@ pub fn (p &Pool) execute(stmt string) string {
         << p.client.execute(stmt) >>>
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("neo4j: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("neo4j: pool closed or dial failed") }
     $reusable := false
     result := p.client.execute_response(fd, stmt, true, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result

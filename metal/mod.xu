@@ -40,7 +40,7 @@ fn checked(code int) int {
     if code == RESOURCE_LIMIT { message = "metal: native handle budget exhausted" }
     if code == NUMERICS { message = "metal: GEMM requires finite normal f32 values or signed zero" }
     if code == SHAPE { message = "metal: incompatible matrix shapes" }
-    >>> errors.code(code, message)
+    >> errors.code(code, message)
 }
 
 pub fn available() bool { << metal_native.available() == 1 }
@@ -132,7 +132,7 @@ pub fn (s &Snapshot) bytes() []int {
 }
 pub fn (s &Snapshot) ints() []int {
     bytes := s.byte_len() >>>
-    if (bytes & 7) != 0 { >>> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
+    if (bytes & 7) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
     $out := []int{}
     for i in 0:bytes/8 { out.push(0) }
     s.copy_into($&out) >>>
@@ -143,7 +143,7 @@ pub fn (s &Snapshot) ints() []int {
 // Every range is validated before any destination element is modified.
 pub fn (s &Snapshot) copy_into(out $&[]int) int {
     bytes := s.byte_len() >>>
-    if (bytes & 7) != 0 { >>> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
+    if (bytes & 7) != 0 { >> errors.code(BOUNDS, "metal: snapshot is not an i64 buffer") }
     << checked(metal_native.snapshot_copy(s.handle, 0, out, 0, bytes/8)) >>>
 }
 

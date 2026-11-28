@@ -59,11 +59,11 @@ pub fn (p &SmtpPool) put_conn(fd int) {
 pub fn (p &SmtpPool) send_mail(msg Message) bool {
     fd := p.get_conn()
     if fd < 0 {
-        >>> errors.new("smtp pool failed to acquire connection")
+        >> errors.new("smtp pool failed to acquire connection")
     }
     p.client.send_mail_on_fd(fd, msg) >>> (err) {
         p.client.close_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << true

@@ -29,9 +29,9 @@ fn write_all(fd int, data string) bool {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("milvus write error: " + err.msg())
+            >> errors.new("milvus write error: " + err.msg())
         }
-        if n <= 0 { >>> errors.new("milvus: connection closed during write") }
+        if n <= 0 { >> errors.new("milvus: connection closed during write") }
         off = off + n
     }
     << true
@@ -84,7 +84,7 @@ pub fn new_client(endpoint string) MilvusClient {
 pub fn (c MilvusClient) connect() int {
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("milvus dial failed: " + err.msg())
+        >> errors.new("milvus dial failed: " + err.msg())
     }
     << fd
 }
@@ -110,7 +110,7 @@ fn (c MilvusClient) request_on_fd(fd int, method string, path string, body strin
 
     resp := http.read_response(fd, method + "") >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body)
+        >> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body)
     }
     *reusable = resp.reusable(method)
     << resp.body
@@ -128,13 +128,13 @@ pub fn (c MilvusClient) do_request(method string, path string, body string) stri
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
         resp := transport.request_raw(ep, cfg, req, method + "") >>>
-        if resp.status_code < 200 || resp.status_code >= 300 { >>> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body) }
+        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("milvus: HTTP status " + str(resp.status_code) + ": " + resp.body) }
         << resp.body
     }
     fd := c.connect() >>>
     res := c.do_request_on_fd(fd, method, path, body) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << res
@@ -230,20 +230,20 @@ fn (c MilvusClient) search_at(fd int, collection string, query_vec []string, lim
     resp := c.request_at(fd, "POST", "/v2/vectordb/entities/search", body, reusable) >>>
 
     d := json.parse(&resp)
-    if !d.ok() { >>> errors.new("milvus: invalid JSON: " + d.error()) }
+    if !d.ok() { >> errors.new("milvus: invalid JSON: " + d.error()) }
     code := d.get(d.root(), "code")
-    if code < 0 || !d.is_number(code) || d.text(code) != "0" { >>> errors.new("milvus: service error: " + resp) }
+    if code < 0 || !d.is_number(code) || d.text(code) != "0" { >> errors.new("milvus: service error: " + resp) }
     data := d.get(d.root(), "data")
-    if data < 0 || !d.is_list(data) { >>> errors.new("milvus: missing search data") }
+    if data < 0 || !d.is_list(data) { >> errors.new("milvus: missing search data") }
     $hits := []SearchHit{}
     for i in 0:d.count(data) {
         hit := d.at(data, i)
-        if !d.is_dict(hit) { >>> errors.new("milvus: invalid search hit") }
+        if !d.is_dict(hit) { >> errors.new("milvus: invalid search hit") }
         id := d.get(hit, "id")
         distance := d.get(hit, "distance")
         text := d.get(hit, "text")
-        if id < 0 || !d.is_number(id) { >>> errors.new("milvus: this API requires integer ids") }
-        if distance < 0 || !d.is_number(distance) { >>> errors.new("milvus: missing hit distance") }
+        if id < 0 || !d.is_number(id) { >> errors.new("milvus: this API requires integer ids") }
+        if distance < 0 || !d.is_number(distance) { >> errors.new("milvus: missing hit distance") }
         id_text := d.text(id)
         hid := strconv.atoi(&id_text) >>>
         $content := ""
