@@ -11,14 +11,14 @@ fn (c $&Client) lease_grant_at(fd int, ttl_seconds int, reusable $&bool) int {
     body := "{\"TTL\":\"" + str(ttl_seconds) + "\",\"ID\":\"0\"}"
     resp := c.request_at(fd, "/v3/lease/grant", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("etcd: lease_grant failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("etcd: lease_grant failed (" + str(resp.status_code) + "): " + resp.body)
     }
     id_str := extract_json_value(resp.body, "ID")
     if id_str.len == 0 {
-        >>> errors.new("etcd: missing lease ID in response")
+        >> errors.new("etcd: missing lease ID in response")
     }
     id_val := parse_int(id_str) >>> (err) {
-        >>> errors.new("etcd: invalid lease ID: " + err.msg())
+        >> errors.new("etcd: invalid lease ID: " + err.msg())
     }
     << id_val
 }
@@ -32,7 +32,7 @@ fn (c $&Client) lease_revoke_at(fd int, lease_id int, reusable $&bool) int {
     body := "{\"ID\":\"" + str(lease_id) + "\"}"
     resp := c.request_at(fd, "/v3/lease/revoke", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("etcd: lease_revoke failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("etcd: lease_revoke failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }
@@ -46,7 +46,7 @@ fn (c $&Client) lease_keepalive_at(fd int, lease_id int, reusable $&bool) int {
     body := "{\"ID\":\"" + str(lease_id) + "\"}"
     resp := c.request_at(fd, "/v3/lease/keepalive", body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("etcd: lease_keepalive failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("etcd: lease_keepalive failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << 0
 }

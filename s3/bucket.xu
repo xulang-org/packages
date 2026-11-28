@@ -10,7 +10,7 @@ pub fn (c $&Client) make_bucket(bucket string) int {
 fn (c $&Client) make_bucket_at(fd int, bucket string, reusable $&bool) int {
     resp := c.request_at(fd, "PUT", "/" + bucket, "", "application/xml", reusable) >>>
     if resp.status_code != 200 && resp.status_code != 204 {
-        >>> errors.new("s3: make_bucket failed with status " + str(resp.status_code) + ": " + resp.body)
+        >> errors.new("s3: make_bucket failed with status " + str(resp.status_code) + ": " + resp.body)
     }
     << 0
 }
@@ -35,7 +35,7 @@ pub fn (c $&Client) remove_bucket(bucket string) int {
 fn (c $&Client) remove_bucket_at(fd int, bucket string, reusable $&bool) int {
     resp := c.request_at(fd, "DELETE", "/" + bucket, "", "", reusable) >>>
     if resp.status_code != 200 && resp.status_code != 204 {
-        >>> errors.new("s3: remove_bucket failed with status " + str(resp.status_code) + ": " + resp.body)
+        >> errors.new("s3: remove_bucket failed with status " + str(resp.status_code) + ": " + resp.body)
     }
     << 0
 }

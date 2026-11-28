@@ -96,24 +96,24 @@ pub fn (c $&Client) request(method string, path string, body string, content_typ
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
         $tc := transport.dial(ep, cfg, transport.DEFAULT_TIMEOUT_NS) >>> (err) {
-            >>> errors.new("s3: TLS dial failed: " + err.msg())
+            >> errors.new("s3: TLS dial failed: " + err.msg())
         }
         $reusable := false
         result := c.request_on_transport($&tc, method, path, body, content_type, $&reusable) >>> (err) {
             tc.close()
-            >>> err
+            >> err
         }
         tc.close()
         << result
     }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("s3: dial failed: " + err.msg())
+        >> errors.new("s3: dial failed: " + err.msg())
     }
     $reusable := false
     result := c.request_on_fd(fd, method, path, body, content_type, $&reusable) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << result
@@ -149,7 +149,7 @@ fn (c $&Client) build_request(method string, path string, body string, content_t
 fn (c $&Client) request_on_transport(tc $&transport.Conn, method string, path string, body string, content_type string, reusable $&bool) Response {
     *reusable = false
     req := c.build_request(method + "", path, body, content_type)
-    tc.write_all(req) >>> (err) { >>> errors.new("s3: TLS write failed: " + err.msg()) }
+    tc.write_all(req) >>> (err) { >> errors.new("s3: TLS write failed: " + err.msg()) }
     resp := transport.read_response(tc, method + "") >>>
     *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method + "")
     << Response{status_code: resp.status_code, body: resp.body}
@@ -164,17 +164,17 @@ fn (c $&Client) request_on_fd(fd int, method string, path string, body string, c
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("s3: write failed: " + err.msg())
+            >> errors.new("s3: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("s3: connection closed during write")
+            >> errors.new("s3: connection closed during write")
         }
         off = off + n
     }
 
     // Read response
     resp := http.read_response(fd, method + "") >>> (err) {
-        >>> err
+        >> err
     }
     *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method + "")
     << Response{status_code: resp.status_code, body: resp.body}

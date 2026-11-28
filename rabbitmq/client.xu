@@ -34,10 +34,10 @@ pub fn (c $&Client) write_exact(data string) int {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) >>> (err) {
-            >>> errors.new("rabbitmq: write failed: " + err.msg())
+            >> errors.new("rabbitmq: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("rabbitmq: connection closed by peer")
+            >> errors.new("rabbitmq: connection closed by peer")
         }
         off = off + n
     }
@@ -48,10 +48,10 @@ pub fn (c $&Client) read_exact(n int) string {
     $res := ""
     while res.len < n {
         chunk := net.conn_read(c.fd, n - res.len) >>> (err) {
-            >>> errors.new("rabbitmq: read failed: " + err.msg())
+            >> errors.new("rabbitmq: read failed: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("rabbitmq: connection closed by peer")
+            >> errors.new("rabbitmq: connection closed by peer")
         }
         res = res + chunk
     }
@@ -78,7 +78,7 @@ pub fn (c $&Client) read_frame() Frame {
     // Read 1-byte frame-end (0xCE)
     end_byte := c.read_exact(1) >>>
     if decode_i8(end_byte + "", 0) != FRAME_END {
-        >>> errors.new("rabbitmq: invalid frame end byte")
+        >> errors.new("rabbitmq: invalid frame end byte")
     }
 
     << Frame{frame_type: frame_type, channel: channel, payload: payload}
@@ -108,7 +108,7 @@ pub fn connect(host string, port int, user string, password string, vhost string
 
     addr := h + ":" + str(p)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("rabbitmq: dial failed: " + err.msg())
+        >> errors.new("rabbitmq: dial failed: " + err.msg())
     }
 
     $client := Client{
@@ -133,23 +133,23 @@ pub fn connect(host string, port int, user string, password string, vhost string
     proto_hdr.push_byte(1)
     client.write_exact(proto_hdr) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // 2. Expect Connection.Start (Class 10, Method 10)
     f1 := client.read_frame() >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     if f1.frame_type != FRAME_METHOD || f1.payload.len < 4 {
         safe_close(fd)
-        >>> errors.new("rabbitmq: expected Connection.Start method frame")
+        >> errors.new("rabbitmq: expected Connection.Start method frame")
     }
     c_id1 := decode_i16(f1.payload + "", 0)
     m_id1 := decode_i16(f1.payload + "", 2)
     if c_id1 != CLASS_CONNECTION || m_id1 != 10 {
         safe_close(fd)
-        >>> errors.new("rabbitmq: unexpected method in handshake (class=" + str(c_id1) + ", method=" + str(m_id1) + ")")
+        >> errors.new("rabbitmq: unexpected method in handshake (class=" + str(c_id1) + ", method=" + str(m_id1) + ")")
     }
 
     // 3. Send Connection.Start-Ok (Class 10, Method 11)
@@ -168,17 +168,17 @@ pub fn connect(host string, port int, user string, password string, vhost string
     start_ok_payload := build_method_payload(CLASS_CONNECTION, 11, start_ok_args)
     client.send_frame(FRAME_METHOD, 0, start_ok_payload) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // 4. Expect Connection.Tune (Class 10, Method 30)
     f2 := client.read_frame() >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     if f2.frame_type != FRAME_METHOD || f2.payload.len < 12 {
         safe_close(fd)
-        >>> errors.new("rabbitmq: expected Connection.Tune method frame")
+        >> errors.new("rabbitmq: expected Connection.Tune method frame")
     }
     channel_max := decode_i16(f2.payload + "", 4)
     frame_max := decode_i32(f2.payload + "", 6)
@@ -191,7 +191,7 @@ pub fn connect(host string, port int, user string, password string, vhost string
     tune_ok_payload := build_method_payload(CLASS_CONNECTION, 31, tune_ok_args)
     client.send_frame(FRAME_METHOD, 0, tune_ok_payload) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // 6. Send Connection.Open (Class 10, Method 40)
@@ -201,17 +201,17 @@ pub fn connect(host string, port int, user string, password string, vhost string
     open_payload := build_method_payload(CLASS_CONNECTION, 40, open_args)
     client.send_frame(FRAME_METHOD, 0, open_payload) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // 7. Expect Connection.Open-Ok (Class 10, Method 41)
     f3 := client.read_frame() >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     if f3.frame_type != FRAME_METHOD || f3.payload.len < 4 {
         safe_close(fd)
-        >>> errors.new("rabbitmq: expected Connection.Open-Ok method frame")
+        >> errors.new("rabbitmq: expected Connection.Open-Ok method frame")
     }
 
     // 8. Open Channel 1 (Class 20, Method 10)
@@ -219,17 +219,17 @@ pub fn connect(host string, port int, user string, password string, vhost string
     ch_open_payload := build_method_payload(CLASS_CHANNEL, 10, ch_open_args)
     client.send_frame(FRAME_METHOD, 1, ch_open_payload) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // 9. Expect Channel.Open-Ok (Class 20, Method 11)
     f4 := client.read_frame() >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     if f4.frame_type != FRAME_METHOD || f4.payload.len < 4 {
         safe_close(fd)
-        >>> errors.new("rabbitmq: expected Channel.Open-Ok method frame")
+        >> errors.new("rabbitmq: expected Channel.Open-Ok method frame")
     }
 
     << client
@@ -253,18 +253,18 @@ pub fn (c $&Client) declare_queue(queue_name string, durable bool) int {
     // Read Queue.Declare-Ok (Class 50, Method 11)
     resp := c.read_frame() >>>
     if resp.frame_type != FRAME_METHOD || resp.payload.len < 4 {
-        >>> errors.new("rabbitmq: invalid Queue.Declare response")
+        >> errors.new("rabbitmq: invalid Queue.Declare response")
     }
     c_id := decode_i16(resp.payload + "", 0)
     m_id := decode_i16(resp.payload + "", 2)
     if c_id == CLASS_CHANNEL && m_id == 40 {
-        >>> errors.new("rabbitmq: channel closed by server")
+        >> errors.new("rabbitmq: channel closed by server")
     }
     if c_id == CLASS_CONNECTION && m_id == 50 {
-        >>> errors.new("rabbitmq: connection closed by server")
+        >> errors.new("rabbitmq: connection closed by server")
     }
     if c_id != CLASS_QUEUE || m_id != 11 {
-        >>> errors.new("rabbitmq: expected Queue.Declare-Ok, got class=" + str(c_id) + ", method=" + str(m_id))
+        >> errors.new("rabbitmq: expected Queue.Declare-Ok, got class=" + str(c_id) + ", method=" + str(m_id))
     }
     << 0
 }
@@ -286,7 +286,7 @@ pub fn (c $&Client) declare_exchange(exchange_name string, exchange_type string,
 
     resp := c.read_frame() >>>
     if resp.frame_type != FRAME_METHOD || resp.payload.len < 4 {
-        >>> errors.new("rabbitmq: invalid Exchange.Declare response")
+        >> errors.new("rabbitmq: invalid Exchange.Declare response")
     }
     << 0
 }
@@ -304,7 +304,7 @@ pub fn (c $&Client) bind_queue(queue_name string, exchange_name string, routing_
 
     resp := c.read_frame() >>>
     if resp.frame_type != FRAME_METHOD || resp.payload.len < 4 {
-        >>> errors.new("rabbitmq: invalid Queue.Bind response")
+        >> errors.new("rabbitmq: invalid Queue.Bind response")
     }
     << 0
 }
@@ -347,20 +347,20 @@ pub fn (c $&Client) get(queue_name string, auto_ack bool) string {
     // Expect response: Basic.Get-Ok (71) or Basic.Get-Empty (72)
     m_frame := c.read_frame() >>>
     if m_frame.frame_type != FRAME_METHOD || m_frame.payload.len < 4 {
-        >>> errors.new("rabbitmq: invalid Basic.Get response")
+        >> errors.new("rabbitmq: invalid Basic.Get response")
     }
     method_id := decode_i16(m_frame.payload + "", 2)
     if method_id == 72 { // Basic.Get-Empty
         << ""
     }
     if method_id != 71 { // Expected Basic.Get-Ok
-        >>> errors.new("rabbitmq: unexpected method in Basic.Get response: " + str(method_id))
+        >> errors.new("rabbitmq: unexpected method in Basic.Get response: " + str(method_id))
     }
 
     // Read Content Header Frame
     hdr_frame := c.read_frame() >>>
     if hdr_frame.frame_type != FRAME_HEADER {
-        >>> errors.new("rabbitmq: expected content header frame after Basic.Get-Ok")
+        >> errors.new("rabbitmq: expected content header frame after Basic.Get-Ok")
     }
     body_size := decode_i64(hdr_frame.payload + "", 4)
 
@@ -369,7 +369,7 @@ pub fn (c $&Client) get(queue_name string, auto_ack bool) string {
     while total_body.len < body_size {
         body_frame := c.read_frame() >>>
         if body_frame.frame_type != FRAME_BODY {
-            >>> errors.new("rabbitmq: expected content body frame")
+            >> errors.new("rabbitmq: expected content body frame")
         }
         total_body = total_body + body_frame.payload
     }

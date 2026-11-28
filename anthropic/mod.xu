@@ -456,7 +456,7 @@ fn request_retry(c &Client, body &string) http.Response {
                 attempt += 1
                 ->
             }
-            >>> errors.new(err_msg)
+            >> errors.new(err_msg)
         }
         if is_retriable_status(resp.status_code) && attempt < max_r {
             sleep_retry_backoff(attempt)
@@ -472,11 +472,11 @@ pub fn (c &Client) messages(req &MessagesRequest) MessagesResponse {
     body := encode_messages_body(req, false)
     resp := request_retry(c, &body) >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
+        >> errors.code(resp.status_code, extract_error_msg(resp.status_code, &resp.body))
     }
     doc := json.parse(&resp.body)
     if !doc.ok() || !doc.is_dict(doc.root()) {
-        >>> errors.new("anthropic: invalid JSON response")
+        >> errors.new("anthropic: invalid JSON response")
     }
     root := doc.root()
     $out := MessagesResponse{
@@ -661,11 +661,11 @@ fn open_stream_retry(c &Client, req &MessagesRequest, rest_out $&string) transpo
             ->
         }
         if err_code != 0 {
-            >>> errors.code(err_code, err_msg)
+            >> errors.code(err_code, err_msg)
         }
-        >>> errors.new(err_msg)
+        >> errors.new(err_msg)
     }
-    >>> errors.new("anthropic: stream failed")
+    >> errors.new("anthropic: stream failed")
 }
 
 fn copy_stream_event(ev &StreamEvent) StreamEvent {

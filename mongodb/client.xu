@@ -23,10 +23,10 @@ pub fn (c $&Client) write_exact(data string) int {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(c.fd, &part) >>> (err) {
-            >>> errors.new("mongodb: write failed: " + err.msg())
+            >> errors.new("mongodb: write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("mongodb: socket closed")
+            >> errors.new("mongodb: socket closed")
         }
         off = off + n
     }
@@ -37,10 +37,10 @@ pub fn (c $&Client) read_exact(n int) string {
     $res := ""
     while res.len < n {
         chunk := net.conn_read(c.fd, n - res.len) >>> (err) {
-            >>> errors.new("mongodb: read failed: " + err.msg())
+            >> errors.new("mongodb: read failed: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("mongodb: socket closed")
+            >> errors.new("mongodb: socket closed")
         }
         res = res + chunk
     }
@@ -62,14 +62,14 @@ pub fn (c $&Client) run_command(db_name string, cmd_elements string) string {
     hdr := c.read_exact(16) >>>
     msg_len := decode_i32(&hdr, 0)
     if msg_len < 26 || msg_len > 16777216 {
-        >>> errors.new("mongodb: invalid message length in response header")
+        >> errors.new("mongodb: invalid message length in response header")
     }
     if decode_i32(&hdr, 8) != req_id {
-        >>> errors.new("mongodb: responseTo does not match request")
+        >> errors.new("mongodb: responseTo does not match request")
     }
     opcode := decode_i32(&hdr, 12)
     if opcode != 2013 {
-        >>> errors.new("mongodb: unexpected opcode in response: " + str(opcode))
+        >> errors.new("mongodb: unexpected opcode in response: " + str(opcode))
     }
 
     // Read rest of message
@@ -80,31 +80,31 @@ pub fn (c $&Client) run_command(db_name string, cmd_elements string) string {
     if !is_bson_ok(res_doc + "") {
         errmsg := find_bson_string(res_doc + "", "errmsg")
         if errmsg.len > 0 {
-            >>> errors.new("mongodb: command error: " + errmsg)
+            >> errors.new("mongodb: command error: " + errmsg)
         }
-        >>> errors.new("mongodb: command returned not ok")
+        >> errors.new("mongodb: command returned not ok")
     }
     errors_field := bson_field(&res_doc, "writeErrors")
-    if errors_field.typ >= 0 && errors_field.typ != 4 { >>> errors.new("mongodb: malformed writeErrors") }
+    if errors_field.typ >= 0 && errors_field.typ != 4 { >> errors.new("mongodb: malformed writeErrors") }
     write_errors := find_bson_document(res_doc + "", "writeErrors")
     if write_errors.len > 5 {
         first := find_bson_document(write_errors, "0")
         errmsg := find_bson_string(first, "errmsg")
-        >>> errors.new("mongodb: write error: " + errmsg)
+        >> errors.new("mongodb: write error: " + errmsg)
     }
     concern_field := bson_field(&res_doc, "writeConcernError")
-    if concern_field.typ >= 0 && concern_field.typ != 3 { >>> errors.new("mongodb: malformed writeConcernError") }
+    if concern_field.typ >= 0 && concern_field.typ != 3 { >> errors.new("mongodb: malformed writeConcernError") }
     concern := find_bson_document(res_doc + "", "writeConcernError")
     if concern.len > 0 {
         errmsg := find_bson_string(concern, "errmsg")
-        >>> errors.new("mongodb: write concern error: " + errmsg)
+        >> errors.new("mongodb: write concern error: " + errmsg)
     }
     << res_doc
 }
 
 pub fn connect(addr string) Client {
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("mongodb: dial failed: " + err.msg())
+        >> errors.new("mongodb: dial failed: " + err.msg())
     }
     $c := Client{
         fd: fd,
@@ -114,7 +114,7 @@ pub fn connect(addr string) Client {
     // Handshake: hello
     if !c.hello() {
         safe_close(fd)
-        >>> errors.new("mongodb: hello handshake failed")
+        >> errors.new("mongodb: hello handshake failed")
     }
     << c
 }

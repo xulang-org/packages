@@ -85,10 +85,10 @@ fn read_exact(fd int, need int) string {
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) >>> (err) {
-            >>> errors.new("grpc read error: " + err.msg())
+            >> errors.new("grpc read error: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("grpc read unexpected EOF")
+            >> errors.new("grpc read unexpected EOF")
         }
         buf = buf + chunk
     }
@@ -100,9 +100,9 @@ fn write_all(fd int, data string) bool {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("grpc write error: " + err.msg())
+            >> errors.new("grpc write error: " + err.msg())
         }
-        if n <= 0 { >>> errors.new("grpc: connection closed during write") }
+        if n <= 0 { >> errors.new("grpc: connection closed during write") }
         off = off + n
     }
     << true
@@ -114,7 +114,7 @@ pub fn (c GrpcClient) read_h2_frame(fd int) H2Frame {
     b1 := hdr[1] & 255
     b2 := hdr[2] & 255
     flen := (b0 << 16) | (b1 << 8) | b2
-    if flen > 16384 { >>> errors.new("grpc: frame exceeds advertised limit") }
+    if flen > 16384 { >> errors.new("grpc: frame exceeds advertised limit") }
     ftype := hdr[3] & 255
     flags := hdr[4] & 255
     s0 := hdr[5] & 127
@@ -140,8 +140,8 @@ pub fn (c GrpcClient) read_h2_frame(fd int) H2Frame {
 fn read_exact_tls(tc $&tls.Conn, need int) string {
     $buf := ""
     while buf.len < need {
-        chunk := tc.read(need - buf.len) >>> (err) { >>> errors.new("grpc TLS read error: " + err.msg()) }
-        if chunk.len == 0 { >>> errors.new("grpc TLS unexpected EOF") }
+        chunk := tc.read(need - buf.len) >>> (err) { >> errors.new("grpc TLS read error: " + err.msg()) }
+        if chunk.len == 0 { >> errors.new("grpc TLS unexpected EOF") }
         buf = buf + chunk
     }
     << buf
@@ -151,7 +151,7 @@ fn write_all_tls(tc $&tls.Conn, data string) bool {
     $off := 0
     while off < data.len {
         part := data[off:data.len]
-        tc.write(&part) >>> (err) { >>> errors.new("grpc TLS write error: " + err.msg()) }
+        tc.write(&part) >>> (err) { >> errors.new("grpc TLS write error: " + err.msg()) }
         off = off + part.len
     }
     << true
@@ -163,7 +163,7 @@ fn read_h2_frame_tls(tc $&tls.Conn) H2Frame {
     b1 := hdr[1] & 255
     b2 := hdr[2] & 255
     flen := (b0 << 16) | (b1 << 8) | b2
-    if flen > 16384 { >>> errors.new("grpc: frame exceeds advertised limit") }
+    if flen > 16384 { >> errors.new("grpc: frame exceeds advertised limit") }
     ftype := hdr[3] & 255
     flags := hdr[4] & 255
     stream_id := ((hdr[5] & 127) << 24) | ((hdr[6] & 255) << 16) | ((hdr[7] & 255) << 8) | (hdr[8] & 255)
@@ -173,34 +173,34 @@ fn read_h2_frame_tls(tc $&tls.Conn) H2Frame {
 }
 
 pub fn (c GrpcClient) connect() int {
-    if c.secure { >>> errors.new("grpc: use call_unary with secure endpoint") }
+    if c.secure { >> errors.new("grpc: use call_unary with secure endpoint") }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("grpc dial failed: " + err.msg())
+        >> errors.new("grpc dial failed: " + err.msg())
     }
 
     // 1. Send HTTP/2 Preface
     write_all(fd, H2_CLIENT_PREFACE) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // 2. Send initial SETTINGS frame
     s_frame := build_settings_frame(false)
     write_all(fd, s_frame) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     // 3. Read server SETTINGS
     f1 := c.read_h2_frame(fd) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     if f1.frame_type != FRAME_SETTINGS || f1.stream_id != 0 || f1.flags != 0 || f1.length % 6 != 0 {
         safe_close(fd)
-        >>> errors.new("grpc: invalid initial SETTINGS")
+        >> errors.new("grpc: invalid initial SETTINGS")
     }
     // This unary transport sends one request within the initial window.
     for i in 0:f1.length / 6 {
@@ -208,14 +208,14 @@ pub fn (c GrpcClient) connect() int {
         key := ((f1.payload[off] & 255) << 8) | (f1.payload[off + 1] & 255)
         value := ((f1.payload[off + 2] & 255) << 24) | ((f1.payload[off + 3] & 255) << 16) | ((f1.payload[off + 4] & 255) << 8) | (f1.payload[off + 5] & 255)
         if key == 4 && value < 65535 { safe_close(fd)
-            >>> errors.new("grpc: reduced request window is unsupported") }
+            >> errors.new("grpc: reduced request window is unsupported") }
     }
 
     // 4. Send SETTINGS ACK
     ack_frame := build_settings_frame(true)
     write_all(fd, ack_frame) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     << fd
@@ -227,19 +227,19 @@ fn (c GrpcClient) connect_tls() tls.Conn {
     $tc := d.dial("tcp", c.host + ":" + str(c.port)) >>>
     write_all_tls($&tc, H2_CLIENT_PREFACE) >>> (err) {
         tc.close()
-        >>> err
+        >> err
     }
     write_all_tls($&tc, build_settings_frame(false)) >>> (err) {
         tc.close()
-        >>> err
+        >> err
     }
     f1 := read_h2_frame_tls($&tc) >>> (err) {
         tc.close()
-        >>> err
+        >> err
     }
     if f1.frame_type != FRAME_SETTINGS || f1.stream_id != 0 || f1.flags != 0 || f1.length % 6 != 0 {
         tc.close()
-        >>> errors.new("grpc: invalid TLS SETTINGS")
+        >> errors.new("grpc: invalid TLS SETTINGS")
     }
     for i in 0:f1.length / 6 {
         off := i * 6
@@ -247,12 +247,12 @@ fn (c GrpcClient) connect_tls() tls.Conn {
         value := ((f1.payload[off + 2] & 255) << 24) | ((f1.payload[off + 3] & 255) << 16) | ((f1.payload[off + 4] & 255) << 8) | (f1.payload[off + 5] & 255)
         if key == 4 && value < 65535 {
             tc.close()
-            >>> errors.new("grpc: reduced request window is unsupported")
+            >> errors.new("grpc: reduced request window is unsupported")
         }
     }
     write_all_tls($&tc, build_settings_frame(true)) >>> (err) {
         tc.close()
-        >>> err
+        >> err
     }
     << tc
 }
@@ -263,7 +263,7 @@ pub fn (c GrpcClient) call_unary(path string, req_bytes string) Response {
         $tc := c.connect_tls() >>>
         resp := c.call_unary_on_tls($&tc, path, req_bytes, 1) >>> (err) {
             tc.close()
-            >>> err
+            >> err
         }
         tc.close()
         << resp
@@ -271,17 +271,17 @@ pub fn (c GrpcClient) call_unary(path string, req_bytes string) Response {
     fd := c.connect() >>>
     resp := c.call_unary_on_fd(fd, path, req_bytes, 1) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << resp
 }
 
 pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, stream_id int) Response {
-    if stream_id <= 0 || stream_id > 2147483647 || stream_id % 2 == 0 { >>> errors.new("grpc: invalid client stream id") }
-    if req_bytes.len > 65530 { >>> errors.new("grpc: request exceeds supported initial window") }
+    if stream_id <= 0 || stream_id > 2147483647 || stream_id % 2 == 0 { >> errors.new("grpc: invalid client stream id") }
+    if req_bytes.len > 65530 { >> errors.new("grpc: request exceeds supported initial window") }
     block := build_grpc_headers_for_host(path, c.host + ":" + str(c.port))
-    if block.len > 65536 { >>> errors.new("grpc: request headers too large") }
+    if block.len > 65536 { >> errors.new("grpc: request headers too large") }
     $off := 0
     while off < block.len {
         $end := off + 16384
@@ -312,27 +312,27 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
     while !end_stream {
         frame := c.read_h2_frame(fd) >>>
         if frame.frame_type == FRAME_SETTINGS {
-            if frame.stream_id != 0 || frame.length % 6 != 0 { >>> errors.new("grpc: malformed SETTINGS") }
+            if frame.stream_id != 0 || frame.length % 6 != 0 { >> errors.new("grpc: malformed SETTINGS") }
             if (frame.flags & FLAG_ACK) != 0 {
-                if frame.length != 0 { >>> errors.new("grpc: malformed SETTINGS ACK") }
+                if frame.length != 0 { >> errors.new("grpc: malformed SETTINGS ACK") }
             } else { write_all(fd, build_settings_frame(true)) >>> }
         } else if frame.frame_type == FRAME_PING {
-            if frame.stream_id != 0 || frame.length != 8 { >>> errors.new("grpc: malformed PING") }
+            if frame.stream_id != 0 || frame.length != 8 { >> errors.new("grpc: malformed PING") }
             if (frame.flags & FLAG_ACK) == 0 {
                 write_all(fd, encode_h2_header(8, FRAME_PING, FLAG_ACK, 0) + frame.payload) >>>
             }
         } else if frame.frame_type == FRAME_DATA && frame.stream_id == stream_id {
-            if !got_headers { >>> errors.new("grpc: DATA before headers") }
+            if !got_headers { >> errors.new("grpc: DATA before headers") }
             $start := 0
             $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
-                if end < 1 { >>> errors.new("grpc: malformed padded DATA") }
+                if end < 1 { >> errors.new("grpc: malformed padded DATA") }
                 end -= frame.payload[0] & 255
                 start = 1
-                if end < start { >>> errors.new("grpc: malformed DATA padding") }
+                if end < start { >> errors.new("grpc: malformed DATA padding") }
             }
             message_bytes = message_bytes + frame.payload[start:end]
-            if message_bytes.len > 16777221 { >>> errors.new("grpc: response too large") }
+            if message_bytes.len > 16777221 { >> errors.new("grpc: response too large") }
             if frame.length > 0 {
                 delta := string_from_byte((frame.length >> 24) & 127) + string_from_byte((frame.length >> 16) & 255) + string_from_byte((frame.length >> 8) & 255) + string_from_byte(frame.length & 255)
                 write_all(fd, encode_h2_header(4, FRAME_WINDOW_UPDATE, 0, 0) + delta) >>>
@@ -343,68 +343,68 @@ pub fn (c GrpcClient) call_unary_on_fd(fd int, path string, req_bytes string, st
             $start := 0
             $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
-                if end < 1 { >>> errors.new("grpc: malformed padded HEADERS") }
+                if end < 1 { >> errors.new("grpc: malformed padded HEADERS") }
                 end -= frame.payload[0] & 255
                 start = 1
             }
             if (frame.flags & FLAG_PRIORITY) != 0 { start += 5 }
-            if end < start { >>> errors.new("grpc: malformed HEADERS") }
+            if end < start { >> errors.new("grpc: malformed HEADERS") }
             $headers := frame.payload[start:end] + ""
             $done := (frame.flags & FLAG_END_HEADERS) != 0
             while !done {
                 next := c.read_h2_frame(fd) >>>
-                if next.frame_type != FRAME_CONTINUATION || next.stream_id != stream_id { >>> errors.new("grpc: expected CONTINUATION") }
+                if next.frame_type != FRAME_CONTINUATION || next.stream_id != stream_id { >> errors.new("grpc: expected CONTINUATION") }
                 headers = headers + next.payload
-                if headers.len > 65536 { >>> errors.new("grpc: response headers too large") }
+                if headers.len > 65536 { >> errors.new("grpc: response headers too large") }
                 done = (next.flags & FLAG_END_HEADERS) != 0
             }
             h := decode_hpack(headers) >>>
             for i in 0:h.names.len {
                 if h.names[i] == ":status" {
-                    if got_headers || http_status != 0 { >>> errors.new("grpc: invalid HTTP status placement") }
+                    if got_headers || http_status != 0 { >> errors.new("grpc: invalid HTTP status placement") }
                     http_status = parse_int(h.values[i] + "") >>>
                 }
                 if h.names[i] == "content-type" {
-                    if got_headers || content_type.len > 0 { >>> errors.new("grpc: invalid content-type placement") }
+                    if got_headers || content_type.len > 0 { >> errors.new("grpc: invalid content-type placement") }
                     value := h.values[i] + ""
                     content_type = strings.to_lower(&value)
                 }
                 if h.names[i] == "grpc-status" {
-                    if grpc_status >= 0 || (frame.flags & FLAG_END_STREAM) == 0 { >>> errors.new("grpc: invalid grpc-status placement") }
+                    if grpc_status >= 0 || (frame.flags & FLAG_END_STREAM) == 0 { >> errors.new("grpc: invalid grpc-status placement") }
                     grpc_status = parse_int(h.values[i] + "") >>>
-                    if grpc_status < 0 || grpc_status > 16 { >>> errors.new("grpc: invalid grpc-status") }
+                    if grpc_status < 0 || grpc_status > 16 { >> errors.new("grpc: invalid grpc-status") }
                 }
                 if h.names[i] == "grpc-message" {
                     value := h.values[i] + ""
                     grpc_message = url.path_unescape(&value) >>>
                 }
             }
-            if !got_headers && http_status != 200 { >>> errors.new("grpc: HTTP status " + str(http_status)) }
+            if !got_headers && http_status != 200 { >> errors.new("grpc: HTTP status " + str(http_status)) }
             if !got_headers {
-                if content_type.len < 16 || content_type[0:16] != "application/grpc" { >>> errors.new("grpc: invalid response content-type") }
-                if content_type.len > 16 && content_type[16:17] != "+" && content_type[16:17] != ";" { >>> errors.new("grpc: invalid response content-type") }
+                if content_type.len < 16 || content_type[0:16] != "application/grpc" { >> errors.new("grpc: invalid response content-type") }
+                if content_type.len > 16 && content_type[16:17] != "+" && content_type[16:17] != ";" { >> errors.new("grpc: invalid response content-type") }
             }
             got_headers = true
             if (frame.flags & FLAG_END_STREAM) != 0 { end_stream = true }
         } else if frame.frame_type == FRAME_RST_STREAM && frame.stream_id == stream_id {
-            >>> errors.new("grpc: rst_stream received")
-        } else if frame.frame_type == FRAME_GOAWAY { >>> errors.new("grpc: goaway received") }
-        else if frame.frame_type == FRAME_CONTINUATION { >>> errors.new("grpc: unexpected CONTINUATION") }
-        else if frame.frame_type == FRAME_PUSH_PROMISE { >>> errors.new("grpc: PUSH_PROMISE is unsupported") }
+            >> errors.new("grpc: rst_stream received")
+        } else if frame.frame_type == FRAME_GOAWAY { >> errors.new("grpc: goaway received") }
+        else if frame.frame_type == FRAME_CONTINUATION { >> errors.new("grpc: unexpected CONTINUATION") }
+        else if frame.frame_type == FRAME_PUSH_PROMISE { >> errors.new("grpc: PUSH_PROMISE is unsupported") }
     }
-    if grpc_status < 0 { >>> errors.new("grpc: missing grpc-status trailers") }
+    if grpc_status < 0 { >> errors.new("grpc: missing grpc-status trailers") }
     $payload := ""
     if message_bytes.len > 0 { payload = decode_grpc_message(message_bytes) >>> }
-    else if grpc_status == 0 { >>> errors.new("grpc: missing unary response message") }
+    else if grpc_status == 0 { >> errors.new("grpc: missing unary response message") }
     << Response{status: grpc_status, message: grpc_message, payload: payload}
 }
 
 
 fn (c GrpcClient) call_unary_on_tls(tc $&tls.Conn, path string, req_bytes string, stream_id int) Response {
-    if stream_id <= 0 || stream_id > 2147483647 || stream_id % 2 == 0 { >>> errors.new("grpc: invalid client stream id") }
-    if req_bytes.len > 65530 { >>> errors.new("grpc: request exceeds supported initial window") }
+    if stream_id <= 0 || stream_id > 2147483647 || stream_id % 2 == 0 { >> errors.new("grpc: invalid client stream id") }
+    if req_bytes.len > 65530 { >> errors.new("grpc: request exceeds supported initial window") }
     block := build_grpc_headers_for_host_scheme(path, c.host + ":" + str(c.port), "https")
-    if block.len > 65536 { >>> errors.new("grpc: request headers too large") }
+    if block.len > 65536 { >> errors.new("grpc: request headers too large") }
     $off := 0
     while off < block.len {
         $end := off + 16384
@@ -435,27 +435,27 @@ fn (c GrpcClient) call_unary_on_tls(tc $&tls.Conn, path string, req_bytes string
     while !end_stream {
         frame := read_h2_frame_tls(tc) >>>
         if frame.frame_type == FRAME_SETTINGS {
-            if frame.stream_id != 0 || frame.length % 6 != 0 { >>> errors.new("grpc: malformed SETTINGS") }
+            if frame.stream_id != 0 || frame.length % 6 != 0 { >> errors.new("grpc: malformed SETTINGS") }
             if (frame.flags & FLAG_ACK) != 0 {
-                if frame.length != 0 { >>> errors.new("grpc: malformed SETTINGS ACK") }
+                if frame.length != 0 { >> errors.new("grpc: malformed SETTINGS ACK") }
             } else { write_all_tls(tc, build_settings_frame(true)) >>> }
         } else if frame.frame_type == FRAME_PING {
-            if frame.stream_id != 0 || frame.length != 8 { >>> errors.new("grpc: malformed PING") }
+            if frame.stream_id != 0 || frame.length != 8 { >> errors.new("grpc: malformed PING") }
             if (frame.flags & FLAG_ACK) == 0 {
                 write_all_tls(tc, encode_h2_header(8, FRAME_PING, FLAG_ACK, 0) + frame.payload) >>>
             }
         } else if frame.frame_type == FRAME_DATA && frame.stream_id == stream_id {
-            if !got_headers { >>> errors.new("grpc: DATA before headers") }
+            if !got_headers { >> errors.new("grpc: DATA before headers") }
             $start := 0
             $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
-                if end < 1 { >>> errors.new("grpc: malformed padded DATA") }
+                if end < 1 { >> errors.new("grpc: malformed padded DATA") }
                 end -= frame.payload[0] & 255
                 start = 1
-                if end < start { >>> errors.new("grpc: malformed DATA padding") }
+                if end < start { >> errors.new("grpc: malformed DATA padding") }
             }
             message_bytes = message_bytes + frame.payload[start:end]
-            if message_bytes.len > 16777221 { >>> errors.new("grpc: response too large") }
+            if message_bytes.len > 16777221 { >> errors.new("grpc: response too large") }
             if frame.length > 0 {
                 delta := string_from_byte((frame.length >> 24) & 127) + string_from_byte((frame.length >> 16) & 255) + string_from_byte((frame.length >> 8) & 255) + string_from_byte(frame.length & 255)
                 write_all_tls(tc, encode_h2_header(4, FRAME_WINDOW_UPDATE, 0, 0) + delta) >>>
@@ -466,58 +466,58 @@ fn (c GrpcClient) call_unary_on_tls(tc $&tls.Conn, path string, req_bytes string
             $start := 0
             $end := frame.payload.len
             if (frame.flags & FLAG_PADDED) != 0 {
-                if end < 1 { >>> errors.new("grpc: malformed padded HEADERS") }
+                if end < 1 { >> errors.new("grpc: malformed padded HEADERS") }
                 end -= frame.payload[0] & 255
                 start = 1
             }
             if (frame.flags & FLAG_PRIORITY) != 0 { start += 5 }
-            if end < start { >>> errors.new("grpc: malformed HEADERS") }
+            if end < start { >> errors.new("grpc: malformed HEADERS") }
             $headers := frame.payload[start:end] + ""
             $done := (frame.flags & FLAG_END_HEADERS) != 0
             while !done {
                 next := read_h2_frame_tls(tc) >>>
-                if next.frame_type != FRAME_CONTINUATION || next.stream_id != stream_id { >>> errors.new("grpc: expected CONTINUATION") }
+                if next.frame_type != FRAME_CONTINUATION || next.stream_id != stream_id { >> errors.new("grpc: expected CONTINUATION") }
                 headers = headers + next.payload
-                if headers.len > 65536 { >>> errors.new("grpc: response headers too large") }
+                if headers.len > 65536 { >> errors.new("grpc: response headers too large") }
                 done = (next.flags & FLAG_END_HEADERS) != 0
             }
             h := decode_hpack(headers) >>>
             for i in 0:h.names.len {
                 if h.names[i] == ":status" {
-                    if got_headers || http_status != 0 { >>> errors.new("grpc: invalid HTTP status placement") }
+                    if got_headers || http_status != 0 { >> errors.new("grpc: invalid HTTP status placement") }
                     http_status = parse_int(h.values[i] + "") >>>
                 }
                 if h.names[i] == "content-type" {
-                    if got_headers || content_type.len > 0 { >>> errors.new("grpc: invalid content-type placement") }
+                    if got_headers || content_type.len > 0 { >> errors.new("grpc: invalid content-type placement") }
                     value := h.values[i] + ""
                     content_type = strings.to_lower(&value)
                 }
                 if h.names[i] == "grpc-status" {
-                    if grpc_status >= 0 || (frame.flags & FLAG_END_STREAM) == 0 { >>> errors.new("grpc: invalid grpc-status placement") }
+                    if grpc_status >= 0 || (frame.flags & FLAG_END_STREAM) == 0 { >> errors.new("grpc: invalid grpc-status placement") }
                     grpc_status = parse_int(h.values[i] + "") >>>
-                    if grpc_status < 0 || grpc_status > 16 { >>> errors.new("grpc: invalid grpc-status") }
+                    if grpc_status < 0 || grpc_status > 16 { >> errors.new("grpc: invalid grpc-status") }
                 }
                 if h.names[i] == "grpc-message" {
                     value := h.values[i] + ""
                     grpc_message = url.path_unescape(&value) >>>
                 }
             }
-            if !got_headers && http_status != 200 { >>> errors.new("grpc: HTTP status " + str(http_status)) }
+            if !got_headers && http_status != 200 { >> errors.new("grpc: HTTP status " + str(http_status)) }
             if !got_headers {
-                if content_type.len < 16 || content_type[0:16] != "application/grpc" { >>> errors.new("grpc: invalid response content-type") }
-                if content_type.len > 16 && content_type[16:17] != "+" && content_type[16:17] != ";" { >>> errors.new("grpc: invalid response content-type") }
+                if content_type.len < 16 || content_type[0:16] != "application/grpc" { >> errors.new("grpc: invalid response content-type") }
+                if content_type.len > 16 && content_type[16:17] != "+" && content_type[16:17] != ";" { >> errors.new("grpc: invalid response content-type") }
             }
             got_headers = true
             if (frame.flags & FLAG_END_STREAM) != 0 { end_stream = true }
         } else if frame.frame_type == FRAME_RST_STREAM && frame.stream_id == stream_id {
-            >>> errors.new("grpc: rst_stream received")
-        } else if frame.frame_type == FRAME_GOAWAY { >>> errors.new("grpc: goaway received") }
-        else if frame.frame_type == FRAME_CONTINUATION { >>> errors.new("grpc: unexpected CONTINUATION") }
-        else if frame.frame_type == FRAME_PUSH_PROMISE { >>> errors.new("grpc: PUSH_PROMISE is unsupported") }
+            >> errors.new("grpc: rst_stream received")
+        } else if frame.frame_type == FRAME_GOAWAY { >> errors.new("grpc: goaway received") }
+        else if frame.frame_type == FRAME_CONTINUATION { >> errors.new("grpc: unexpected CONTINUATION") }
+        else if frame.frame_type == FRAME_PUSH_PROMISE { >> errors.new("grpc: PUSH_PROMISE is unsupported") }
     }
-    if grpc_status < 0 { >>> errors.new("grpc: missing grpc-status trailers") }
+    if grpc_status < 0 { >> errors.new("grpc: missing grpc-status trailers") }
     $payload := ""
     if message_bytes.len > 0 { payload = decode_grpc_message(message_bytes) >>> }
-    else if grpc_status == 0 { >>> errors.new("grpc: missing unary response message") }
+    else if grpc_status == 0 { >> errors.new("grpc: missing unary response message") }
     << Response{status: grpc_status, message: grpc_message, payload: payload}
 }

@@ -856,7 +856,7 @@ fn check_gw_rate_limit(g $&Gateway, now_ms int) int {
             gw_redis_decr(g, cur_key)
             g.stats.failed_requests += 1
             gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
-            >>> errors.new("gateway: rate limit exceeded")
+            >> errors.new("gateway: rate limit exceeded")
         }
         << 0
     }
@@ -866,7 +866,7 @@ fn check_gw_rate_limit(g $&Gateway, now_ms int) int {
     }
     if g.window_requests >= g.rate_limit_rpm {
         g.stats.failed_requests += 1
-        >>> errors.new("gateway: rate limit exceeded")
+        >> errors.new("gateway: rate limit exceeded")
     }
     g.window_requests += 1
     << 0
@@ -913,7 +913,7 @@ fn try_route_at(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, tried $
 
 pub fn (g $&Gateway) chat_with_passthrough(req &openai.ChatRequest, pt &ProviderPassthrough) openai.ChatResponse {
     if g.routes.len == 0 {
-        >>> errors.new("gateway: no provider routes configured")
+        >> errors.new("gateway: no provider routes configured")
     }
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
@@ -927,7 +927,7 @@ pub fn (g $&Gateway) chat_with_passthrough(req &openai.ChatRequest, pt &Provider
     }
     g.stats.failed_requests += 1
     gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
-    >>> errors.new(last_err)
+    >> errors.new(last_err)
 }
 
 pub fn (g $&Gateway) chat_with_fallback(req &openai.ChatRequest) openai.ChatResponse {
@@ -937,7 +937,7 @@ pub fn (g $&Gateway) chat_with_fallback(req &openai.ChatRequest) openai.ChatResp
 
 pub fn (g $&Gateway) chat_weighted(req &openai.ChatRequest) openai.ChatResponse {
     if g.routes.len == 0 {
-        >>> errors.new("gateway: no provider routes configured")
+        >> errors.new("gateway: no provider routes configured")
     }
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
@@ -982,7 +982,7 @@ pub fn (g $&Gateway) chat_weighted(req &openai.ChatRequest) openai.ChatResponse 
     }
     g.stats.failed_requests += 1
     gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
-    >>> errors.new(last_err)
+    >> errors.new(last_err)
 }
 
 struct GwAnthStreamOutcome {
@@ -1267,7 +1267,7 @@ fn stream_route_at_ex(g $&Gateway, req &openai.ChatRequest, i int, now_ms int, t
 fn chat_stream_fallback_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, on_delta fn(openai.StreamDelta) bool,
                              has_ch bool, delta_ch chan openai.StreamDelta) openai.ChatResponse {
     if g.routes.len == 0 {
-        >>> errors.new("gateway: no provider routes configured")
+        >> errors.new("gateway: no provider routes configured")
     }
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
@@ -1283,13 +1283,13 @@ fn chat_stream_fallback_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, 
         if emitted {
             g.stats.failed_requests += 1
             gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
-            >>> errors.new(last_err)
+            >> errors.new(last_err)
         }
     }
     _ := empty_pt
     g.stats.failed_requests += 1
     gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
-    >>> errors.new(last_err)
+    >> errors.new(last_err)
 }
 
 pub fn (g $&Gateway) chat_stream_with_fallback(req &openai.ChatRequest, on_delta fn(openai.StreamDelta) bool) openai.ChatResponse {
@@ -1304,7 +1304,7 @@ pub fn (g $&Gateway) chat_stream_chan_with_fallback(req &openai.ChatRequest, ch 
 fn chat_stream_weighted_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, on_delta fn(openai.StreamDelta) bool,
                              has_ch bool, delta_ch chan openai.StreamDelta) openai.ChatResponse {
     if g.routes.len == 0 {
-        >>> errors.new("gateway: no provider routes configured")
+        >> errors.new("gateway: no provider routes configured")
     }
     now_ms := time.now_time().unix_milli()
     _ := check_gw_rate_limit(g, now_ms) >>>
@@ -1349,12 +1349,12 @@ fn chat_stream_weighted_impl(g $&Gateway, req &openai.ChatRequest, use_cb bool, 
         if emitted {
             g.stats.failed_requests += 1
             gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
-            >>> errors.new(last_err)
+            >> errors.new(last_err)
         }
     }
     g.stats.failed_requests += 1
     gw_record_stats_req(g, false, false, true, 0, 0, 0.0)
-    >>> errors.new(last_err)
+    >> errors.new(last_err)
 }
 
 pub fn (g $&Gateway) chat_stream_weighted(req &openai.ChatRequest, on_delta fn(openai.StreamDelta) bool) openai.ChatResponse {

@@ -73,7 +73,7 @@ pub fn (p &Pool) insert_one(db_name string, col_name string, doc_bytes string) i
     fd := c.fd
     res := c.insert_one(db_name, col_name, doc_bytes) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res
@@ -84,7 +84,7 @@ pub fn (p &Pool) find_first_string(db_name string, col_name string, target_field
     fd := c.fd
     res := c.find_first_string(db_name, col_name, target_field) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res

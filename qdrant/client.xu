@@ -93,12 +93,12 @@ pub fn (c $&Client) request(method string, path string, body string) Response {
     }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("qdrant: dial failed: " + err.msg())
+        >> errors.new("qdrant: dial failed: " + err.msg())
     }
     $reusable := false
     result := c.request_on_fd(fd, method, path, body, $&reusable) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << result
@@ -137,14 +137,14 @@ fn (c $&Client) request_on_fd(fd int, method string, path string, body string, r
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("qdrant: write failed: " + err.msg())
+            >> errors.new("qdrant: write failed: " + err.msg())
         }
-        if n <= 0 { >>> errors.new("qdrant: connection closed during write") }
+        if n <= 0 { >> errors.new("qdrant: connection closed during write") }
         off = off + n
     }
 
     resp := http.read_response(fd, method + "") >>> (err) {
-        >>> err
+        >> err
     }
     *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method)
     << Response{status_code: resp.status_code, body: resp.body}

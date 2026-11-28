@@ -29,9 +29,9 @@ fn write_all(fd int, data string) bool {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("meili write error: " + err.msg())
+            >> errors.new("meili write error: " + err.msg())
         }
-        if n <= 0 { >>> errors.new("meilisearch: connection closed during write") }
+        if n <= 0 { >> errors.new("meilisearch: connection closed during write") }
         off = off + n
     }
     << true
@@ -84,7 +84,7 @@ pub fn new_client(endpoint string, api_key string) MeiliClient {
 pub fn (c MeiliClient) connect() int {
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("meili dial failed: " + err.msg())
+        >> errors.new("meili dial failed: " + err.msg())
     }
     << fd
 }
@@ -109,7 +109,7 @@ fn (c MeiliClient) request_on_fd(fd int, method string, path string, body string
 
     resp := http.read_response(fd, method + "") >>>
     if resp.status_code < 200 || resp.status_code >= 300 {
-        >>> errors.new("meilisearch: HTTP status " + str(resp.status_code) + ": " + resp.body)
+        >> errors.new("meilisearch: HTTP status " + str(resp.status_code) + ": " + resp.body)
     }
     *reusable = resp.reusable(method)
     << resp.body
@@ -127,13 +127,13 @@ pub fn (c MeiliClient) do_request(method string, path string, body string) strin
         ep := transport.Endpoint{scheme: "https", host: c.host + "", port: c.port, path: "", secure: true}
         cfg := tls.new_config(c.host + "")
         resp := transport.request_raw(ep, cfg, req, method + "") >>>
-        if resp.status_code < 200 || resp.status_code >= 300 { >>> errors.new("meilisearch: HTTP status " + str(resp.status_code) + ": " + resp.body) }
+        if resp.status_code < 200 || resp.status_code >= 300 { >> errors.new("meilisearch: HTTP status " + str(resp.status_code) + ": " + resp.body) }
         << resp.body
     }
     fd := c.connect() >>>
     res := c.do_request_on_fd(fd, method, path, body) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << res
@@ -208,15 +208,15 @@ fn (c MeiliClient) search_at(fd int, uid string, query string, limit int, reusab
     resp := c.request_at(fd, "POST", "/indexes/" + uid + "/search", body, reusable) >>>
 
     d := json.parse(&resp)
-    if !d.ok() { >>> errors.new("meilisearch: invalid JSON: " + d.error()) }
+    if !d.ok() { >> errors.new("meilisearch: invalid JSON: " + d.error()) }
     nodes := d.get(d.root(), "hits")
-    if nodes < 0 || !d.is_list(nodes) { >>> errors.new("meilisearch: missing hits array") }
+    if nodes < 0 || !d.is_list(nodes) { >> errors.new("meilisearch: missing hits array") }
     $hits := []SearchHit{}
     for i in 0:d.count(nodes) {
         hit := d.at(nodes, i)
-        if !d.is_dict(hit) { >>> errors.new("meilisearch: invalid hit") }
+        if !d.is_dict(hit) { >> errors.new("meilisearch: invalid hit") }
         id := d.get(hit, "id")
-        if id < 0 || !d.is_number(id) { >>> errors.new("meilisearch: this API requires integer ids") }
+        if id < 0 || !d.is_number(id) { >> errors.new("meilisearch: this API requires integer ids") }
         id_text := d.text(id)
         hid := strconv.atoi(&id_text) >>>
         title := d.get(hit, "title")
@@ -228,7 +228,7 @@ fn (c MeiliClient) search_at(fd int, uid string, query string, limit int, reusab
     if total < 0 { total = d.get(d.root(), "estimatedTotalHits") }
     $count := -1
     if total >= 0 {
-        if !d.is_number(total) { >>> errors.new("meilisearch: invalid total hits") }
+        if !d.is_number(total) { >> errors.new("meilisearch: invalid total hits") }
         text := d.text(total)
         count = strconv.atoi(&text) >>>
     }

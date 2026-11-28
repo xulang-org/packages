@@ -12,7 +12,7 @@ fn (c $&Client) index_doc_at(fd int, index string, id string, doc_json string, r
     resp := c.request_at(fd, "PUT", path, doc_json, reusable) >>>
     code := resp.status_code
     if code != 200 && code != 201 {
-        >>> errors.new("elasticsearch: index_doc failed with status " + str(code) + ": " + resp.body)
+        >> errors.new("elasticsearch: index_doc failed with status " + str(code) + ": " + resp.body)
     }
     << resp.body
 }
@@ -27,7 +27,7 @@ fn (c $&Client) get_doc_at(fd int, index string, id string, reusable $&bool) str
     resp := c.request_at(fd, "GET", path, "", reusable) >>>
     code := resp.status_code
     if code != 200 {
-        >>> errors.new("elasticsearch: doc not found (status " + str(code) + ")")
+        >> errors.new("elasticsearch: doc not found (status " + str(code) + ")")
     }
     << resp.body
 }

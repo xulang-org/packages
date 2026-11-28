@@ -94,11 +94,11 @@ pub fn (c Client) request(method string, path string, body string) Response {
         << Response{status_code: resp.status_code, headers: resp.headers, body: resp.body}
     }
     addr := c.host + ":" + str(c.port)
-    fd := net.dial(strings.clone(&addr)) >>> (err) { >>> err }
+    fd := net.dial(strings.clone(&addr)) >>> (err) { >> err }
     $reusable := false
     result := c.request_on_fd(fd, method, path, body, $&reusable) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << result
@@ -118,15 +118,15 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("chroma write failed: " + err.msg())
+            >> errors.new("chroma write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("chroma: connection closed during write") }
+            >> errors.new("chroma: connection closed during write") }
         off = off + n
     }
 
     resp := http.read_response(fd, method + "") >>> (err) {
-        >>> err
+        >> err
     }
     *reusable = resp.reusable(method) && resp.status_code >= 200 && resp.status_code < 300
     << Response{status_code: resp.status_code, headers: resp.headers, body: resp.body}
@@ -162,7 +162,7 @@ fn (c Client) create_collection_at(fd int, name string, reusable $&bool) string 
     body := "{\"name\":\"" + name + "\"}"
     resp := c.request_at(fd, "POST", "/api/v1/collections", body, reusable) >>>
     if resp.status_code != 200 && resp.status_code != 201 {
-        >>> errors.new("chroma: create_collection failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("chroma: create_collection failed (" + str(resp.status_code) + "): " + resp.body)
     }
     // Extract "id" from {"name":"...","id":"uuid",...}
     needle := "\"id\":\""
@@ -219,7 +219,7 @@ fn (c Client) query_at(fd int, col_id string, query_embeddings_json string, n_re
     path := "/api/v1/collections/" + col_id + "/query"
     resp := c.request_at(fd, "POST", path, body, reusable) >>>
     if resp.status_code != 200 {
-        >>> errors.new("chroma: query failed (" + str(resp.status_code) + "): " + resp.body)
+        >> errors.new("chroma: query failed (" + str(resp.status_code) + "): " + resp.body)
     }
     << resp.body
 }

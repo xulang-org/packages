@@ -38,11 +38,11 @@ pub fn (c $&TlsClient) read(max int) string {
 }
 
 pub fn (c $&TlsClient) read_exact(need int) string {
-    if need < 0 || need > transport.MAX_MESSAGE_BYTES { >>> errors.new("redis: invalid TLS read length") }
+    if need < 0 || need > transport.MAX_MESSAGE_BYTES { >> errors.new("redis: invalid TLS read length") }
     $out := ""
     while out.len < need {
         part := c.read(need - out.len) >>>
-        if part.len == 0 { >>> errors.new("redis: TLS connection closed") }
+        if part.len == 0 { >> errors.new("redis: TLS connection closed") }
         out = out + part
     }
     << out

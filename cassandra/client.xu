@@ -62,10 +62,10 @@ fn read_exact(fd int, need int) string {
     while buf.len < need {
         want := need - buf.len
         chunk := net.conn_read(fd, want) >>> (err) {
-            >>> errors.new("cassandra read_exact error: " + err.msg())
+            >> errors.new("cassandra read_exact error: " + err.msg())
         }
         if chunk.len == 0 {
-            >>> errors.new("cassandra read_exact unexpected EOF")
+            >> errors.new("cassandra read_exact unexpected EOF")
         }
         buf = buf + chunk
     }
@@ -77,7 +77,7 @@ fn write_all(fd int, data string) bool {
     while off < data.len {
         part := data[off:data.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("cassandra write_all error: " + err.msg())
+            >> errors.new("cassandra write_all error: " + err.msg())
         }
         if n <= 0 {
             <-
@@ -112,24 +112,24 @@ pub fn (c Client) read_frame(fd int) Frame {
 pub fn (c Client) connect() int {
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("cassandra dial failed: " + err.msg())
+        >> errors.new("cassandra dial failed: " + err.msg())
     }
 
     // Send STARTUP frame
     startup := build_startup_frame()
     write_all(fd, startup) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     resp := c.read_frame(fd) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
 
     if resp.opcode == OPCODE_ERROR {
         safe_close(fd)
-        >>> errors.new("cassandra startup error: opcode 0")
+        >> errors.new("cassandra startup error: opcode 0")
     }
 
     // Opcode READY (2) indicates success
@@ -144,15 +144,15 @@ pub fn (c Client) connect() int {
         query := build_query_frame(cql, 1)
         write_all(fd, query) >>> (err) {
             safe_close(fd)
-            >>> err
+            >> err
         }
         q_resp := c.read_frame(fd) >>> (err) {
             safe_close(fd)
-            >>> err
+            >> err
         }
         if q_resp.opcode == OPCODE_ERROR {
             safe_close(fd)
-            >>> errors.new("cassandra USE keyspace failed")
+            >> errors.new("cassandra USE keyspace failed")
         }
     }
 
@@ -173,9 +173,9 @@ pub fn (c Client) execute_on_fd(fd int, cql string) string {
             if 6 + msg_len <= resp.body.len {
                 err_msg = resp.body[6:(6 + msg_len)]
             }
-            >>> errors.new("cql error (" + str(err_code) + "): " + err_msg)
+            >> errors.new("cql error (" + str(err_code) + "): " + err_msg)
         }
-        >>> errors.new("cql error")
+        >> errors.new("cql error")
     }
 
     if resp.opcode == OPCODE_RESULT {
@@ -207,7 +207,7 @@ pub fn (c Client) execute(cql string) string {
     fd := c.connect() >>>
     res := c.execute_on_fd(fd, cql) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << res

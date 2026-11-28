@@ -95,7 +95,7 @@ pub fn (p &Pool) publish(topic string, payload string, qos int) int {
     fd := c.fd
     res := c.publish(topic + "", payload + "", qos) >>> (err) {
         p.put_conn(fd)
-        >>> err
+        >> err
     }
     p.put_conn(fd)
     << res

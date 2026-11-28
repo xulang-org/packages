@@ -136,10 +136,10 @@ pub fn (c $&Client) write_raw(lines string) bool {
 fn (c $&Client) write_raw_at(fd int, lines string, reusable $&bool) bool {
     path := "/api/v2/write?org=" + c.org + "&bucket=" + c.bucket + "&precision=ns"
     resp := c.request_at(fd, "POST", path, lines, "text/plain; charset=utf-8", "application/json", reusable) >>> (err) {
-        >>> err
+        >> err
     }
     if resp.status_code == 204 || (resp.status_code >= 200 && resp.status_code < 300) {
         << true
     }
-    >>> errors.new("influxdb write failed with status " + str(resp.status_code) + ": " + resp.body)
+    >> errors.new("influxdb write failed with status " + str(resp.status_code) + ": " + resp.body)
 }

@@ -93,12 +93,12 @@ pub fn (c Client) request(method string, path string, body string) Response {
     }
     addr := c.host + ":" + str(c.port)
     fd := net.dial(strings.clone(&addr)) >>> (err) {
-        >>> errors.new("nacos dial failed: " + err.msg())
+        >> errors.new("nacos dial failed: " + err.msg())
     }
     $reusable := false
     result := c.request_on_fd(fd, method, path, body, $&reusable) >>> (err) {
         safe_close(fd)
-        >>> err
+        >> err
     }
     safe_close(fd)
     << result
@@ -129,16 +129,16 @@ fn (c Client) request_on_fd(fd int, method string, path string, body string, reu
     while off < req.len {
         part := req[off:req.len]
         n := net.conn_write(fd, &part) >>> (err) {
-            >>> errors.new("nacos write failed: " + err.msg())
+            >> errors.new("nacos write failed: " + err.msg())
         }
         if n <= 0 {
-            >>> errors.new("nacos: connection closed during write")
+            >> errors.new("nacos: connection closed during write")
         }
         off = off + n
     }
 
     resp := http.read_response(fd, method + "") >>> (err) {
-        >>> err
+        >> err
     }
     *reusable = resp.status_code >= 200 && resp.status_code < 300 && resp.reusable(method)
     << Response{status_code: resp.status_code, headers: resp.headers, body: resp.body}

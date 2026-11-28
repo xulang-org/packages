@@ -86,11 +86,11 @@ pub fn (p &MeiliPool) create_index(uid string, primary_key string) bool {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("meilisearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
     $reusable := false
     result := p.client.create_index_at(fd, uid, primary_key, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -103,11 +103,11 @@ pub fn (p &MeiliPool) delete_index(uid string) bool {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("meilisearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
     $reusable := false
     result := p.client.delete_index_at(fd, uid, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -120,11 +120,11 @@ pub fn (p &MeiliPool) add_documents(uid string, json_docs string) bool {
         << result
     }
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("meilisearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
     $reusable := false
     result := p.client.add_documents_at(fd, uid, json_docs, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
@@ -132,11 +132,11 @@ pub fn (p &MeiliPool) add_documents(uid string, json_docs string) bool {
 
 pub fn (p &MeiliPool) search(uid string, query string, limit int) SearchResult {
     fd := p.get_conn()
-    if fd < 0 { >>> errors.new("meilisearch: pool closed or dial failed") }
+    if fd < 0 { >> errors.new("meilisearch: pool closed or dial failed") }
     $reusable := false
     result := p.client.search_at(fd, uid, query, limit, $&reusable) >>> (err) {
         p.discard_conn(fd)
-        >>> err
+        >> err
     }
     if reusable { p.put_conn(fd) } else { p.discard_conn(fd) }
     << result
